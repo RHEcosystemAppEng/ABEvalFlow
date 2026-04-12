@@ -1,10 +1,12 @@
 """Tests for scripts/validate.py and skillsevalflow/schemas.py."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from scripts.validate import (
     MAX_SUPPORTIVE_SIZE_BYTES,
@@ -50,17 +52,32 @@ class TestSubmissionMetadata:
 
     def test_missing_required_field(self) -> None:
         data = {k: v for k, v in VALID_METADATA.items() if k != "name"}
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SubmissionMetadata(**data)
 
     def test_empty_name_rejected(self) -> None:
         data = {**VALID_METADATA, "name": ""}
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SubmissionMetadata(**data)
 
     def test_invalid_generation_mode(self) -> None:
         data = {**VALID_METADATA, "generation_mode": "unknown"}
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
+            SubmissionMetadata(**data)
+
+    def test_extra_fields_rejected(self) -> None:
+        data = {**VALID_METADATA, "unknown_field": "value"}
+        with pytest.raises(ValidationError, match="extra"):
+            SubmissionMetadata(**data)
+
+    def test_invalid_schema_version_format(self) -> None:
+        data = {**VALID_METADATA, "schema_version": "banana"}
+        with pytest.raises(ValidationError, match="MAJOR.MINOR"):
+            SubmissionMetadata(**data)
+
+    def test_schema_version_integer_string_rejected(self) -> None:
+        data = {**VALID_METADATA, "schema_version": "1"}
+        with pytest.raises(ValidationError, match="MAJOR.MINOR"):
             SubmissionMetadata(**data)
 
 
@@ -102,9 +119,12 @@ class TestValidateSubmission:
         errors = validate_submission(valid_submission)
         assert any("instruction.md is empty" in e for e in errors)
 
-    def test_missing_skills_dir(self, valid_submission: Path) -> None:
-        import shutil
+    def test_whitespace_only_instruction_md(self, valid_submission: Path) -> None:
+        (valid_submission / "instruction.md").write_text("   \n\n  ")
+        errors = validate_submission(valid_submission)
+        assert any("instruction.md is empty" in e for e in errors)
 
+    def test_missing_skills_dir(self, valid_submission: Path) -> None:
         shutil.rmtree(valid_submission / "skills")
         errors = validate_submission(valid_submission)
         assert any("skills/ directory is missing" in e for e in errors)
@@ -122,6 +142,11 @@ class TestValidateSubmission:
 
     def test_skills_dir_empty_skill_md(self, valid_submission: Path) -> None:
         (valid_submission / "skills" / "SKILL.md").write_text("")
+        errors = validate_submission(valid_submission)
+        assert any("SKILL.md is empty" in e for e in errors)
+
+    def test_skills_dir_whitespace_only_skill_md(self, valid_submission: Path) -> None:
+        (valid_submission / "skills" / "SKILL.md").write_text("  \n\n  ")
         errors = validate_submission(valid_submission)
         assert any("SKILL.md is empty" in e for e in errors)
 

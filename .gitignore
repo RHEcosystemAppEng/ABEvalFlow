@@ -9,8 +9,9 @@
 .cursor/
 .claude/
 
-# Plan review suggestions (working documents, not deliverables)
+# Review and planning working documents (not deliverables)
 Docs/plan_suggestions/
+Docs/commit reviews/
 
 # Python
 __pycache__/

@@ -12,9 +12,9 @@ Exit codes: 0 = pass, 1 = validation failure (structured JSON on stdout).
 """
 
 import argparse
+import ast
 import json
 import logging
-import py_compile
 import sys
 from pathlib import Path
 
@@ -32,7 +32,7 @@ def _check_instruction_md(submission_dir: Path) -> list[str]:
     instruction = submission_dir / "instruction.md"
     if not instruction.is_file():
         return ["instruction.md is missing"]
-    if instruction.stat().st_size == 0:
+    if not instruction.read_text().strip():
         return ["instruction.md is empty"]
     return []
 
@@ -45,7 +45,7 @@ def _check_skills_dir(submission_dir: Path) -> list[str]:
     skill_file = skills_dir / "SKILL.md"
     if not skill_file.is_file():
         return ["skills/SKILL.md is missing (must be exactly 'SKILL.md')"]
-    if skill_file.stat().st_size == 0:
+    if not skill_file.read_text().strip():
         return ["skills/SKILL.md is empty"]
     return []
 
@@ -54,8 +54,9 @@ def _check_py_compiles(file_path: Path) -> list[str]:
     if not file_path.is_file():
         return [f"{file_path.name} is missing"]
     try:
-        py_compile.compile(str(file_path), doraise=True)
-    except py_compile.PyCompileError as exc:
+        source = file_path.read_text()
+        ast.parse(source, filename=str(file_path))
+    except SyntaxError as exc:
         return [f"{file_path.name} does not compile: {exc}"]
     return []
 
@@ -94,6 +95,7 @@ def _check_supportive_size(submission_dir: Path) -> list[str]:
 
 def validate_submission(submission_dir: Path) -> list[str]:
     """Run all validation checks and return a list of error strings (empty = valid)."""
+    logger.info("Validating submission: %s", submission_dir)
     errors: list[str] = []
 
     errors.extend(_check_instruction_md(submission_dir))
@@ -109,6 +111,10 @@ def validate_submission(submission_dir: Path) -> list[str]:
 
     errors.extend(_check_supportive_size(submission_dir))
 
+    if errors:
+        logger.warning("Validation failed with %d error(s)", len(errors))
+    else:
+        logger.info("Validation passed")
     return errors
 
 
