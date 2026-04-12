@@ -1,0 +1,39 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: skills-submission-template
+  namespace: skills-eval-flow
+spec:
+  params:
+    - name: repo-url
+      description: The git repository URL
+    - name: revision
+      description: The git commit SHA
+    - name: repo-name
+      description: The full repository name (org/repo)
+    - name: skill-dir
+      description: The skill directory path under submissions/
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: skills-eval-
+      spec:
+        pipelineRef:
+          name: skills-eval-pipeline
+        params:
+          - name: repo-url
+            value: $(tt.params.repo-url)
+          - name: revision
+            value: $(tt.params.revision)
+          - name: skill-dir
+            value: $(tt.params.skill-dir)
+        workspaces:
+          - name: shared-workspace
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi

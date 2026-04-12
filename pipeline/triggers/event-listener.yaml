@@ -1,0 +1,35 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: skills-submission-listener
+  namespace: skills-eval-flow
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: skills-push-trigger
+      interceptors:
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              # Only fire when at least one commit touches submissions/
+              value: >-
+                body.commits.exists(c,
+                  c.added.exists(f, f.startsWith('submissions/')) ||
+                  c.modified.exists(f, f.startsWith('submissions/'))
+                )
+            - name: "overlays"
+              value:
+                - key: skill_directory
+                  # Extract the first subdirectory under submissions/
+                  # e.g. submissions/my-skill/SKILL.md -> my-skill
+                  expression: >-
+                    body.commits.map(c,
+                      c.added + c.modified
+                    ).flatten().filter(f,
+                      f.startsWith('submissions/')
+                    )[0].split('/')[1]
+      bindings:
+        - ref: skills-submission-binding
+      template:
+        ref: skills-submission-template
