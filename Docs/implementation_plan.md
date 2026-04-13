@@ -227,7 +227,7 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 
 **Goal:** Build both skilled and unskilled images and push to registry.
 
-- **Build tool constraint:** ADR Decision #5 specifies `docker buildx`. However, OpenShift clusters run CRI-O (not Docker) and do not provide a Docker daemon in pods. Using `docker buildx` inside unprivileged Tekton steps requires a Docker-in-Docker sidecar or socket mount, both of which require privileged access and contradict the security posture. **Buildah** (`buildah bud` + `buildah push`) is the standard rootless, daemonless alternative on OpenShift and runs in `ubi9` base images without privilege escalation. This constraint must be reconciled with ADR Decision #5 before implementation — likely by adopting Buildah for OpenShift.
+- **Build tool: Buildah** (ADR Decision #5 reconciled). ADR specified `docker buildx`, but OpenShift clusters run CRI-O with no Docker daemon available. Buildah (`buildah bud` + `buildah push`) is the rootless, daemonless alternative native to OpenShift. Uses `registry.access.redhat.com/ubi9/buildah:latest` image with `--storage-driver=vfs` for unprivileged operation.
 - Builds from the scaffolded directories.
 - Tags: `<registry>/<namespace>/<skill-name>:skilled-<commit-sha>` and `<registry>/<namespace>/<skill-name>:unskilled-<commit-sha>`.
 - Push to **internal OpenShift registry** for evaluation (per ADR decision #6).
@@ -236,8 +236,8 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 ### 3.2 Registry Configuration
 
 - [ ] Create image pull/push secrets for Quay.io.
-- [ ] Configure OpenShift internal registry access for pipeline ServiceAccount.
-- [ ] Define image retention policy (default: 30 days on Quay for reproducibility).
+- [x] Configure OpenShift internal registry access for pipeline ServiceAccount (`system:image-builder` role granted).
+- [ ] Define image retention policy (7 days on Quay for reproducibility).
 - [ ] Add `latest-skilled` / `latest-unskilled` floating tags per skill for the monitoring pipeline. **Note:** Digest-based references remain the source of truth for reproducibility; floating tags are monitoring convenience only and may race under concurrent runs.
 
 ### 3.3 Image Reference Handoff
@@ -476,7 +476,7 @@ Pipeline task order when AI features are enabled:
 - [ ] Alternatively, set up MinIO for S3-compatible artifact storage.
 - [ ] Create a CronJob or TTL-based cleanup for:
   - Stale trial Pods.
-  - Old container images (Quay retention: default 30 days).
+  - Old container images (Quay retention: 7 days).
   - Expired evaluation reports.
   - OpenShift internal registry images (after Quay promotion or on failure).
 
@@ -571,4 +571,4 @@ A single evaluation run consumes 40 LLM sessions (N=20 x 2 variants). Cost manag
 | Harbor upstream API drift | New features unavailable, security patches missed | Pin fork SHA, quarterly upstream review |
 | Platform update degrades skills silently | Regression goes undetected | Phase 9 monitoring (thresholds + optional CUSUM) with automated alerting |
 | `metadata.yaml` schema evolution | Breaks old submissions | `schema_version` field in Pydantic model |
-| `docker buildx` incompatible with OpenShift CRI-O | Build step fails in unprivileged Tekton pods | Reconcile ADR Decision #5 with Buildah; document chosen approach |
+| `docker buildx` incompatible with OpenShift CRI-O | Build step fails in unprivileged Tekton pods | Resolved: adopted Buildah for OpenShift (rootless, daemonless) |

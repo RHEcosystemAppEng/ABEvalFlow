@@ -1,0 +1,117 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-push-images
+  namespace: skills-eval-flow
+spec:
+  description: >-
+    Builds skilled and unskilled container images from scaffolded directories
+    using Buildah (rootless, daemonless) and pushes them to the OpenShift
+    internal registry. Emits digest-based image references for downstream tasks.
+  params:
+    - name: skill-name
+      type: string
+      description: Validated skill name (from validate-submission results)
+    - name: skilled-task-dir
+      type: string
+      description: Path to the scaffolded skilled task directory
+    - name: unskilled-task-dir
+      type: string
+      description: Path to the scaffolded unskilled task directory
+    - name: commit-sha
+      type: string
+      description: Git commit SHA used for image tagging
+    - name: registry-url
+      type: string
+      default: "image-registry.openshift-image-registry.svc:5000"
+      description: Container registry URL
+    - name: registry-namespace
+      type: string
+      default: "skills-eval-flow"
+      description: Registry namespace / project name
+  workspaces:
+    - name: source
+      description: Workspace containing the scaffolded task directories
+  results:
+    - name: skilled-image-ref
+      description: Digest-based reference for the skilled image
+    - name: unskilled-image-ref
+      description: Digest-based reference for the unskilled image
+  steps:
+    - name: build-skilled
+      image: registry.access.redhat.com/ubi9/buildah:latest
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        CONTEXT_DIR="$(params.skilled-task-dir)/environment"
+        IMAGE_TAG="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name):skilled-$(params.commit-sha)"
+
+        buildah bud \
+          --storage-driver=vfs \
+          --layers \
+          -t "$IMAGE_TAG" \
+          "$CONTEXT_DIR"
+
+        echo "Built skilled image: $IMAGE_TAG"
+
+    - name: push-skilled
+      image: registry.access.redhat.com/ubi9/buildah:latest
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        IMAGE_TAG="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name):skilled-$(params.commit-sha)"
+
+        DIGEST=$(buildah push \
+          --storage-driver=vfs \
+          --digestfile /tmp/skilled-digest \
+          "$IMAGE_TAG" \
+          "docker://$IMAGE_TAG" 2>&1 && cat /tmp/skilled-digest)
+
+        IMAGE_REF="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name)@${DIGEST}"
+        echo -n "$IMAGE_REF" > "$(results.skilled-image-ref.path)"
+        echo "Pushed skilled image: $IMAGE_REF"
+
+    - name: build-unskilled
+      image: registry.access.redhat.com/ubi9/buildah:latest
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        CONTEXT_DIR="$(params.unskilled-task-dir)/environment"
+        IMAGE_TAG="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name):unskilled-$(params.commit-sha)"
+
+        buildah bud \
+          --storage-driver=vfs \
+          --layers \
+          -t "$IMAGE_TAG" \
+          "$CONTEXT_DIR"
+
+        echo "Built unskilled image: $IMAGE_TAG"
+
+    - name: push-unskilled
+      image: registry.access.redhat.com/ubi9/buildah:latest
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        IMAGE_TAG="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name):unskilled-$(params.commit-sha)"
+
+        DIGEST=$(buildah push \
+          --storage-driver=vfs \
+          --digestfile /tmp/unskilled-digest \
+          "$IMAGE_TAG" \
+          "docker://$IMAGE_TAG" 2>&1 && cat /tmp/unskilled-digest)
+
+        IMAGE_REF="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name)@${DIGEST}"
+        echo -n "$IMAGE_REF" > "$(results.unskilled-image-ref.path)"
+        echo "Pushed unskilled image: $IMAGE_REF"
