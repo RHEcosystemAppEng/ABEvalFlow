@@ -65,6 +65,15 @@ class TestSubmissionMetadata:
         with pytest.raises(ValidationError):
             SubmissionMetadata(**data)
 
+    def test_minimal_metadata_only_name(self) -> None:
+        model = SubmissionMetadata(name="my-skill")
+        assert model.schema_version == "1.0"
+        assert model.generation_mode == GenerationMode.MANUAL
+        assert model.version == "0.1.0"
+        assert model.persona is None
+        assert model.description is None
+        assert model.author is None
+
     def test_extra_fields_rejected(self) -> None:
         data = {**VALID_METADATA, "unknown_field": "value"}
         with pytest.raises(ValidationError, match="extra"):
