@@ -1,0 +1,18 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+WORKDIR /workspace
+
+COPY instruction.md .
+COPY tests/ /tests/
+{% if has_supportive %}
+COPY supportive/ /workspace/supportive/
+{% endif %}
+{% if has_scripts %}
+COPY scripts/ /workspace/scripts/
+{% endif %}
+
+# Skilled variant: includes skills and docs for the agent
+COPY skills/ /skills/
+{% if has_docs %}
+COPY docs/ /workspace/docs/
+{% endif %}
