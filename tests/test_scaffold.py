@@ -112,6 +112,22 @@ class TestScaffoldBasic:
         assert "COPY skills/" not in content
         assert "COPY docs/" not in content
 
+    def test_dockerfile_preinstalls_uv(self, valid_submission: Path, tmp_path: Path):
+        output = tmp_path / "output"
+        skilled, unskilled = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+        for d in (skilled, unskilled):
+            content = (d / "environment" / "Dockerfile").read_text()
+            assert "UV_INSTALL_DIR=/usr/local/bin" in content
+            assert "dnf install" in content
+
+    def test_test_sh_no_runtime_install(self, valid_submission: Path, tmp_path: Path):
+        output = tmp_path / "output"
+        skilled, _ = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+        content = (skilled / "test.sh").read_text()
+        assert "dnf install" not in content
+        assert "curl -LsSf" not in content
+        assert "source" not in content
+
     def test_test_sh_is_executable(self, valid_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         skilled, unskilled = scaffold_submission(valid_submission, output, TEMPLATES_DIR)

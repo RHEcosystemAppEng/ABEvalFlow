@@ -1,5 +1,11 @@
 FROM registry.access.redhat.com/ubi9/python-311:latest
 
+USER 0
+RUN dnf install -y --quiet curl \
+    && curl -LsSf https://astral.sh/uv/0.9.7/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+    && dnf clean all
+USER 1001
+
 WORKDIR /workspace
 
 COPY instruction.md .
