@@ -51,17 +51,29 @@ class CopySpec(BaseModel):
 
     @field_validator("src")
     @classmethod
-    def _strip_trailing_slash(cls, v: str) -> str:
-        return v.rstrip("/")
-
-    @field_validator("src")
-    @classmethod
-    def _reject_path_traversal(cls, v: str) -> str:
+    def _validate_src(cls, v: str) -> str:
+        v = v.rstrip("/")
         if ".." in v or v.startswith("/"):
             raise ValueError("src must be a relative top-level directory name")
+        if not v:
+            raise ValueError("src must not be empty")
+        return v
+
+    @field_validator("dest")
+    @classmethod
+    def _validate_dest(cls, v: str) -> str:
+        v = v.rstrip("/")
+        if not v:
+            raise ValueError("dest must not be empty")
+        if ".." in v:
+            raise ValueError("dest must not contain '..'")
+        if not v.startswith("/"):
+            raise ValueError("dest must be an absolute path (start with '/')")
         return v
 
 class VariantSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     copy_dirs: list[CopySpec] = Field(default_factory=list, alias="copy")
     env_from_secrets: dict[str, str] = Field(
         default_factory=dict,
@@ -96,12 +108,13 @@ class ExperimentConfig(BaseModel):
 Key design decisions:
 
 - **`CopySpec(src, dest)` tuples** instead of plain dir names — `skills/` must copy to `/skills/` (Harbor contract), while `docs/` goes to `/workspace/docs/`. The Dockerfile template uses these pairs directly.
+- **Both `src` and `dest` are validated** — `src` rejects traversal (`../`), absolute paths, and empty strings; `dest` rejects traversal, relative paths, and empty strings. Trailing slashes are stripped from both.
+- **`copy_pairs` are filtered by directory existence** — `customize_context` only includes `CopySpec` entries whose `src` directory actually exists in the submission, preventing Dockerfile `COPY` failures for optionally-configured directories.
 - **`env_from_secrets`** instead of raw `env: dict[str, str]` — prevents secret leakage in metadata.yaml. Values reference OpenShift Secrets (`secret-name/key`), resolved at runtime via `persistent_env` in Harbor, not baked into the Dockerfile.
 - **`ExperimentType` is a `StrEnum`** — unknown types raise `ValidationError` at schema validation, not silently falling through.
 - **`n_trials`** has an upper bound (`le=100`) to prevent accidental resource exhaustion.
-- Bare directory names (no trailing slashes) enforced by `field_validator`.
-- Path traversal (`../`, absolute paths) rejected in `src`.
 - Duplicate `src` directories rejected by `model_validator`.
+- **`VariantSpec` uses `populate_by_name=True`** — allows access via `copy_dirs` attribute while accepting `copy` as the YAML key (avoids shadowing Pydantic's `BaseModel.copy`).
 
 ## Strategy Pattern (`abevalflow/experiment.py` — new file)
 
@@ -110,47 +123,73 @@ class ExperimentStrategy(Protocol):
     def variant_copy_specs(
         self, submission_dir: Path, variant: str,
     ) -> list[CopySpec]:
-        """Return copy specs for this variant (control or treatment)."""
+        """Return copy specs for this variant (control or treatment).
+        Only specs whose src directory exists in submission_dir are returned.
+        """
 
-    def customize_context(self, base_context: dict, variant: str) -> dict:
+    def customize_context(
+        self, base_context: dict, variant: str, submission_dir: Path,
+    ) -> dict:
         """Adjust template context per variant.
 
-        Must set 'skills_dir' to '/skills' when skills/ is in the copy
-        spec, and omit/None it otherwise. This drives the task.toml.j2
-        conditional for skills_dir.
+        Must set 'skills_dir' when skills/ is in the copy spec, and
+        'copy_pairs' as a list of (src, dest) tuples for Dockerfile.j2.
+        copy_pairs are filtered to directories that actually exist in
+        submission_dir to avoid COPY instructions for missing dirs.
         """
+
+def _get_variant_spec(config: ExperimentConfig, variant: str) -> VariantSpec:
+    return config.treatment if variant == "treatment" else config.control
+
+def _filter_specs(specs: list[CopySpec], submission_dir: Path) -> list[CopySpec]:
+    """Return only specs whose src directory exists in the submission."""
+    return [s for s in specs if (submission_dir / s.src).is_dir()]
 
 class SkillExperimentStrategy:
     """Default strategy: treatment includes skills/docs, control excludes them.
 
     customize_context sets:
-      - treatment: skills_dir='/skills', copy_pairs=[('skills','/skills'), ...]
-      - control:   skills_dir=None,     copy_pairs=[('supportive','/workspace/supportive'), ...]
+      - treatment: skills_dir='/skills', copy_pairs=[('skills','/skills'), ('docs','/workspace/docs')]
+      - control:   skills_dir=None,     copy_pairs=[]
+
+    Common dirs (tests, supportive, scripts) are handled by the scaffold
+    module's COMMON_COPY_DIRS and are not part of the strategy's copy specs.
     """
 
-class ModelExperimentStrategy:
+class _PerVariantStrategy:
+    """Shared base for strategies that read copy/env from the per-variant spec.
+
+    Both ModelExperimentStrategy and ConfigDrivenStrategy have identical
+    mechanics — they differ only in semantic intent. This base eliminates
+    the duplication so changes need not be mirrored.
+    """
+
+class ModelExperimentStrategy(_PerVariantStrategy):
     """Same files for both variants, different env vars.
 
-    Both variants get identical copy specs. The difference is in
-    env_from_secrets — e.g., treatment uses model A, control uses model B.
-    env vars are injected via Harbor's persistent_env at runtime,
-    NOT as Dockerfile ENV directives.
+    Both variants get identical copy specs from their respective
+    VariantSpec. The difference is in env_from_secrets — e.g.,
+    treatment uses model A, control uses model B. Env vars are
+    injected via Harbor's persistent_env at runtime, not baked
+    into the Dockerfile.
     """
 
-class ConfigDrivenStrategy:
+class ConfigDrivenStrategy(_PerVariantStrategy):
     """Reads copy/env directly from ExperimentConfig for 'custom' type.
 
-    Sets skills_dir='/skills' when 'skills' is in the copy spec src list.
+    Sets skills_dir when 'skills' is in the copy spec src list.
     """
 ```
 
 Factory function:
 
 ```python
-_STRATEGY_MAP: dict[ExperimentType, type[ExperimentStrategy]] = {
+_STRATEGY_MAP: dict[ExperimentType, type] = {
     ExperimentType.SKILL: SkillExperimentStrategy,
     ExperimentType.MODEL: ModelExperimentStrategy,
-    ExperimentType.PROMPT: SkillExperimentStrategy,  # same file logic, different content
+    # Prompt experiments differ at runtime (different system prompt), not in
+    # container layout — same copy/scaffold behavior as skill experiments.
+    ExperimentType.PROMPT: SkillExperimentStrategy,
     ExperimentType.CUSTOM: ConfigDrivenStrategy,
 }
 
@@ -180,10 +219,12 @@ skills_dir = "{{ skills_dir }}"
 Key changes:
 - Replace `SKILLED_COPY_DIRS` / `UNSKILLED_COPY_DIRS` constants with strategy-driven `CopySpec` lists
 - Rename output dirs: `tasks/<name>/` → `tasks-treatment/<name>/`, `tasks-no-skills/<name>/` → `tasks-control/<name>/`
-- `_build_template_context` populates `copy_pairs` (from `CopySpec`) instead of individual `has_*` booleans
+- `_build_template_context` populates `copy_pairs` (from `CopySpec`) instead of individual `has_*` booleans; `has_docs` removed (docs handled entirely via `copy_pairs`)
+- `_build_template_context` receives `strategy: ExperimentStrategy` directly (avoids double `get_strategy()` call) and passes `submission_dir` to `customize_context` for existence filtering
 - `scaffold_submission()` returns `(treatment_dir, control_dir)` instead of `(skilled_dir, unskilled_dir)`
 - Accept `ExperimentConfig` (from parsed metadata) and delegate to strategy
 - Common dirs (`tests/`, `supportive/`, `scripts/`) are always copied for both variants; the strategy only controls the treatment-specific dirs
+- `strategy_srcs` derived from `context.get("copy_pairs", [])` instead of calling `variant_copy_specs` again (avoids redundant filesystem checks)
 
 ## Template Unification (`templates/`)
 
@@ -204,12 +245,18 @@ WORKDIR /workspace
 
 COPY instruction.md .
 COPY tests/ /tests/
+{% if has_supportive %}
+COPY supportive/ /workspace/supportive/
+{% endif %}
+{% if has_scripts %}
+COPY scripts/ /workspace/scripts/
+{% endif %}
 {% for src, dest in copy_pairs %}
 COPY {{ src }}/ {{ dest }}/
 {% endfor %}
 ```
 
-`copy_pairs` is a list of `(src, dest)` tuples built from `CopySpec`. Example for skill treatment: `[("skills", "/skills"), ("docs", "/workspace/docs"), ("supportive", "/workspace/supportive")]`. For control: `[("supportive", "/workspace/supportive")]`.
+`copy_pairs` is a list of `(src, dest)` tuples built from `CopySpec`, filtered to only include directories that exist in the submission. Example for skill treatment: `[("skills", "/skills"), ("docs", "/workspace/docs")]`. For control: `[]` (empty — common dirs like `supportive/` are handled by `COMMON_COPY_DIRS` in `scaffold.py`, not by the strategy).
 
 When `copy_pairs` is empty (e.g., control with no optional dirs), no extra `COPY` lines are emitted — the Dockerfile is still valid.
 
@@ -264,7 +311,7 @@ No changes needed — `has_llm_judge` is still determined by directory inspectio
 ### `tests/test_validate.py`
 - `ExperimentConfig` validation: valid types, invalid type rejected, `n_trials` bounds
 - `VariantSpec` validation: path traversal rejected, duplicate src rejected
-- `CopySpec` validation: trailing slash stripped, absolute src rejected
+- `CopySpec` validation: `src` trailing slash stripped, absolute src rejected, empty src rejected; `dest` trailing slash stripped, empty rejected, traversal rejected, relative path rejected
 - `env_from_secrets` format validation
 
 ## Security Rules
@@ -283,7 +330,9 @@ No changes needed — `has_llm_judge` is still determined by directory inspectio
 ## Execution Plan (APPENG-4932)
 
 > **Jira:** [APPENG-4932](https://issues.redhat.com/browse/APPENG-4932) — AB Eval Flow Conversion
-> **Branch:** `APPENG-4932/ab-eval-flow-conversion`
+> **Branches:**
+>   - `APPENG-4932/ab-eval-flow-conversion` — Commits 1-3 + review fixes → [PR #5](https://github.com/RHEcosystemAppEng/ABEvalFlow/pull/5) (merged)
+>   - `APPENG-4932/ab-eval-flow-templates` — Commits 4-6 + review fixes → [PR #6](https://github.com/RHEcosystemAppEng/ABEvalFlow/pull/6)
 > **Base:** `main` (after PRs #1-4 merged)
 > **Roadmap context:** See [workstreams_roadmap.md](./workstreams_roadmap.md) — this is WS1
 
@@ -302,45 +351,45 @@ Each commit is a self-contained, testable unit. TDD approach: write tests first 
 
 **Files:** `abevalflow/schemas.py`, `tests/test_validate.py`
 
-- [ ] Add `ExperimentType` enum (`skill`, `model`, `prompt`, `custom`)
-- [ ] Add `CopySpec` model with `src`/`dest` fields, path traversal rejection, trailing slash strip
-- [ ] Add `VariantSpec` model with `copy` list and `env_from_secrets` dict, duplicate src rejection
-- [ ] Add `ExperimentConfig` model with `type`, `n_trials` (bounded 1-100), `treatment`/`control` specs
-- [ ] Wire `ExperimentConfig` into `SubmissionMetadata` as optional `experiment` field
-- [ ] Default: no `experiment` key → `ExperimentConfig()` → skill experiment, N=20
-- [ ] Tests: valid types, invalid type rejected, `n_trials` bounds, path traversal, duplicate src, trailing slash, absolute src, `env_from_secrets` format, backward compat (no experiment key)
-- [ ] Run `uv run pytest` — all tests pass
+- [x] Add `ExperimentType` enum (`skill`, `model`, `prompt`, `custom`)
+- [x] Add `CopySpec` model with `src`/`dest` fields, path traversal rejection, trailing slash strip
+- [x] Add `VariantSpec` model with `copy` list and `env_from_secrets` dict, duplicate src rejection
+- [x] Add `ExperimentConfig` model with `type`, `n_trials` (bounded 1-100), `treatment`/`control` specs
+- [x] Wire `ExperimentConfig` into `SubmissionMetadata` as optional `experiment` field
+- [x] Default: no `experiment` key → `ExperimentConfig()` → skill experiment, N=20
+- [x] Tests: valid types, invalid type rejected, `n_trials` bounds, path traversal, duplicate src, trailing slash, absolute src, `env_from_secrets` format, backward compat (no experiment key)
+- [x] Run `uv run pytest` — all tests pass
 
 #### Commit 2 — `feat: add ExperimentStrategy protocol and implementations`
 
 **Files:** `abevalflow/experiment.py` (new), `tests/test_experiment.py` (new)
 
-- [ ] Define `ExperimentStrategy` protocol with `variant_copy_specs()` and `customize_context()`
-- [ ] Implement `SkillExperimentStrategy` — treatment gets skills/docs, control excludes them
-- [ ] Implement `ModelExperimentStrategy` — same files both variants, difference in `env_from_secrets`
-- [ ] Implement `ConfigDrivenStrategy` — reads copy/env directly from `ExperimentConfig`
-- [ ] Implement `get_strategy()` factory with `_STRATEGY_MAP`
-- [ ] `skills_dir` contract: set when `"skills"` is in copy spec src list, `None` otherwise
-- [ ] Tests: each strategy produces correct copy specs and context for treatment/control variants, `skills_dir` set correctly, factory returns correct strategy for each type
-- [ ] Run `uv run pytest` — all tests pass
+- [x] Define `ExperimentStrategy` protocol with `variant_copy_specs()` and `customize_context()`
+- [x] Implement `SkillExperimentStrategy` — treatment gets skills/docs, control excludes them
+- [x] Implement `ModelExperimentStrategy` — same files both variants, difference in `env_from_secrets`
+- [x] Implement `ConfigDrivenStrategy` — reads copy/env directly from `ExperimentConfig`
+- [x] Implement `get_strategy()` factory with `_STRATEGY_MAP`
+- [x] `skills_dir` contract: set when `"skills"` is in copy spec src list, `None` otherwise
+- [x] Tests: each strategy produces correct copy specs and context for treatment/control variants, `skills_dir` set correctly, factory returns correct strategy for each type
+- [x] Run `uv run pytest` — all tests pass
 
 #### Commit 3 — `refactor: scaffold.py — strategy-driven dirs, control/treatment`
 
 **Files:** `scripts/scaffold.py`, `tests/test_scaffold.py`
 
-- [ ] Replace `SKILLED_COPY_DIRS` / `UNSKILLED_COPY_DIRS` constants with strategy-driven `CopySpec` lists
-- [ ] Rename output dirs: `tasks/<name>/` → `tasks-treatment/<name>/`, `tasks-no-skills/<name>/` → `tasks-control/<name>/`
-- [ ] `_build_template_context` populates `copy_pairs` from `CopySpec` instead of `has_*` booleans
-- [ ] `scaffold_submission()` returns `(treatment_dir, control_dir)` instead of `(skilled_dir, unskilled_dir)`
-- [ ] Accept `ExperimentConfig` from parsed metadata, delegate to strategy
-- [ ] Common dirs (`tests/`, `supportive/`, `scripts/`) always copied for both variants
-- [ ] Update all test references: `skilled` → `treatment`, `unskilled` → `control`
-- [ ] Add regression test: old-format metadata produces identical output structure
-- [ ] Add test: model strategy with `env_from_secrets`
-- [ ] Add test: custom strategy with explicit `CopySpec`
-- [ ] Add test: empty `copy_pairs` produces valid Dockerfile
-- [ ] Add test: `n_trials` passthrough
-- [ ] Run `uv run pytest` — all tests pass
+- [x] Replace `SKILLED_COPY_DIRS` / `UNSKILLED_COPY_DIRS` constants with strategy-driven `CopySpec` lists
+- [x] Rename output dirs: `tasks/<name>/` → `tasks-treatment/<name>/`, `tasks-no-skills/<name>/` → `tasks-control/<name>/`
+- [x] `_build_template_context` populates `copy_pairs` from `CopySpec` instead of `has_*` booleans
+- [x] `scaffold_submission()` returns `(treatment_dir, control_dir)` instead of `(skilled_dir, unskilled_dir)`
+- [x] Accept `ExperimentConfig` from parsed metadata, delegate to strategy
+- [x] Common dirs (`tests/`, `supportive/`, `scripts/`) always copied for both variants
+- [x] Update all test references: `skilled` → `treatment`, `unskilled` → `control`
+- [x] Add regression test: old-format metadata produces identical output structure
+- [x] Add test: model strategy with `env_from_secrets`
+- [x] Add test: custom strategy with explicit `CopySpec`
+- [x] Add test: empty `copy_pairs` produces valid Dockerfile
+- [x] Add test: `n_trials` passthrough
+- [x] Run `uv run pytest` — all tests pass
 
 #### Commit 4 — `refactor: unify Dockerfile templates into Dockerfile.j2`
 
@@ -372,29 +421,37 @@ Note: `build-push.yaml` does not exist yet on `main` — it will be created with
 
 ### Definition of Done
 
-- [ ] All 6 commits on `APPENG-4932/ab-eval-flow-conversion` branch
-- [ ] All existing + new tests pass (`uv run pytest`)
-- [ ] Backward compatibility: submission without `experiment` key produces same output as before
-- [ ] No references to `skilled`/`unskilled` remain in code or YAML (Docs may reference them historically)
-- [ ] PR created and ready for review
+- [x] Commits 1-3 on `APPENG-4932/ab-eval-flow-conversion` → PR #5 (merged)
+- [x] Commits 4-6 on `APPENG-4932/ab-eval-flow-templates` → PR #6
+- [x] All existing + new tests pass (`uv run pytest` — 132 passed)
+- [x] Backward compatibility: submission without `experiment` key produces same output as before
+- [x] No references to `skilled`/`unskilled` remain in code or YAML (Docs may reference them historically)
+- [x] PRs created and reviewed
 
 ## Files Changed Summary
 
-| File | Action |
-|------|--------|
-| `abevalflow/schemas.py` | Add `ExperimentConfig`, `VariantSpec`, `CopySpec`, `ExperimentType` |
-| `abevalflow/experiment.py` | New — strategy protocol + `Skill`/`Model`/`ConfigDriven` implementations |
-| `scripts/scaffold.py` | Refactor to use strategy, rename control/treatment, use `CopySpec` |
-| `scripts/analyze.py` | Rename metric labels from skilled/unskilled to treatment/control |
-| `templates/Dockerfile.j2` | New — unified template using `copy_pairs` |
-| `templates/Dockerfile.skilled.j2` | Delete |
-| `templates/Dockerfile.unskilled.j2` | Delete |
-| `templates/task.toml.j2` | Replace `variant == "skilled"` with `skills_dir` check |
-| `templates/test.sh.j2` | No changes (verified unaffected) |
-| `pipeline/tasks/build-push.yaml` | Rename params/results/steps |
-| `pipeline/tasks/scaffold.yaml` | Rename results |
-| `tests/test_scaffold.py` | Rename + add experiment config and regression tests |
-| `tests/test_validate.py` | Add ExperimentConfig/VariantSpec/CopySpec validation tests |
-| `tests/test_experiment.py` | New — strategy unit tests |
-| `Docs/implementation_plan.md` | Update terminology (targeted sections: Phase 4.4, 4.6, 5.1, 6) |
-| `README.md` | Update terminology |
+| File | Action | PR |
+|------|--------|----|
+| `abevalflow/schemas.py` | Add `ExperimentConfig`, `VariantSpec`, `CopySpec`, `ExperimentType`; add `_validate_dest` | #5 |
+| `abevalflow/experiment.py` | New — strategy protocol + `Skill`/`Model`/`ConfigDriven` implementations; `_PerVariantStrategy` base, `_filter_specs` | #5 |
+| `scripts/scaffold.py` | Refactor to use strategy, rename control/treatment, use `CopySpec`; remove dead `has_docs` | #5, #6 |
+| `templates/Dockerfile.j2` | New — unified template using `copy_pairs` | #6 |
+| `templates/Dockerfile.skilled.j2` | Delete | #6 |
+| `templates/Dockerfile.unskilled.j2` | Delete | #6 |
+| `templates/task.toml.j2` | Replace `variant == "skilled"` with `skills_dir` check | #6 |
+| `templates/test.sh.j2` | No changes (verified unaffected) | — |
+| `pipeline/tasks/scaffold.yaml` | Rename results to `treatment-task-dir`/`control-task-dir` | #6 |
+| `tests/test_scaffold.py` | Rename + add experiment config, regression, and edge-case tests | #5 |
+| `tests/test_validate.py` | Add ExperimentConfig/VariantSpec/CopySpec validation tests (incl. `dest`) | #5 |
+| `tests/test_experiment.py` | New — strategy unit tests incl. `_filter_specs` coverage | #5 |
+| `Docs/implementation_plan.md` | Update terminology (targeted sections: Phase 4.4, 4.6, 5.1, 6) | #6 |
+| `Docs/ab_testing_generalization_plan.md` | Update checklists, fix return order, update code snippets | #6 |
+| `Docs/workstreams_roadmap.md` | New — workstream execution order and Jira cross-references | #6 |
+| `README.md` | Update terminology | #6 |
+
+**Not yet changed (future workstreams):**
+
+| File | Action | Workstream |
+|------|--------|------------|
+| `scripts/analyze.py` | Rename metric labels from skilled/unskilled to treatment/control | WS3 |
+| `pipeline/tasks/build-push.yaml` | Will be created with treatment/control naming directly | WS2 (APPENG-4905) |
