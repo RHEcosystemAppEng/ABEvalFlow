@@ -62,7 +62,7 @@ class CopySpec(BaseModel):
         return v
 
 class VariantSpec(BaseModel):
-    copy: list[CopySpec] = Field(default_factory=list)
+    copy_dirs: list[CopySpec] = Field(default_factory=list, alias="copy")
     env_from_secrets: dict[str, str] = Field(
         default_factory=dict,
         description=(
@@ -74,7 +74,7 @@ class VariantSpec(BaseModel):
 
     @model_validator(mode="after")
     def _no_duplicate_src(self) -> "VariantSpec":
-        srcs = [c.src for c in self.copy]
+        srcs = [c.src for c in self.copy_dirs]
         if len(srcs) != len(set(srcs)):
             raise ValueError("Duplicate src directories in copy spec")
         return self
@@ -280,75 +280,103 @@ No changes needed — `has_llm_judge` is still determined by directory inspectio
 - `examples/sample_skill/metadata.yaml` does NOT need an `experiment` block (defaults apply)
 - Add regression test fixture: run scaffold with old-format metadata, assert output matches current behavior
 
-## Commit Plan
+## Execution Plan (APPENG-4932)
 
-| # | Commit | Files |
-|---|--------|-------|
-| 1 | `feat: add ExperimentConfig, VariantSpec, CopySpec to schema` | `schemas.py`, `test_validate.py` |
-| 2 | `feat: add ExperimentStrategy protocol and implementations` | `experiment.py`, `test_experiment.py` (new) |
-| 3 | `refactor: scaffold.py — strategy-driven dirs, control/treatment` | `scaffold.py`, `test_scaffold.py` |
-| 4 | `refactor: unify Dockerfile templates into Dockerfile.j2` | `Dockerfile.j2` (new), delete `.skilled.j2`/`.unskilled.j2`, `task.toml.j2` |
-| 5 | `refactor: rename Tekton params/results to control/treatment` | `build-push.yaml`, `scaffold.yaml` |
-| 6 | `docs: update terminology in plan, README, and analysis references` | `implementation_plan.md`, `README.md`, `scripts/analyze.py` |
+> **Jira:** [APPENG-4932](https://issues.redhat.com/browse/APPENG-4932) — AB Eval Flow Conversion
+> **Branch:** `APPENG-4932/ab-eval-flow-conversion`
+> **Base:** `main` (after PRs #1-4 merged)
+> **Roadmap context:** See [workstreams_roadmap.md](./workstreams_roadmap.md) — this is WS1
 
-## Impact on Open PRs
+### Prerequisites (all met)
 
-This refactor affects files already in open pull requests. The A/B generalization
-should be implemented **after these PRs are merged** to avoid conflict, or as
-follow-up commits on the relevant branches.
+- [x] PR #1 — Phase 1 validation (APPENG-4903) — merged
+- [x] PR #2 — Tekton triggers + validate task (APPENG-4903) — merged
+- [x] PR #3 — Phase 2 scaffolding (APPENG-4904) — merged
+- [x] PR #4 — Rename to ABEvalFlow — merged
 
-### PR #1 — `APPENG-4903/phase-1-validation` ([link](https://github.com/RHEcosystemAppEng/ABEvalFlow/pull/1))
+### Commit Plan
 
-**Impact: HIGH** — schema is the foundation of the refactor.
+Each commit is a self-contained, testable unit. TDD approach: write tests first where applicable.
 
-| PR file | A/B plan change |
-|---------|-----------------|
-| `abevalflow/schemas.py` | Add `ExperimentConfig`, `VariantSpec`, `CopySpec`, `ExperimentType` |
-| `tests/test_validate.py` | Add tests for new schema models |
-| `scripts/validate.py` | May need to validate `experiment` block if present |
+#### Commit 1 — `feat: add ExperimentConfig, VariantSpec, CopySpec to schema`
 
-### PR #2 — `APPENG-4903/tekton-triggers-and-validate-task` ([link](https://github.com/RHEcosystemAppEng/ABEvalFlow/pull/2))
+**Files:** `abevalflow/schemas.py`, `tests/test_validate.py`
 
-**Impact: LOW** — triggers and validate task are experiment-agnostic.
+- [ ] Add `ExperimentType` enum (`skill`, `model`, `prompt`, `custom`)
+- [ ] Add `CopySpec` model with `src`/`dest` fields, path traversal rejection, trailing slash strip
+- [ ] Add `VariantSpec` model with `copy` list and `env_from_secrets` dict, duplicate src rejection
+- [ ] Add `ExperimentConfig` model with `type`, `n_trials` (bounded 1-100), `treatment`/`control` specs
+- [ ] Wire `ExperimentConfig` into `SubmissionMetadata` as optional `experiment` field
+- [ ] Default: no `experiment` key → `ExperimentConfig()` → skill experiment, N=20
+- [ ] Tests: valid types, invalid type rejected, `n_trials` bounds, path traversal, duplicate src, trailing slash, absolute src, `env_from_secrets` format, backward compat (no experiment key)
+- [ ] Run `uv run pytest` — all tests pass
 
-| PR file | A/B plan change |
-|---------|-----------------|
-| `pipeline/tasks/validate.yaml` | No change needed (validates structure, not experiment type) |
-| `pipeline/triggers/*` | No change needed (triggers are submission-agnostic) |
-| `Docs/trigger_guide.md` | Minor terminology update (skilled/unskilled references) |
-| `examples/sample_skill/metadata.yaml` | No change needed (defaults apply, no `experiment` block required) |
+#### Commit 2 — `feat: add ExperimentStrategy protocol and implementations`
 
-### PR #3 — `APPENG-4904/phase-2-scaffolding` ([link](https://github.com/RHEcosystemAppEng/ABEvalFlow/pull/3))
+**Files:** `abevalflow/experiment.py` (new), `tests/test_experiment.py` (new)
 
-**Impact: VERY HIGH** — scaffold, templates, and tests are the core of the refactor.
+- [ ] Define `ExperimentStrategy` protocol with `variant_copy_specs()` and `customize_context()`
+- [ ] Implement `SkillExperimentStrategy` — treatment gets skills/docs, control excludes them
+- [ ] Implement `ModelExperimentStrategy` — same files both variants, difference in `env_from_secrets`
+- [ ] Implement `ConfigDrivenStrategy` — reads copy/env directly from `ExperimentConfig`
+- [ ] Implement `get_strategy()` factory with `_STRATEGY_MAP`
+- [ ] `skills_dir` contract: set when `"skills"` is in copy spec src list, `None` otherwise
+- [ ] Tests: each strategy produces correct copy specs and context for treatment/control variants, `skills_dir` set correctly, factory returns correct strategy for each type
+- [ ] Run `uv run pytest` — all tests pass
 
-| PR file | A/B plan change |
-|---------|-----------------|
-| `scripts/scaffold.py` | Major refactor: strategy pattern, `CopySpec`, control/treatment naming |
-| `templates/Dockerfile.skilled.j2` | Delete — replaced by unified `Dockerfile.j2` |
-| `templates/Dockerfile.unskilled.j2` | Delete — replaced by unified `Dockerfile.j2` |
-| `templates/task.toml.j2` | Replace `variant == "skilled"` with `skills_dir` check |
-| `templates/test.sh.j2` | No change (verified unaffected) |
-| `pipeline/tasks/scaffold.yaml` | Rename results: skilled/unskilled → treatment/control |
-| `tests/test_scaffold.py` | Major rename + new experiment config tests |
+#### Commit 3 — `refactor: scaffold.py — strategy-driven dirs, control/treatment`
 
-### Branch `APPENG-4905/phase-3-build-push` (no PR yet)
+**Files:** `scripts/scaffold.py`, `tests/test_scaffold.py`
 
-**Impact: MEDIUM** — param/result/step renames only.
+- [ ] Replace `SKILLED_COPY_DIRS` / `UNSKILLED_COPY_DIRS` constants with strategy-driven `CopySpec` lists
+- [ ] Rename output dirs: `tasks/<name>/` → `tasks-treatment/<name>/`, `tasks-no-skills/<name>/` → `tasks-control/<name>/`
+- [ ] `_build_template_context` populates `copy_pairs` from `CopySpec` instead of `has_*` booleans
+- [ ] `scaffold_submission()` returns `(control_dir, treatment_dir)` instead of `(skilled_dir, unskilled_dir)`
+- [ ] Accept `ExperimentConfig` from parsed metadata, delegate to strategy
+- [ ] Common dirs (`tests/`, `supportive/`, `scripts/`) always copied for both variants
+- [ ] Update all test references: `skilled` → `treatment`, `unskilled` → `control`
+- [ ] Add regression test: old-format metadata produces identical output structure
+- [ ] Add test: model strategy with `env_from_secrets`
+- [ ] Add test: custom strategy with explicit `CopySpec`
+- [ ] Add test: empty `copy_pairs` produces valid Dockerfile
+- [ ] Add test: `n_trials` passthrough
+- [ ] Run `uv run pytest` — all tests pass
 
-| Branch file | A/B plan change |
-|-------------|-----------------|
-| `pipeline/tasks/build-push.yaml` | Rename params/results/steps: skilled/unskilled → treatment/control |
-| `Docs/implementation_plan.md` | Update terminology in Phases 3-6 |
+#### Commit 4 — `refactor: unify Dockerfile templates into Dockerfile.j2`
 
-### Recommended Merge Order
+**Files:** `templates/Dockerfile.j2` (new), `templates/task.toml.j2`, delete `templates/Dockerfile.skilled.j2`, delete `templates/Dockerfile.unskilled.j2`
 
-1. Merge PR #1, PR #2, PR #3, and phase-3 branch **as-is** (current skilled/unskilled naming)
-2. Create a new branch `APPENG-XXXX/ab-testing-generalization` from `main`
-3. Implement the A/B refactor as a single focused effort across all affected files
-4. This avoids rebasing conflicts and keeps the current PRs reviewable
+- [x] Create unified `Dockerfile.j2` using `{% for src, dest in copy_pairs %}` loop
+- [x] Update `task.toml.j2`: replace `{% if variant == "skilled" %}` with `{% if skills_dir %}`
+- [x] Delete `Dockerfile.skilled.j2` and `Dockerfile.unskilled.j2`
+- [x] Update `scaffold.py` to reference `Dockerfile.j2` instead of variant-specific templates
+- [x] Run `uv run pytest` — all tests pass (scaffold tests validate generated Dockerfiles)
 
-Alternative: if PRs are slow to merge, the refactor can be applied directly on PR #3's branch (highest overlap) and the other PRs rebased after.
+#### Commit 5 — `refactor: rename Tekton params/results to control/treatment`
+
+**Files:** `pipeline/tasks/scaffold.yaml`
+
+- [x] Results: `skilled-task-dir` → `treatment-task-dir`, `unskilled-task-dir` → `control-task-dir`
+- [x] Update step script to use `tasks-treatment/` and `tasks-control/` output dirs
+
+Note: `build-push.yaml` does not exist yet on `main` — it will be created with treatment/control naming directly in WS2 (APPENG-4905).
+
+#### Commit 6 — `docs: update terminology in plan, README, and trigger guide`
+
+**Files:** `Docs/implementation_plan.md`, `README.md`, `Docs/trigger_guide.md`
+
+- [x] Update `implementation_plan.md` — Phases 2-6 terminology (skilled/unskilled → treatment/control)
+- [x] Update `README.md` — "How It Works" section
+- [x] Verified `trigger_guide.md` — no skilled/unskilled references found
+- [x] Run final `uv run pytest` — all tests pass
+
+### Definition of Done
+
+- [ ] All 6 commits on `APPENG-4932/ab-eval-flow-conversion` branch
+- [ ] All existing + new tests pass (`uv run pytest`)
+- [ ] Backward compatibility: submission without `experiment` key produces same output as before
+- [ ] No references to `skilled`/`unskilled` remain in code or YAML (Docs may reference them historically)
+- [ ] PR created and ready for review
 
 ## Files Changed Summary
 
