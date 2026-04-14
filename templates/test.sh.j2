@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Run test_outputs.py via pytest with CTRF reporting.
+# Do not use set -e: we need to capture the exit code and write the reward file
+# regardless of whether tests pass or fail.
+uvx \
+  --with pytest==8.4.1 \
+  --with pytest-json-ctrf==0.3.5 \
+  pytest --ctrf /logs/verifier/ctrf.json /tests/test_outputs.py -rA || true
+
+TEST_EXIT=${PIPESTATUS[0]:-$?}
+
+{% if has_llm_judge %}
+# LLM judge is informational only — its output is captured in /logs but does
+# not affect the reward signal or the verifier exit code.
+python /tests/llm_judge.py || echo "WARNING: llm_judge.py failed (non-fatal)"
+{% endif %}
+
+if [ $TEST_EXIT -eq 0 ]; then
+  echo 1 > /logs/verifier/reward.txt
+else
+  echo 0 > /logs/verifier/reward.txt
+fi
+
+exit $TEST_EXIT
