@@ -2,7 +2,7 @@
 
 Each strategy determines which directories to copy and how to customize
 the template context for treatment and control variants. The scaffold
-module delegates to these strategies rather than hardcoding skilled/unskilled
+module delegates to these strategies rather than hardcoding treatment/control
 logic.
 """
 

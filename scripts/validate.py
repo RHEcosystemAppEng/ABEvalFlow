@@ -1,4 +1,4 @@
-"""Validate a skill submission directory against the submission contract.
+"""Validate a submission directory against the submission contract.
 
 Checks:
   1. instruction.md exists and is non-empty
@@ -130,7 +130,7 @@ def validate_submission(submission_dir: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate a skill submission directory")
+    parser = argparse.ArgumentParser(description="Validate a submission directory")
     parser.add_argument("submission_dir", type=Path, help="Path to the submission directory")
     args = parser.parse_args(argv)
 

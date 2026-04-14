@@ -123,9 +123,9 @@ class TestSkillExperimentStrategy:
     def test_treatment_context_preserves_base(self, submission_dir: Path) -> None:
         config = ExperimentConfig()
         strategy = SkillExperimentStrategy(config)
-        base = {"skill_name": "test", "persona": "sre"}
+        base = {"submission_name": "test", "persona": "sre"}
         ctx = strategy.customize_context(base, "treatment", submission_dir)
-        assert ctx["skill_name"] == "test"
+        assert ctx["submission_name"] == "test"
         assert ctx["persona"] == "sre"
 
     def test_base_context_not_mutated(self, submission_dir: Path) -> None:

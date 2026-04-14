@@ -1,12 +1,12 @@
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:
-  name: skills-submission-listener
+  name: submission-listener
   namespace: ab-eval-flow
 spec:
   serviceAccountName: pipeline
   triggers:
-    - name: skills-push-trigger
+    - name: submission-push-trigger
       interceptors:
         - ref:
             name: "cel"
@@ -20,11 +20,11 @@ spec:
                 )
             - name: "overlays"
               value:
-                - key: skill_directory
+                - key: submission_directory
                   # Extract the first subdirectory under submissions/
-                  # e.g. submissions/my-skill/SKILL.md -> my-skill
-                  # NOTE: single-skill-per-push assumed; multi-skill pushes
-                  # only evaluate the first skill found.
+                  # e.g. submissions/my-submission/SKILL.md -> my-submission
+                  # NOTE: single-submission-per-push assumed; multi-submission
+                  # pushes only evaluate the first submission found.
                   expression: >-
                     body.commits.map(c,
                       c.added + c.modified
@@ -32,6 +32,6 @@ spec:
                       f.startsWith('submissions/')
                     )[0].split('/')[1]
       bindings:
-        - ref: skills-submission-binding
+        - ref: submission-binding
       template:
-        ref: skills-submission-template
+        ref: submission-template

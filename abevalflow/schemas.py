@@ -1,9 +1,9 @@
-"""Pydantic models for skill submission metadata validation.
+"""Pydantic models for submission metadata validation.
 
 The schema defines the structure of metadata.yaml files that accompany
-skill submissions. The schema_version field tracks the format version
-so the pipeline can handle older submissions gracefully when the schema
-evolves (e.g., new fields added, defaults changed).
+submissions. The schema_version field tracks the format version so the
+pipeline can handle older submissions gracefully when the schema evolves
+(e.g., new fields added, defaults changed).
 
 Current schema version: 1.0
 """
@@ -105,12 +105,12 @@ class ExperimentConfig(BaseModel):
 
 
 class SubmissionMetadata(BaseModel):
-    """Schema for metadata.yaml in a skill submission directory.
+    """Schema for metadata.yaml in a submission directory.
 
     Only 'name' is required. All other fields have sensible defaults so
     that a minimal metadata.yaml can be as simple as:
 
-        name: my-skill
+        name: my-submission
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -143,12 +143,12 @@ class SubmissionMetadata(BaseModel):
             )
         return v
 
-    description: str | None = Field(default=None, description="Brief description of the skill")
+    description: str | None = Field(default=None, description="Brief description of the submission")
     persona: str | None = Field(
         default=None,
         description="Target persona (e.g. rh-sre, rh-developer). Used as category in Harbor.",
     )
-    version: str = Field(default="0.1.0", min_length=1, description="Skill version string")
+    version: str = Field(default="0.1.0", min_length=1, description="Version string")
     author: str | None = Field(default=None, description="Author or team name")
     tags: list[str] | None = Field(default=None, description="Optional classification tags")
     generation_mode: GenerationMode = Field(

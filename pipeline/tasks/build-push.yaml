@@ -12,7 +12,7 @@ spec:
     cluster-signed certificate not trusted by the container runtime.
     SETFCAP capability is required for rootless Buildah (newuidmap/newgidmap).
   params:
-    - name: skill-name
+    - name: submission-name
       type: string
       description: >-
         Submission name used for image tagging and registry path
@@ -54,7 +54,7 @@ spec:
 
         build_and_push() {
           local variant="$1" context_dir="$2" result_path="$3"
-          local image_tag="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name):${variant}-$(params.commit-sha)"
+          local image_tag="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name):${variant}-$(params.commit-sha)"
 
           buildah login \
             --tls-verify=false \
@@ -76,7 +76,7 @@ spec:
 
           local digest
           digest=$(tr -d '\n' < "/tmp/${variant}-digest")
-          local image_ref="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name)@${digest}"
+          local image_ref="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name)@${digest}"
           echo -n "$image_ref" > "$result_path"
           echo "Pushed ${variant} image: $image_ref"
         }
@@ -96,7 +96,7 @@ spec:
 
         build_and_push() {
           local variant="$1" context_dir="$2" result_path="$3"
-          local image_tag="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name):${variant}-$(params.commit-sha)"
+          local image_tag="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name):${variant}-$(params.commit-sha)"
 
           buildah login \
             --tls-verify=false \
@@ -118,7 +118,7 @@ spec:
 
           local digest
           digest=$(tr -d '\n' < "/tmp/${variant}-digest")
-          local image_ref="$(params.registry-url)/$(params.registry-namespace)/$(params.skill-name)@${digest}"
+          local image_ref="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name)@${digest}"
           echo -n "$image_ref" > "$result_path"
           echo "Pushed ${variant} image: $image_ref"
         }

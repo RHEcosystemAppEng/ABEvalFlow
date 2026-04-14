@@ -25,7 +25,7 @@ from abevalflow.schemas import (
 VALID_METADATA = {
     "schema_version": "1.0",
     "name": "my-skill",
-    "description": "A test skill",
+    "description": "A test submission",
     "persona": "rh-sre",
     "version": "0.1.0",
     "author": "test-team",

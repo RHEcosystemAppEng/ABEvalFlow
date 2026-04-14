@@ -1,7 +1,7 @@
 [project]
 name = "abevalflow"
 version = "0.1.0"
-description = "Automated Tekton pipeline on OpenShift for evaluating AI skill submissions"
+description = "Automated Tekton pipeline on OpenShift for A/B evaluation of AI submissions"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
