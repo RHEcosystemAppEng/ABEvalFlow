@@ -234,7 +234,7 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 ### 3.2 Registry Configuration
 
 - [ ] Create image pull/push secrets for Quay.io.
-- [ ] Configure OpenShift internal registry access for pipeline ServiceAccount.
+- [x] Configure OpenShift internal registry access for pipeline ServiceAccount (`config/rbac.yaml`).
 - [ ] Define image retention policy (default: 30 days on Quay for reproducibility).
 - [ ] Add `latest-treatment` / `latest-control` floating tags per skill for the monitoring pipeline. **Note:** Digest-based references remain the source of truth for reproducibility; floating tags are monitoring convenience only and may race under concurrent runs.
 
@@ -259,8 +259,8 @@ Use digest-based references (not mutable tags) between tasks to avoid tag mutati
 
 ### 3.4 Definition of Done
 
-- [ ] Both variants built and pushed to OpenShift internal registry.
-- [ ] `treatment-image-ref` and `control-image-ref` emitted as Tekton results (digest-based).
+- [x] Both variants built and pushed to OpenShift internal registry (`pipeline/tasks/build-push.yaml`).
+- [x] `treatment-image-ref` and `control-image-ref` emitted as Tekton results (digest-based).
 - [ ] Push secrets functional.
 
 ---
