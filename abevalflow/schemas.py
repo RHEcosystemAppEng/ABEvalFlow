@@ -11,7 +11,7 @@ Current schema version: 1.0
 import re
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CURRENT_SCHEMA_VERSION = "1.0"
 
@@ -21,6 +21,86 @@ _SCHEMA_VERSION_RE = re.compile(r"\d+\.\d+")
 class GenerationMode(StrEnum):
     MANUAL = "manual"
     AI = "ai"
+
+
+class ExperimentType(StrEnum):
+    SKILL = "skill"
+    MODEL = "model"
+    PROMPT = "prompt"
+    CUSTOM = "custom"
+
+
+class CopySpec(BaseModel):
+    """A source directory and its destination path inside the container."""
+
+    src: str = Field(description="Directory name in submission (e.g. 'skills')")
+    dest: str = Field(description="Absolute path in container (e.g. '/skills')")
+
+    @field_validator("src")
+    @classmethod
+    def _validate_src(cls, v: str) -> str:
+        v = v.rstrip("/")
+        if ".." in v or v.startswith("/"):
+            raise ValueError("src must be a relative top-level directory name")
+        if not v:
+            raise ValueError("src must not be empty")
+        return v
+
+    @field_validator("dest")
+    @classmethod
+    def _validate_dest(cls, v: str) -> str:
+        v = v.rstrip("/")
+        if not v:
+            raise ValueError("dest must not be empty")
+        if ".." in v:
+            raise ValueError("dest must not contain '..'")
+        if not v.startswith("/"):
+            raise ValueError("dest must be an absolute path (start with '/')")
+        return v
+
+
+class VariantSpec(BaseModel):
+    """Describes what goes into a single variant (treatment or control)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    copy_dirs: list[CopySpec] = Field(default_factory=list, alias="copy")
+    env_from_secrets: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Env vars to inject at runtime via OpenShift Secrets. "
+            "Keys are env var names, values are secret references "
+            "(e.g. 'secret-name/key'). Raw values are NOT allowed."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _no_duplicate_src(self) -> "VariantSpec":
+        srcs = [c.src for c in self.copy_dirs]
+        if len(srcs) != len(set(srcs)):
+            raise ValueError("Duplicate src directories in copy spec")
+        return self
+
+
+class ExperimentConfig(BaseModel):
+    """A/B experiment configuration embedded in metadata.yaml."""
+
+    type: ExperimentType = Field(
+        default=ExperimentType.SKILL,
+        description="Experiment type: skill, model, prompt, custom",
+    )
+    n_trials: int = Field(
+        default=20, gt=0, le=100, description="Number of trials per variant"
+    )
+    treatment: VariantSpec = Field(
+        default_factory=lambda: VariantSpec(
+            copy=[
+                CopySpec(src="skills", dest="/skills"),
+                CopySpec(src="docs", dest="/workspace/docs"),
+            ]
+        ),
+    )
+    control: VariantSpec = Field(default_factory=VariantSpec)
 
 
 class SubmissionMetadata(BaseModel):
@@ -65,6 +145,14 @@ class SubmissionMetadata(BaseModel):
             "Whether the submission includes hand-written tests (manual) or "
             "expects the pipeline to generate instruction/tests from the skill (ai). "
             "AI mode is not yet implemented; defaults to manual."
+        ),
+    )
+
+    experiment: ExperimentConfig = Field(
+        default_factory=ExperimentConfig,
+        description=(
+            "A/B experiment configuration. Omit entirely to use the default "
+            "skill experiment with N=20 trials."
         ),
     )
 
