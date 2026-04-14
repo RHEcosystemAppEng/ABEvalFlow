@@ -23,6 +23,6 @@ build_timeout_sec = {{ build_timeout }}
 cpus = {{ cpus }}
 memory_mb = {{ memory_mb }}
 storage_mb = {{ storage_mb }}
-{% if variant == "skilled" %}
-skills_dir = "/skills"
+{% if skills_dir %}
+skills_dir = "{{ skills_dir }}"
 {% endif %}

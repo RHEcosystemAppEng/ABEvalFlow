@@ -6,12 +6,12 @@ Automated Tekton-orchestrated pipeline on OpenShift for evaluating AI skill subm
 
 1. **Submit** — Push a skill directory to the submissions repo; a Tekton EventListener triggers the pipeline.
 2. **Validate** — Checks structure, compiles test files, validates `metadata.yaml` schema.
-3. **Scaffold** — Generates two container variants via Jinja2 templates:
-   - **Skilled** — includes the skill and reference docs.
-   - **Unskilled** — excludes them (baseline).
+3. **Scaffold** — Generates two container variants via Jinja2 templates and an experiment strategy:
+   - **Treatment** — includes the experimental material (e.g., skills and reference docs for a skill experiment).
+   - **Control** — baseline without the experimental material.
 4. **Build & Push** — Builds both images and pushes to the OpenShift internal registry.
-5. **Evaluate** — Harbor runs N=20 attempts per variant (40 total) using a custom OpenShift backend.
-6. **Analyze** — Computes pass rates, skills uplift (gap), statistical significance (p-value), and generates heatmaps.
+5. **Evaluate** — Harbor runs N attempts per variant (default N=20, 40 total) using a custom OpenShift backend.
+6. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value), and generates heatmaps.
 7. **Publish** — Stores reports, promotes passing images to Quay.io, and opens a PR to [agentic-collections](https://github.com/RHEcosystemAppEng/agentic-collections).
 
 ## Repository Structure

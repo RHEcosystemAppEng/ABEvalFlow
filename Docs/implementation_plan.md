@@ -6,7 +6,7 @@
 
 ## Overview
 
-Build an automated, Tekton-orchestrated pipeline on OpenShift that accepts skill submissions, validates them, scaffolds skilled/unskilled container variants, builds images, runs Harbor evaluations via a custom OpenShift backend, and produces statistical reports comparing skilled vs. unskilled performance.
+Build an automated, Tekton-orchestrated pipeline on OpenShift that accepts skill submissions, validates them, scaffolds treatment/control container variants, builds images, runs Harbor evaluations via a custom OpenShift backend, and produces statistical reports comparing treatment vs. control performance.
 
 ### Non-Goals
 
@@ -22,7 +22,7 @@ This pipeline spans two repositories:
 | **[ABEvalFlow](https://github.com/RHEcosystemAppEng/ABEvalFlow)** (this repo) | Pipeline definitions, scripts, templates, config | Tekton YAML, Python scripts, Jinja2 templates, Harbor backend |
 | **[agentic-collections](https://github.com/RHEcosystemAppEng/agentic-collections)** | Skills, tasks, tests (post-evaluation) | Persona-based plugins (`rh-sre`, `rh-developer`, `ocp-admin`, etc.), 100+ skills |
 
-The `tasks/` and `tasks-no-skills/` directories generated during scaffolding are **ephemeral workspace artifacts** — they exist only during a pipeline run, not as permanent directories in either repo.
+The `tasks-treatment/` and `tasks-control/` directories generated during scaffolding are **ephemeral workspace artifacts** — they exist only during a pipeline run, not as permanent directories in either repo.
 
 ### Harbor Fork
 
@@ -64,8 +64,7 @@ ABEvalFlow/
 │       ├── analyze-report.yaml     # Step 7
 │       └── publish-store.yaml      # Step 8
 ├── templates/                      # Jinja2 templates for scaffolding
-│   ├── Dockerfile.skilled.j2
-│   ├── Dockerfile.unskilled.j2
+│   ├── Dockerfile.j2
 │   ├── test.sh.j2
 │   └── task.toml.j2
 ├── scripts/                        # Python scripts used by pipeline tasks
@@ -192,8 +191,7 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 
 **Goal:** Create templates that generate the correct Dockerfiles and supporting files.
 
-- [ ] `Dockerfile.skilled.j2` — COPYs `skills/`, `docs/`, `tests/`, `supportive/`, and `instruction.md`.
-- [ ] `Dockerfile.unskilled.j2` — COPYs `tests/`, `supportive/`, and `instruction.md` but **excludes** `skills/` and `docs/`.
+- [x] `Dockerfile.j2` — Unified template using `copy_pairs` loop; COPYs strategy-determined directories plus common files (`tests/`, `supportive/`, `instruction.md`).
 - [ ] `test.sh.j2` — Entry script that runs the agent, then executes `test_outputs.py` and optional `llm_judge.py`.
 - [ ] `task.toml.j2` — Harbor task configuration.
 
@@ -203,9 +201,9 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 
 - Input: path to validated submission directory.
 - Output (ephemeral workspace artifacts, not permanent repo dirs):
-  - `tasks/<skill-name>/` — skilled variant with rendered Dockerfile, test.sh, task.toml.
-  - `tasks-no-skills/<skill-name>/` — unskilled variant.
-- Renders templates with context from `metadata.yaml` and directory inspection (presence of `supportive/`, `docs/`, etc.).
+  - `tasks-treatment/<skill-name>/` — treatment variant with rendered Dockerfile, test.sh, task.toml.
+  - `tasks-control/<skill-name>/` — control variant (baseline).
+- Renders templates with context from `metadata.yaml`, directory inspection, and experiment strategy (which determines copy specs per variant).
 
 ### 2.3 Scaffold Tekton Task (`pipeline/tasks/scaffold.yaml`)
 
@@ -214,10 +212,10 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 
 ### 2.4 Definition of Done
 
-- [ ] Both variants produced with correct Dockerfile COPY directives.
-- [ ] Skilled variant includes skills/docs; unskilled excludes them.
-- [ ] `test.sh` and `task.toml` render correctly for both variants.
-- [ ] Unit tests pass for `scaffold.py`.
+- [x] Both variants produced with correct Dockerfile COPY directives via strategy-driven `copy_pairs`.
+- [x] Treatment variant includes strategy-determined dirs (e.g., skills/docs for skill experiments); control excludes them.
+- [x] `test.sh` and `task.toml` render correctly for both variants.
+- [x] Unit tests pass for `scaffold.py`.
 
 ---
 
@@ -225,11 +223,11 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 
 ### 3.1 Build Task (`pipeline/tasks/build-push.yaml`)
 
-**Goal:** Build both skilled and unskilled images and push to registry.
+**Goal:** Build both treatment and control images and push to registry.
 
 - **Build tool constraint:** ADR Decision #5 specifies `docker buildx`. However, OpenShift clusters run CRI-O (not Docker) and do not provide a Docker daemon in pods. Using `docker buildx` inside unprivileged Tekton steps requires a Docker-in-Docker sidecar or socket mount, both of which require privileged access and contradict the security posture. **Buildah** (`buildah bud` + `buildah push`) is the standard rootless, daemonless alternative on OpenShift and runs in `ubi9` base images without privilege escalation. This constraint must be reconciled with ADR Decision #5 before implementation — likely by adopting Buildah for OpenShift.
 - Builds from the scaffolded directories.
-- Tags: `<registry>/<namespace>/<skill-name>:skilled-<commit-sha>` and `<registry>/<namespace>/<skill-name>:unskilled-<commit-sha>`.
+- Tags: `<registry>/<namespace>/<skill-name>:treatment-<commit-sha>` and `<registry>/<namespace>/<skill-name>:control-<commit-sha>`.
 - Push to **internal OpenShift registry** for evaluation (per ADR decision #6).
 - Quay promotion happens in Phase 6 (not here) to avoid double-push.
 
@@ -238,23 +236,23 @@ Exit codes: `0` = pass, `1` = validation failure (with structured JSON error out
 - [ ] Create image pull/push secrets for Quay.io.
 - [ ] Configure OpenShift internal registry access for pipeline ServiceAccount.
 - [ ] Define image retention policy (default: 30 days on Quay for reproducibility).
-- [ ] Add `latest-skilled` / `latest-unskilled` floating tags per skill for the monitoring pipeline. **Note:** Digest-based references remain the source of truth for reproducibility; floating tags are monitoring convenience only and may race under concurrent runs.
+- [ ] Add `latest-treatment` / `latest-control` floating tags per skill for the monitoring pipeline. **Note:** Digest-based references remain the source of truth for reproducibility; floating tags are monitoring convenience only and may race under concurrent runs.
 
 ### 3.3 Image Reference Handoff
 
 The `build-push` Tekton task must emit two **results** for downstream consumption:
 
-- `skilled-image-ref` — full digest-based reference (e.g., `registry/ns/skill@sha256:...`)
-- `unskilled-image-ref` — same format
+- `treatment-image-ref` — full digest-based reference (e.g., `registry/ns/skill@sha256:...`)
+- `control-image-ref` — same format
 
 The `pipeline.yaml` wires these to the `harbor-eval` task:
 
 ```yaml
 params:
-  - name: skilled-image
-    value: "$(tasks.build-push.results.skilled-image-ref)"
-  - name: unskilled-image
-    value: "$(tasks.build-push.results.unskilled-image-ref)"
+  - name: treatment-image
+    value: "$(tasks.build-push.results.treatment-image-ref)"
+  - name: control-image
+    value: "$(tasks.build-push.results.control-image-ref)"
 ```
 
 Use digest-based references (not mutable tags) between tasks to avoid tag mutation between push and eval.
@@ -262,7 +260,7 @@ Use digest-based references (not mutable tags) between tasks to avoid tag mutati
 ### 3.4 Definition of Done
 
 - [ ] Both variants built and pushed to OpenShift internal registry.
-- [ ] `skilled-image-ref` and `unskilled-image-ref` emitted as Tekton results (digest-based).
+- [ ] `treatment-image-ref` and `control-image-ref` emitted as Tekton results (digest-based).
 - [ ] Push secrets functional.
 
 ---
@@ -314,8 +312,8 @@ Additional requirements:
 
 ### 4.4 Trial Execution Configuration
 
-- The `harbor-eval` Tekton task accepts `skilled-image-ref` and `unskilled-image-ref` as **params** wired from Phase 3 results.
-- N = 20 attempts per variant (skilled + unskilled = 40 total sessions).
+- The `harbor-eval` Tekton task accepts `treatment-image-ref` and `control-image-ref` as **params** wired from Phase 3 results.
+- N = configurable attempts per variant (default 20, treatment + control = 40 total sessions).
 - Configure resource requests/limits per trial Pod.
 - LLM endpoint configured via environment variable — backend is agnostic to whether it points to LiteLLM, a direct API, or a self-hosted model.
 - Trial Pod timeout: configurable, with a global evaluation timeout.
@@ -335,7 +333,7 @@ The pipeline ServiceAccount needs (prefer named Secrets for least-privilege wher
 
 ### 4.6 Definition of Done
 
-- [ ] 40 trial Pods complete (20 skilled + 20 unskilled).
+- [ ] Trial Pods complete (N per variant × 2 variants, default 40 total).
 - [ ] Cleanup verified — no stale Pods after evaluation.
 - [ ] Retry behavior validated for transient failures.
 - [ ] Unit tests pass with mocked K8s API.
@@ -350,8 +348,8 @@ The pipeline ServiceAccount needs (prefer named Secrets for least-privilege wher
 **Goal:** Consume Harbor output and produce a statistical report.
 
 Metrics to compute:
-- **Pass rate** per variant (skilled, unskilled).
-- **Skills uplift (gap):** `pass_rate_skilled - pass_rate_unskilled`.
+- **Pass rate** per variant (treatment, control).
+- **Uplift (gap):** `pass_rate_treatment - pass_rate_control`.
 - **Statistical significance:** p-value via Fisher's exact test or chi-squared.
 - **Heatmap generation:** matplotlib/seaborn figures saved as PNG.
 - **LLM judge scores** (when `llm_judge.py` is present): include a qualitative score summary section. Define a schema for `llm_judge.py` output (JSON with `score`, `rationale`) to ensure `analyze.py` can reliably parse it.
@@ -494,7 +492,7 @@ The pipeline and Harbor backend are agnostic — they pass LLM config as environ
 
 ### 8.5 Cost Controls & Observability
 
-A single evaluation run consumes 40 LLM sessions (N=20 x 2 variants). Cost management is a first-class concern:
+A single evaluation run consumes N × 2 LLM sessions (default N=20, 40 total). Cost management is a first-class concern:
 
 - [ ] Configure LiteLLM per-key budget limits (when using Vertex mode).
 - [ ] Implement pre-flight cost estimate: before launching Harbor, estimate token usage based on skill complexity and configured N. Log the estimate to the run summary to flag potential runaway cost before spend happens.

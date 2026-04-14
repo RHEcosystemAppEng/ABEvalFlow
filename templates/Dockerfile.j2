@@ -16,5 +16,6 @@ COPY supportive/ /workspace/supportive/
 {% if has_scripts %}
 COPY scripts/ /workspace/scripts/
 {% endif %}
-
-# Unskilled variant: no skills/ or docs/ — agent works without skill guidance
+{% for src, dest in copy_pairs %}
+COPY {{ src }}/ {{ dest }}/
+{% endfor %}

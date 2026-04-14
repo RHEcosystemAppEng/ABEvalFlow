@@ -5,8 +5,8 @@ metadata:
   namespace: ab-eval-flow
 spec:
   description: >-
-    Generates skilled and unskilled Harbor task directories from a validated
-    skill submission. Produces two output directories under the workspace for
+    Generates treatment and control Harbor task directories from a validated
+    submission. Produces two output directories under the workspace for
     downstream build tasks.
   params:
     - name: skill-dir
@@ -27,10 +27,10 @@ spec:
     - name: source
       description: Workspace containing the cloned submissions repository
   results:
-    - name: skilled-task-dir
-      description: Path to the scaffolded skilled task directory
-    - name: unskilled-task-dir
-      description: Path to the scaffolded unskilled task directory
+    - name: treatment-task-dir
+      description: Path to the scaffolded treatment task directory
+    - name: control-task-dir
+      description: Path to the scaffolded control task directory
   steps:
     - name: clone-pipeline-repo
       image: registry.access.redhat.com/ubi9/python-311:latest
@@ -56,17 +56,17 @@ spec:
         OUTPUT_DIR="$(workspaces.source.path)"
 
         cd "$PIPELINE_DIR"
-        pip install --quiet --no-cache-dir jinja2 pyyaml
+        pip install --quiet --no-cache-dir jinja2 pyyaml pydantic
 
         python scripts/scaffold.py "$SUBMISSION_DIR" "$OUTPUT_DIR"
 
-        SKILLED_DIR="$OUTPUT_DIR/tasks/$(params.skill-name)"
-        UNSKILLED_DIR="$OUTPUT_DIR/tasks-no-skills/$(params.skill-name)"
+        TREATMENT_DIR="$OUTPUT_DIR/tasks-treatment/$(params.skill-name)"
+        CONTROL_DIR="$OUTPUT_DIR/tasks-control/$(params.skill-name)"
 
-        echo -n "$SKILLED_DIR" > "$(results.skilled-task-dir.path)"
-        echo -n "$UNSKILLED_DIR" > "$(results.unskilled-task-dir.path)"
+        echo -n "$TREATMENT_DIR" > "$(results.treatment-task-dir.path)"
+        echo -n "$CONTROL_DIR" > "$(results.control-task-dir.path)"
 
-        echo "Skilled dir:   $SKILLED_DIR"
-        echo "Unskilled dir: $UNSKILLED_DIR"
-        ls -la "$SKILLED_DIR"
-        ls -la "$UNSKILLED_DIR"
+        echo "Treatment dir: $TREATMENT_DIR"
+        echo "Control dir:   $CONTROL_DIR"
+        ls -la "$TREATMENT_DIR"
+        ls -la "$CONTROL_DIR"
