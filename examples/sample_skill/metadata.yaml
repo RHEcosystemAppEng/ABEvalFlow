@@ -1,0 +1,7 @@
+name: sample-skill
+description: A minimal sample skill for demonstrating the submission contract
+persona: rh-developer
+version: "0.1.0"
+tags:
+  - sample
+  - demo
