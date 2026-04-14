@@ -181,7 +181,7 @@ Key changes:
 - Replace `SKILLED_COPY_DIRS` / `UNSKILLED_COPY_DIRS` constants with strategy-driven `CopySpec` lists
 - Rename output dirs: `tasks/<name>/` → `tasks-treatment/<name>/`, `tasks-no-skills/<name>/` → `tasks-control/<name>/`
 - `_build_template_context` populates `copy_pairs` (from `CopySpec`) instead of individual `has_*` booleans
-- `scaffold_submission()` returns `(control_dir, treatment_dir)` instead of `(skilled_dir, unskilled_dir)`
+- `scaffold_submission()` returns `(treatment_dir, control_dir)` instead of `(skilled_dir, unskilled_dir)`
 - Accept `ExperimentConfig` (from parsed metadata) and delegate to strategy
 - Common dirs (`tests/`, `supportive/`, `scripts/`) are always copied for both variants; the strategy only controls the treatment-specific dirs
 
@@ -331,7 +331,7 @@ Each commit is a self-contained, testable unit. TDD approach: write tests first 
 - [ ] Replace `SKILLED_COPY_DIRS` / `UNSKILLED_COPY_DIRS` constants with strategy-driven `CopySpec` lists
 - [ ] Rename output dirs: `tasks/<name>/` → `tasks-treatment/<name>/`, `tasks-no-skills/<name>/` → `tasks-control/<name>/`
 - [ ] `_build_template_context` populates `copy_pairs` from `CopySpec` instead of `has_*` booleans
-- [ ] `scaffold_submission()` returns `(control_dir, treatment_dir)` instead of `(skilled_dir, unskilled_dir)`
+- [ ] `scaffold_submission()` returns `(treatment_dir, control_dir)` instead of `(skilled_dir, unskilled_dir)`
 - [ ] Accept `ExperimentConfig` from parsed metadata, delegate to strategy
 - [ ] Common dirs (`tests/`, `supportive/`, `scripts/`) always copied for both variants
 - [ ] Update all test references: `skilled` → `treatment`, `unskilled` → `control`

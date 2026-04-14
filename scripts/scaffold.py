@@ -56,7 +56,6 @@ def _build_template_context(
         "tags": tags,
         "has_supportive": (submission_dir / "supportive").is_dir(),
         "has_scripts": (submission_dir / "scripts").is_dir(),
-        "has_docs": (submission_dir / "docs").is_dir(),
         "has_llm_judge": has_llm_judge,
         # These were formerly ad-hoc dict reads from raw metadata; they are
         # not SubmissionMetadata fields (extra="forbid" rejects them), so the
