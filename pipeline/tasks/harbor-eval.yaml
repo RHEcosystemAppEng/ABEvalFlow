@@ -6,10 +6,11 @@ metadata:
 spec:
   description: >-
     Runs A/B evaluation using Harbor on OpenShift. Installs Harbor from the
-    fork repo, generates a job config from submission metadata, and executes
-    treatment + control trials. Supports two modes: prebuilt (uses digest-based
-    image refs from the build-push task) and local-build (Harbor builds from
-    each task's Dockerfile).
+    fork repo, generates per-variant job configs from submission metadata,
+    and executes treatment and control as separate Harbor jobs. Each variant
+    gets its own results directory for clean trial attribution. Supports two
+    modes: prebuilt (uses digest-based image refs from the build-push task)
+    and local-build (Harbor builds from each task's Dockerfile).
   params:
     - name: submission-dir
       type: string
@@ -39,11 +40,14 @@ spec:
         'local-build' lets Harbor build from each task's Dockerfile.
     - name: harbor-fork-url
       type: string
-      default: "https://github.com/GuyZivRH/skills_eval_corrections.git"
+      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
       default: "main"
+      # TODO: pin to a specific SHA once the fork stabilises — "main" means
+      # each TaskRun pulls whatever is current, risking breakage from
+      # upstream changes.
       description: Branch or SHA of the Harbor fork to install
     - name: pipeline-repo-url
       type: string
@@ -61,31 +65,25 @@ spec:
       description: Treatment variant pass rate as a decimal string (e.g. "0.85")
     - name: control-pass-rate
       description: Control variant pass rate as a decimal string (e.g. "0.60")
-    - name: jobs-dir
-      description: Path to the Harbor jobs output directory
+    - name: results-dir
+      description: Path to the base results directory containing treatment/ and control/ subdirs
   steps:
-    - name: install-harbor
-      image: registry.access.redhat.com/ubi9/python-311:latest
+    - name: run-evaluation
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
-        echo "Installing Harbor from $(params.harbor-fork-url) @ $(params.harbor-fork-revision)"
+        # --- 1. Install Harbor from fork ---
+        echo "=== Installing Harbor from $(params.harbor-fork-url) @ $(params.harbor-fork-revision) ==="
         INSTALL_START=$(date +%s)
-
         pip install --quiet --no-cache-dir \
           "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)"
-
         INSTALL_END=$(date +%s)
         echo "Harbor installed in $((INSTALL_END - INSTALL_START))s"
         harbor --version
 
-    - name: generate-config
-      image: registry.access.redhat.com/ubi9/python-311:latest
-      script: |
-        #!/usr/bin/env bash
-        set -euo pipefail
-
+        # --- 2. Clone pipeline repo and generate per-variant configs ---
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         if [ -d "$PIPELINE_DIR" ]; then
           echo "Pipeline repo already cloned, skipping"
@@ -95,7 +93,8 @@ spec:
         fi
 
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
-        JOBS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        CONFIG_DIR="$(workspaces.source.path)/_eval-configs"
 
         cd "$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml
@@ -104,9 +103,9 @@ spec:
           --submission-dir "$SUBMISSION_PATH"
           --treatment-task-dir "$(params.treatment-task-dir)"
           --control-task-dir "$(params.control-task-dir)"
-          --output /tmp/eval-config.yaml
+          --output-dir "$CONFIG_DIR"
           --eval-mode "$(params.eval-mode)"
-          --jobs-dir "$JOBS_DIR"
+          --results-base-dir "$RESULTS_DIR"
         )
 
         if [ "$(params.eval-mode)" = "prebuilt" ]; then
@@ -118,54 +117,46 @@ spec:
 
         python scripts/generate_eval_config.py "${ARGS[@]}"
 
-        echo "--- Generated config ---"
-        cat /tmp/eval-config.yaml
+        echo "=== Treatment config ==="
+        cat "$CONFIG_DIR/treatment-config.yaml"
+        echo "=== Control config ==="
+        cat "$CONFIG_DIR/control-config.yaml"
 
-    - name: run-evaluation
-      image: registry.access.redhat.com/ubi9/python-311:latest
-      script: |
-        #!/usr/bin/env bash
-        set -euo pipefail
-
-        JOBS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
-
-        echo "Starting Harbor evaluation (mode=$(params.eval-mode))"
+        # --- 3. Run treatment evaluation ---
+        echo "=== Running treatment evaluation ==="
         EVAL_START=$(date +%s)
+        harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
+        EVAL_MID=$(date +%s)
+        echo "Treatment completed in $((EVAL_MID - EVAL_START))s"
 
-        harbor run -c /tmp/eval-config.yaml --quiet -y
-
+        # --- 4. Run control evaluation ---
+        echo "=== Running control evaluation ==="
+        harbor run -c "$CONFIG_DIR/control-config.yaml" -y
         EVAL_END=$(date +%s)
-        echo "Evaluation completed in $((EVAL_END - EVAL_START))s"
+        echo "Control completed in $((EVAL_END - EVAL_MID))s"
+        echo "Total evaluation time: $((EVAL_END - EVAL_START))s"
 
-        echo -n "$JOBS_DIR" > "$(results.jobs-dir.path)"
+        # --- 5. Parse results ---
+        echo -n "$RESULTS_DIR" > "$(results.results-dir.path)"
 
-        # Parse results: count pass/fail per variant from result.json files.
-        # Harbor writes one directory per trial; each contains result.json
-        # with verifier_result.reward (1.0 = pass, 0.0 = fail).
-        python - "$JOBS_DIR" "$(params.submission-name)" \
+        python - "$RESULTS_DIR" \
           "$(results.treatment-pass-rate.path)" \
           "$(results.control-pass-rate.path)" <<'PARSE_SCRIPT'
         import json
         import sys
         from pathlib import Path
 
-        jobs_dir = Path(sys.argv[1])
-        submission_name = sys.argv[2]
-        treatment_result_path = sys.argv[3]
-        control_result_path = sys.argv[4]
+        results_dir = Path(sys.argv[1])
+        treatment_result_path = sys.argv[2]
+        control_result_path = sys.argv[3]
 
-        def compute_pass_rate(job_dir: Path) -> str:
-            """Scan trial directories and compute pass rate from result.json files."""
-            if not job_dir.is_dir():
+        def compute_pass_rate(variant_dir: Path) -> str:
+            """Scan all trial result.json files under a variant's jobs directory."""
+            if not variant_dir.is_dir():
                 return "0.0"
             total = 0
             passed = 0
-            for trial_dir in sorted(job_dir.iterdir()):
-                if not trial_dir.is_dir():
-                    continue
-                result_file = trial_dir / "result.json"
-                if not result_file.is_file():
-                    continue
+            for result_file in sorted(variant_dir.rglob("result.json")):
                 try:
                     data = json.loads(result_file.read_text())
                     vr = data.get("verifier_result", {})
@@ -179,59 +170,14 @@ spec:
                 return "0.0"
             return f"{passed / total:.4f}"
 
-        # Find the job directory — Harbor creates a timestamped subdir.
-        # Scan for trial dirs that match each variant by task directory name.
-        # Trial dir names follow the pattern: <task-name>__<shortuuid>
-        treatment_total = 0
-        treatment_passed = 0
-        control_total = 0
-        control_passed = 0
-
-        # Harbor writes to jobs_dir/<job_name>/ — find the most recent job
-        job_subdirs = sorted(
-            [d for d in jobs_dir.iterdir() if d.is_dir()],
-            key=lambda d: d.stat().st_mtime,
-            reverse=True,
-        ) if jobs_dir.is_dir() else []
-
-        if job_subdirs:
-            job_dir = job_subdirs[0]
-            for trial_dir in sorted(job_dir.iterdir()):
-                if not trial_dir.is_dir():
-                    continue
-                result_file = trial_dir / "result.json"
-                if not result_file.is_file():
-                    continue
-                try:
-                    data = json.loads(result_file.read_text())
-                    vr = data.get("verifier_result", {})
-                    reward = vr.get("reward")
-                    is_pass = reward is not None and float(reward) > 0.0
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    is_pass = False
-
-                trial_name = trial_dir.name
-                if "tasks-treatment" in trial_name or trial_name.startswith(submission_name):
-                    treatment_total += 1
-                    if is_pass:
-                        treatment_passed += 1
-                elif "tasks-control" in trial_name:
-                    control_total += 1
-                    if is_pass:
-                        control_passed += 1
-                else:
-                    treatment_total += 1
-                    if is_pass:
-                        treatment_passed += 1
-
-        t_rate = f"{treatment_passed / treatment_total:.4f}" if treatment_total > 0 else "0.0"
-        c_rate = f"{control_passed / control_total:.4f}" if control_total > 0 else "0.0"
+        t_rate = compute_pass_rate(results_dir / "treatment")
+        c_rate = compute_pass_rate(results_dir / "control")
 
         with open(treatment_result_path, "w") as f:
             f.write(t_rate)
         with open(control_result_path, "w") as f:
             f.write(c_rate)
 
-        print(f"Treatment: {treatment_passed}/{treatment_total} = {t_rate}")
-        print(f"Control:   {control_passed}/{control_total} = {c_rate}")
+        print(f"Treatment pass rate: {t_rate}")
+        print(f"Control pass rate:   {c_rate}")
         PARSE_SCRIPT

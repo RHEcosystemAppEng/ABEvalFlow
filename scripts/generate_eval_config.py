@@ -1,17 +1,30 @@
-"""Generate a Harbor job config YAML for A/B evaluation.
+"""Generate per-variant Harbor job configs for A/B evaluation.
 
-Reads metadata.yaml from the submission directory and produces a config
-file that can be passed to ``harbor run -c <config.yaml>``.
+Reads metadata.yaml from the submission directory and produces two config
+files (one per variant) that can be passed to ``harbor run -c <config.yaml>``.
+
+Each variant runs as a separate Harbor job with its own jobs directory,
+producing a clean result layout::
+
+    <results-base-dir>/
+        treatment/
+            <job-name>/
+                <trial-1>__<uuid>/result.json
+                ...
+        control/
+            <job-name>/
+                <trial-1>__<uuid>/result.json
+                ...
 
 Usage:
-    python scripts/generate_eval_config.py \
-        --submission-dir /workspace/submissions/my-submission \
-        --treatment-task-dir /workspace/tasks-treatment/my-submission \
-        --control-task-dir /workspace/tasks-control/my-submission \
-        --eval-mode prebuilt \
-        --treatment-image-ref registry/ns/img@sha256:abc \
-        --control-image-ref registry/ns/img@sha256:def \
-        --output /tmp/eval-config.yaml
+    python scripts/generate_eval_config.py \\
+        --submission-dir /workspace/submissions/my-submission \\
+        --treatment-task-dir /workspace/tasks-treatment/my-submission \\
+        --control-task-dir /workspace/tasks-control/my-submission \\
+        --eval-mode prebuilt \\
+        --treatment-image-ref registry/ns/img@sha256:abc \\
+        --control-image-ref registry/ns/img@sha256:def \\
+        --output-dir /workspace/eval-configs
 """
 
 from __future__ import annotations
@@ -29,6 +42,7 @@ from abevalflow.schemas import SubmissionMetadata
 logger = logging.getLogger(__name__)
 
 EVAL_MODES = ("prebuilt", "local-build")
+VARIANTS = ("treatment", "control")
 
 # Harbor's default agent/verifier/setup timeouts used as reference baselines
 # for computing timeout multipliers from the absolute seconds in metadata.yaml.
@@ -56,22 +70,38 @@ def _timeout_multiplier(actual: float, default: float) -> float:
     return actual / default
 
 
-def build_eval_config(
+def build_variant_config(
     metadata: SubmissionMetadata,
-    treatment_task_dir: str,
-    control_task_dir: str,
+    variant: str,
+    task_dir: str,
     eval_mode: str,
-    jobs_dir: str = "jobs",
-    treatment_image_ref: str = "",
-    control_image_ref: str = "",
+    jobs_dir: str,
+    image_ref: str = "",
 ) -> dict[str, Any]:
-    """Build a dict matching Harbor's JobConfig schema."""
-    treatment_task: dict[str, Any] = {"path": treatment_task_dir}
-    control_task: dict[str, Any] = {"path": control_task_dir}
+    """Build a Harbor JobConfig dict for a single variant.
+
+    Each variant gets its own job so results land in a variant-specific
+    directory and trial classification is unambiguous.
+    """
+    if eval_mode == "prebuilt" and not image_ref:
+        raise ValueError(
+            f"image_ref is required for variant '{variant}' in prebuilt mode"
+        )
+
+    task: dict[str, Any] = {"path": task_dir}
+
+    env_block: dict[str, Any] = {
+        "type": "openshift",
+        "delete": True,
+        "override_cpus": metadata.cpus,
+        "override_memory_mb": metadata.memory_mb,
+        "override_storage_mb": metadata.storage_mb,
+    }
 
     if eval_mode == "prebuilt":
-        treatment_task["environment_kwargs"] = {"image_ref": treatment_image_ref}
-        control_task["environment_kwargs"] = {"image_ref": control_image_ref}
+        env_block["kwargs"] = {"image_ref": image_ref}
+    else:
+        env_block["force_build"] = True
 
     agent_mult = _timeout_multiplier(
         metadata.agent_timeout_sec, _HARBOR_DEFAULT_AGENT_TIMEOUT
@@ -86,8 +116,12 @@ def build_eval_config(
         metadata.build_timeout_sec, _HARBOR_DEFAULT_BUILD_TIMEOUT
     )
 
+    # n_concurrent_trials=4 is Harbor's default; kept explicit so operators
+    # can tune it per-cluster via a future CLI param or metadata field.
+    # agents=[{}] inherits Harbor's default agent (oracle agent); the
+    # pipeline will wire agent_name/model via params in a future iteration.
     config: dict[str, Any] = {
-        "job_name": f"{metadata.name}-eval",
+        "job_name": f"{metadata.name}-{variant}",
         "jobs_dir": jobs_dir,
         "n_attempts": metadata.experiment.n_trials,
         "timeout_multiplier": 1.0,
@@ -96,56 +130,58 @@ def build_eval_config(
         "agent_setup_timeout_multiplier": setup_mult,
         "environment_build_timeout_multiplier": build_mult,
         "n_concurrent_trials": 4,
-        "environment": {
-            "type": "openshift",
-            "delete": True,
-            "override_cpus": metadata.cpus,
-            "override_memory_mb": metadata.memory_mb,
-            "override_storage_mb": metadata.storage_mb,
-        },
+        "environment": env_block,
         "agents": [{}],
-        "tasks": [treatment_task, control_task],
+        "tasks": [task],
     }
-
-    if eval_mode == "local-build":
-        config["environment"]["force_build"] = True
 
     return config
 
 
-def generate_eval_config(
+def generate_eval_configs(
     submission_dir: Path,
     treatment_task_dir: str,
     control_task_dir: str,
-    output: Path,
+    output_dir: Path,
     eval_mode: str,
+    results_base_dir: str,
     treatment_image_ref: str = "",
     control_image_ref: str = "",
-    jobs_dir: str = "jobs",
-) -> dict[str, Any]:
-    """End-to-end: load metadata, build config, write YAML, return the dict."""
+) -> dict[str, dict[str, Any]]:
+    """Generate per-variant Harbor configs, write YAML files, return both."""
     metadata = load_metadata(submission_dir)
-    config = build_eval_config(
-        metadata=metadata,
-        treatment_task_dir=treatment_task_dir,
-        control_task_dir=control_task_dir,
-        eval_mode=eval_mode,
-        jobs_dir=jobs_dir,
-        treatment_image_ref=treatment_image_ref,
-        control_image_ref=control_image_ref,
-    )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-    logger.info("Wrote eval config to %s", output)
-    return config
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    variant_args = {
+        "treatment": (treatment_task_dir, treatment_image_ref),
+        "control": (control_task_dir, control_image_ref),
+    }
+
+    configs: dict[str, dict[str, Any]] = {}
+    for variant, (task_dir, img_ref) in variant_args.items():
+        jobs_dir = f"{results_base_dir}/{variant}"
+        config = build_variant_config(
+            metadata=metadata,
+            variant=variant,
+            task_dir=task_dir,
+            eval_mode=eval_mode,
+            jobs_dir=jobs_dir,
+            image_ref=img_ref,
+        )
+        out_path = output_dir / f"{variant}-config.yaml"
+        with out_path.open("w") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        logger.info("Wrote %s config to %s", variant, out_path)
+        configs[variant] = config
+
+    return configs
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     parser = argparse.ArgumentParser(
-        description="Generate a Harbor eval config from submission metadata",
+        description="Generate per-variant Harbor eval configs from submission metadata",
     )
     parser.add_argument(
         "--submission-dir",
@@ -164,10 +200,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to the scaffolded control task directory",
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         type=Path,
         required=True,
-        help="Path to write the generated config YAML",
+        help="Directory to write the per-variant config YAML files",
     )
     parser.add_argument(
         "--eval-mode",
@@ -186,9 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Digest-based image ref for control variant (required for prebuilt mode)",
     )
     parser.add_argument(
-        "--jobs-dir",
-        default="jobs",
-        help="Directory where Harbor writes job results (default: jobs)",
+        "--results-base-dir",
+        default="eval-results",
+        help="Base directory for Harbor job results (default: eval-results)",
     )
 
     args = parser.parse_args(argv)
@@ -204,15 +240,15 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Submission directory does not exist: %s", args.submission_dir)
         return 1
 
-    generate_eval_config(
+    generate_eval_configs(
         submission_dir=args.submission_dir,
         treatment_task_dir=args.treatment_task_dir,
         control_task_dir=args.control_task_dir,
-        output=args.output,
+        output_dir=args.output_dir,
         eval_mode=args.eval_mode,
+        results_base_dir=args.results_base_dir,
         treatment_image_ref=args.treatment_image_ref,
         control_image_ref=args.control_image_ref,
-        jobs_dir=args.jobs_dir,
     )
     return 0
 

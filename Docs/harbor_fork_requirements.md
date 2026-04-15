@@ -1,19 +1,23 @@
 # Harbor Fork — Required Changes for ABEvalFlow Integration
 
-> **Target repo:** [RHEcosystemAppEng/skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections)
+> **Target repo:** [GuyZivRH/skills_eval_corrections](https://github.com/GuyZivRH/skills_eval_corrections)
 > **Open PR:** [#1 — feat: add OpenShift environment backend](https://github.com/RHEcosystemAppEng/skills_eval_corrections/pull/1)
 > **ABEvalFlow branch:** `APPENG-4906/harbor-eval-task`
 
 ---
 
-## 1. Per-Task `environment_kwargs` Support
+## 1. Per-Task `environment_kwargs` Support (nice-to-have)
 
-### Problem
+### Context
 
-ABEvalFlow evaluates two variants (treatment and control) with different pre-built
-images in a single Harbor job. The current `--ek image_ref=<ref>` mechanism sets the
-image ref globally on `EnvironmentConfig.kwargs`, so all tasks in a job share the
-same image. This prevents using a single sweep config for both variants.
+ABEvalFlow currently runs each variant (treatment/control) as a **separate Harbor
+job**, each with its own config file and `jobs_dir`. This avoids the need for
+per-task environment kwargs — the global `environment.kwargs.image_ref` works
+because each job has a single task.
+
+However, if we later want to run both variants in a **single Harbor job** (e.g.,
+for sweep-based workflows or simplified config), per-task `environment_kwargs`
+would be needed.
 
 ### Proposed Change
 
@@ -33,7 +37,7 @@ class TaskConfig(BaseModel):
 
 ### Merge Logic
 
-When the `Job` creates `TrialConfig` instances from `JobConfig`, it should merge
+When the `Job` creates `TrialConfig` instances from `JobConfig`, merge
 per-task kwargs into the trial's environment config:
 
 ```python
@@ -44,9 +48,7 @@ trial_env_config.kwargs = {**trial_env_config.kwargs, **task.environment_kwargs}
 
 Task-level kwargs override global kwargs for the same key (task wins).
 
-### Result
-
-A single sweep config can specify different `image_ref` values per variant:
+### Example
 
 ```yaml
 job_name: my-submission-eval

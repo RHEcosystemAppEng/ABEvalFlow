@@ -19,8 +19,14 @@ metadata:
   namespace: ab-eval-flow
 rules:
   - apiGroups: [""]
-    resources: [pods, pods/exec, pods/log]
+    resources: [pods]
     verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
   - apiGroups: [""]
     resources: [events]
     verbs: [get, list]
