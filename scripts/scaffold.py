@@ -4,8 +4,8 @@ Usage:
     python scripts/scaffold.py <submission-dir> <output-dir>
 
 Produces two directories under <output-dir>:
-    tasks-treatment/<skill-name>/  -- treatment variant
-    tasks-control/<skill-name>/    -- control variant (baseline)
+    tasks-treatment/<submission-name>/  -- treatment variant
+    tasks-control/<submission-name>/    -- control variant (baseline)
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def _build_template_context(
     has_llm_judge = (submission_dir / "tests" / "llm_judge.py").is_file()
 
     base_context = {
-        "skill_name": metadata.name,
+        "submission_name": metadata.name,
         "persona": metadata.persona or "general",
         "description": metadata.description or "",
         "version": metadata.version,

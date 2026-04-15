@@ -1,7 +1,7 @@
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerBinding
 metadata:
-  name: skills-submission-binding
+  name: submission-binding
   namespace: ab-eval-flow
 spec:
   params:
@@ -11,5 +11,5 @@ spec:
       value: $(body.after)
     - name: repo-name
       value: $(body.repository.full_name)
-    - name: skill-dir
-      value: $(extensions.skill_directory)
+    - name: submission-dir
+      value: $(extensions.submission_directory)

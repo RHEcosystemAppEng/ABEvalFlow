@@ -5,13 +5,13 @@ metadata:
   namespace: ab-eval-flow
 spec:
   description: >-
-    Validates a skill submission directory against the submission contract.
+    Validates a submission directory against the submission contract.
     Checks instruction.md, SKILL.md, test compilation, metadata schema, and
     supportive/ size limits. Outputs structured JSON results.
   params:
-    - name: skill-dir
+    - name: submission-dir
       type: string
-      description: Path to the skill directory within the workspace (e.g. my-skill)
+      description: Path to the submission directory within the workspace (e.g. my-submission)
     - name: max-workspace-mb
       type: string
       default: "500"
@@ -30,8 +30,8 @@ spec:
   results:
     - name: validation-result
       description: JSON object with valid (bool) and errors (array)
-    - name: skill-name
-      description: The validated skill name (from metadata.yaml)
+    - name: submission-name
+      description: The validated submission name (from metadata.yaml)
   steps:
     - name: check-workspace-size
       image: registry.access.redhat.com/ubi9/python-311:latest
@@ -67,12 +67,12 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
-        SKILL_PATH="$(workspaces.source.path)/submissions/$(params.skill-dir)"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
 
         cd "$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml
 
-        python scripts/validate.py "$SKILL_PATH" \
+        python scripts/validate.py "$SUBMISSION_PATH" \
           | tee /tmp/validation-output.json
 
         cat /tmp/validation-output.json | tr -d '\n' \
@@ -84,8 +84,8 @@ spec:
         import yaml, sys
         meta = yaml.safe_load(open(sys.argv[1]))
         print(meta['name'], end='')
-        " "$SKILL_PATH/metadata.yaml" > "$(results.skill-name.path)"
+        " "$SUBMISSION_PATH/metadata.yaml" > "$(results.submission-name.path)"
         else
-          echo "INVALID" > "$(results.skill-name.path)"
+          echo "INVALID" > "$(results.submission-name.path)"
           exit 1
         fi

@@ -9,12 +9,12 @@ spec:
     submission. Produces two output directories under the workspace for
     downstream build tasks.
   params:
-    - name: skill-dir
+    - name: submission-dir
       type: string
-      description: Path to the skill directory within the workspace (e.g. my-skill)
-    - name: skill-name
+      description: Path to the submission directory within the workspace (e.g. my-submission)
+    - name: submission-name
       type: string
-      description: Validated skill name (from validate-submission results)
+      description: Validated submission name (from validate-submission results)
     - name: pipeline-repo-url
       type: string
       default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
@@ -52,7 +52,7 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
-        SUBMISSION_DIR="$(workspaces.source.path)/submissions/$(params.skill-dir)"
+        SUBMISSION_DIR="$(workspaces.source.path)/submissions/$(params.submission-dir)"
         OUTPUT_DIR="$(workspaces.source.path)"
 
         cd "$PIPELINE_DIR"
@@ -60,8 +60,8 @@ spec:
 
         python scripts/scaffold.py "$SUBMISSION_DIR" "$OUTPUT_DIR"
 
-        TREATMENT_DIR="$OUTPUT_DIR/tasks-treatment/$(params.skill-name)"
-        CONTROL_DIR="$OUTPUT_DIR/tasks-control/$(params.skill-name)"
+        TREATMENT_DIR="$OUTPUT_DIR/tasks-treatment/$(params.submission-name)"
+        CONTROL_DIR="$OUTPUT_DIR/tasks-control/$(params.submission-name)"
 
         echo -n "$TREATMENT_DIR" > "$(results.treatment-task-dir.path)"
         echo -n "$CONTROL_DIR" > "$(results.control-task-dir.path)"
