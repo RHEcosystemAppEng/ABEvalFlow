@@ -371,10 +371,10 @@ Output: Markdown (or HTML) report with:
 
 ### 5.3 Definition of Done
 
-- [ ] Report includes uplift + p-value + artifact links + run provenance.
-- [ ] Heatmaps generated and embedded.
-- [ ] LLM judge scores aggregated when present.
-- [ ] Unit tests pass for `analyze.py`.
+- [x] Report includes uplift + p-value + run provenance (artifact links deferred to Phase 6 publish step).
+- [ ] Heatmaps generated and embedded (deferred — not applicable to single A/B comparison).
+- [ ] LLM judge scores aggregated when present (deferred — `llm_judge.py` not yet implemented).
+- [x] Unit tests pass for `analyze.py`.
 
 ---
 
