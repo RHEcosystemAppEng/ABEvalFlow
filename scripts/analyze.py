@@ -171,6 +171,14 @@ def build_analysis(
     t_summary = compute_variant_summary(treatment_trials)
     c_summary = compute_variant_summary(control_trials)
 
+    _MIN_TRIALS_FOR_RELIABLE_STATS = 15
+    for label, vs in [("treatment", t_summary), ("control", c_summary)]:
+        if 0 < vs.n_trials < _MIN_TRIALS_FOR_RELIABLE_STATS:
+            logger.warning(
+                "%s has only %d trials (< %d) — statistical tests may be unreliable",
+                label, vs.n_trials, _MIN_TRIALS_FOR_RELIABLE_STATS,
+            )
+
     uplift = t_summary.pass_rate - c_summary.pass_rate
     mean_gap = None
     if t_summary.mean_reward is not None and c_summary.mean_reward is not None:

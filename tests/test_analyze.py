@@ -328,6 +328,12 @@ class TestBuildAnalysis:
         assert gap is not None
         assert gap > 0
 
+    def test_small_sample_warning(self, results_dir: Path, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            build_analysis(results_dir, "my-submission")
+        assert any("only 5 trials" in msg for msg in caplog.messages)
+
 
 # ---------------------------------------------------------------------------
 # TestRenderMarkdown
