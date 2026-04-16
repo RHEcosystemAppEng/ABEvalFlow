@@ -1,7 +1,7 @@
 # Harbor OpenShift Backend — Handoff Document
 
 > **Jira:** APPENG-4906 (Phase 4 — Harbor OpenShift Backend)
-> **Target repo:** [GuyZivRH/skills_eval_corrections](https://github.com/GuyZivRH/skills_eval_corrections) (Harbor fork)
+> **Target repo:** [RHEcosystemAppEng/skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) (Harbor fork)
 > **Full spec:** See [implementation_plan.md](./implementation_plan.md), Phase 4 (lines 270–343)
 
 ---
