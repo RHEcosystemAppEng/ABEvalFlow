@@ -7,6 +7,8 @@ import os
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import OperationalError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from abevalflow.db.models import Base
 
@@ -35,8 +37,14 @@ def get_engine(url: str | None = None) -> Engine:
     return engine
 
 
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type(OperationalError),
+    reraise=True,
+)
 def init_db(engine: Engine) -> None:
-    """Create all tables (idempotent)."""
+    """Create all tables (idempotent). Retries on connection failure."""
     Base.metadata.create_all(engine)
     logger.info("Database tables ensured")
 

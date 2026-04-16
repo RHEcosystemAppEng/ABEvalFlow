@@ -147,14 +147,19 @@ class TestCmdCompare:
 
 
 class TestMainCLI:
-    def test_list_via_main(self, seeded_factory, monkeypatch, capsys):
+    def test_list_via_main(self, tmp_path, monkeypatch, capsys):
+        db_url = f"sqlite:///{tmp_path / 'query.db'}"
+        engine = create_engine(db_url, connect_args={"check_same_thread": False})
+        Base.metadata.create_all(engine)
         monkeypatch.setattr(
             "sys.argv",
-            ["query_results.py", "--database-url", "sqlite://", "list"],
+            ["query_results.py", "--database-url", db_url, "list"],
         )
         from scripts.query_results import main
 
         main()
+        out = capsys.readouterr().out
+        assert "No evaluation runs found" in out
 
     def test_missing_command(self, monkeypatch):
         monkeypatch.setattr(

@@ -22,9 +22,12 @@ import logging
 import sys
 from pathlib import Path
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
 from abevalflow.db.engine import get_engine, init_db, make_session
 from abevalflow.db.models import EvaluationRun, Trial
-from abevalflow.db.observer import _discover_observers, notify_observers
+from abevalflow.db.observer import discover_observers, notify_observers
 from abevalflow.report import AnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -94,7 +97,7 @@ def map_trials(result: AnalysisResult, run: EvaluationRun) -> list[Trial]:
 
 def store(
     report_dir: Path,
-    database_url: str,
+    database_url: str | None = None,
     run_id: str | None = None,
 ) -> bool:
     """Load, validate, and persist a report. Returns True on success."""
@@ -118,8 +121,6 @@ def store(
     session_factory = make_session(engine)
 
     with session_factory() as session:
-        from sqlalchemy import select
-
         existing = session.execute(
             select(EvaluationRun).where(
                 EvaluationRun.pipeline_run_id == effective_run_id
@@ -139,7 +140,15 @@ def store(
 
         session.add(ev_run)
         session.add_all(trials)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            logger.warning(
+                "Concurrent insert for run %s — treating as idempotent",
+                effective_run_id,
+            )
+            return True
 
         logger.info(
             "Stored: submission=%s run_id=%s trials=%d recommendation=%s",
@@ -149,7 +158,7 @@ def store(
             result.summary.recommendation.value,
         )
 
-        observers = _discover_observers()
+        observers = discover_observers()
         if observers:
             notify_observers(observers, result, ev_run.id)
 

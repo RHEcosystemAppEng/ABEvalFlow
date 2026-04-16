@@ -243,6 +243,8 @@ Update `config/rbac.yaml`: grant pipeline SA read access to `ab-eval-db-credenti
 
 **MVP limitations:** Single replica, no HA, no automated backups. HA/backup hardening is tracked in APPENG-4910 (Infrastructure & Operations).
 
+**Pull secret:** The `registry.redhat.io` PostgreSQL image requires a pull secret on the cluster. Ensure `imagePullSecrets` is configured on the namespace or ServiceAccount.
+
 ---
 
 ## 8. Dependencies

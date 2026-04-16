@@ -35,7 +35,7 @@ class ResultsObserver(Protocol):
         ...
 
 
-def _discover_observers() -> list[ResultsObserver]:
+def discover_observers() -> list[ResultsObserver]:
     """Discover and instantiate observers based on environment variables.
 
     All matching observers are loaded (not first-match). Returns an empty

@@ -14,7 +14,7 @@ from abevalflow.db.engine import get_engine, init_db, make_session
 from abevalflow.db.models import Base, EvaluationRun, Trial
 from abevalflow.db.observer import (
     ResultsObserver,
-    _discover_observers,
+    discover_observers,
     notify_observers,
 )
 from abevalflow.report import (
@@ -303,5 +303,5 @@ class TestObserverProtocol:
     def test_discover_no_env_vars(self, monkeypatch):
         monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
         monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
-        observers = _discover_observers()
+        observers = discover_observers()
         assert observers == []

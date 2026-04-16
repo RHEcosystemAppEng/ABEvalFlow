@@ -16,7 +16,7 @@ import sys
 
 from sqlalchemy import desc, func, select
 
-from abevalflow.db.engine import get_engine, init_db, make_session
+from abevalflow.db.engine import get_engine, make_session
 from abevalflow.db.models import EvaluationRun
 
 logger = logging.getLogger(__name__)
@@ -218,9 +218,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    engine = get_engine(args.database_url)
-    init_db(engine)
-    session_factory = make_session(engine)
+    try:
+        engine = get_engine(args.database_url)
+        session_factory = make_session(engine)
+    except Exception:
+        logger.exception("Failed to connect to database")
+        sys.exit(1)
 
     if args.command == "list":
         cmd_list(session_factory)
