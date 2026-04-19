@@ -182,14 +182,14 @@ def test_greet_empty_string():
 
 ### docs/ (optional)
 
-Reference documentation the agent can consult during trials. Place any
-relevant `.md`, `.txt`, or `.pdf` files here. These are copied into both
-treatment and control containers.
+Reference documentation copied into both treatment and control containers
+for the agent to consult during trials. Place any relevant `.md`, `.txt`,
+or `.pdf` files here.
 
 ### supportive/ (optional)
 
-Mock MCP servers, sample data files, or other supporting resources. Must
-be under 50 MB total.
+Mock MCP servers, sample data files, or other supporting resources.
+Recommended to keep under 50 MB total.
 
 ---
 
@@ -311,7 +311,7 @@ Before submitting, verify:
 - [ ] `instruction.md` exists and clearly describes the task
 - [ ] `tests/test_outputs.py` exists and runs with `pytest` locally
 - [ ] No secrets, passwords, or API keys in any file
-- [ ] `supportive/` folder (if present) is under 50 MB
+- [ ] `supportive/` folder (if present) is under 50 MB (recommended)
 - [ ] Folder name matches the `name` in `metadata.yaml`
 
 ---
@@ -373,3 +373,84 @@ See `Docs/trigger_models_and_experiment_types.md` for details.
 **Q: Who do I contact for help?**
 Reach out to the ABEvalFlow team or open an issue in the
 [ABEvalFlow repository](https://github.com/RHEcosystemAppEng/ABEvalFlow).
+
+---
+
+## Appendix: Operator Reference
+
+This section is for platform operators who deploy and maintain the pipeline
+infrastructure. Submitters can skip this.
+
+### Webhook Configuration
+
+Configure a GitHub webhook on the submissions repository:
+
+| Setting      | Value                                                |
+|--------------|------------------------------------------------------|
+| Payload URL  | `https://<eventlistener-route>/`                     |
+| Content type | `application/json`                                   |
+| Events       | **Just the push event**                              |
+| Secret       | Shared secret (configure in EventListener if needed) |
+
+To find the EventListener route:
+
+```bash
+oc get route -n ab-eval-flow -l eventlistener=skills-submission-listener
+```
+
+### Manual Trigger (for Testing)
+
+#### Option 1: `tkn` CLI
+
+```bash
+tkn pipeline start abevalflow-pipeline \
+  -p repo-url=https://github.com/RHEcosystemAppEng/agentic-collections.git \
+  -p revision=main \
+  -p submission-dir=my-skill \
+  -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
+  -n ab-eval-flow
+```
+
+#### Option 2: PipelineRun YAML
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: abevalflow-manual-
+  namespace: ab-eval-flow
+spec:
+  pipelineRef:
+    name: abevalflow-pipeline
+  params:
+    - name: repo-url
+      value: https://github.com/RHEcosystemAppEng/agentic-collections.git
+    - name: revision
+      value: main
+    - name: submission-dir
+      value: my-skill
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+```
+
+Apply with:
+
+```bash
+oc create -f pipelinerun.yaml -n ab-eval-flow
+```
+
+### Tekton Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Pipeline | `pipeline/pipeline.yaml` | End-to-end pipeline wiring all tasks |
+| EventListener | `pipeline/triggers/event-listener.yaml` | Receives webhooks, filters, extracts submission dir |
+| TriggerBinding | `pipeline/triggers/trigger-binding.yaml` | Maps webhook payload to pipeline params |
+| TriggerTemplate | `pipeline/triggers/trigger-template.yaml` | Creates PipelineRun from params |

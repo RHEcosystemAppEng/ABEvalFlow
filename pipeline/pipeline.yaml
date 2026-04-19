@@ -38,12 +38,18 @@ spec:
       description: Registry namespace / project name
     - name: harbor-fork-url
       type: string
-      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
+      default: "https://github.com/GuyZivRH/skills_eval_corrections.git"
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
       default: "main"
       description: Branch or SHA of the Harbor fork to install
+    - name: eval-mode
+      type: string
+      default: "prebuilt"
+      description: >-
+        Evaluation mode: 'prebuilt' uses digest image refs from build-push;
+        'local-build' lets Harbor build from each task's Dockerfile.
     - name: uplift-threshold
       type: string
       default: "0.0"
@@ -56,6 +62,10 @@ spec:
       description: >-
         Shared PVC across all tasks. Contains the cloned submissions repo,
         scaffolded task dirs, build contexts, evaluation results, and reports.
+
+  timeouts:
+    pipeline: "4h"
+    tasks: "3h"
 
   tasks:
     # ------------------------------------------------------------------
@@ -153,6 +163,8 @@ spec:
           value: $(tasks.build-push.results.treatment-image-ref)
         - name: control-image-ref
           value: $(tasks.build-push.results.control-image-ref)
+        - name: eval-mode
+          value: $(params.eval-mode)
         - name: harbor-fork-url
           value: $(params.harbor-fork-url)
         - name: harbor-fork-revision
