@@ -189,7 +189,7 @@ or `.pdf` files here.
 ### supportive/ (optional)
 
 Mock MCP servers, sample data files, or other supporting resources.
-Recommended to keep under 50 MB total.
+Must be under 50 MB total (enforced by validation).
 
 ---
 
@@ -311,7 +311,7 @@ Before submitting, verify:
 - [ ] `instruction.md` exists and clearly describes the task
 - [ ] `tests/test_outputs.py` exists and runs with `pytest` locally
 - [ ] No secrets, passwords, or API keys in any file
-- [ ] `supportive/` folder (if present) is under 50 MB (recommended)
+- [ ] `supportive/` folder (if present) is under 50 MB
 - [ ] Folder name matches the `name` in `metadata.yaml`
 
 ---
@@ -395,7 +395,7 @@ Configure a GitHub webhook on the submissions repository:
 To find the EventListener route:
 
 ```bash
-oc get route -n ab-eval-flow -l eventlistener=skills-submission-listener
+oc get route -n ab-eval-flow -l eventlistener=submission-listener
 ```
 
 ### Manual Trigger (for Testing)
