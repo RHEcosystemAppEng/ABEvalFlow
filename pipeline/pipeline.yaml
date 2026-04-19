@@ -1,0 +1,232 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: abevalflow-pipeline
+  namespace: ab-eval-flow
+spec:
+  description: >-
+    End-to-end A/B evaluation pipeline for AI skill submissions.
+    Validates the submission, scaffolds treatment/control variants,
+    builds container images, runs Harbor evaluations, analyzes
+    results, and persists them to PostgreSQL.
+  params:
+    - name: repo-url
+      type: string
+      description: Git URL of the submissions repository
+    - name: revision
+      type: string
+      description: Git commit SHA or branch to evaluate
+    - name: submission-dir
+      type: string
+      description: >-
+        Submission directory name under submissions/ (e.g. my-skill)
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
+      description: URL of the ABEvalFlow pipeline repository (scripts and templates)
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+      description: Branch or SHA of the pipeline repo to use for scripts
+    - name: registry-url
+      type: string
+      default: "image-registry.openshift-image-registry.svc:5000"
+      description: Container registry URL for built images
+    - name: registry-namespace
+      type: string
+      default: "ab-eval-flow"
+      description: Registry namespace / project name
+    - name: harbor-fork-url
+      type: string
+      default: "https://github.com/GuyZivRH/skills_eval_corrections.git"
+      description: Harbor fork repository URL
+    - name: harbor-fork-revision
+      type: string
+      default: "main"
+      description: Branch or SHA of the Harbor fork to install
+    - name: eval-mode
+      type: string
+      default: "prebuilt"
+      description: >-
+        Evaluation mode: 'prebuilt' uses digest image refs from build-push;
+        'local-build' lets Harbor build from each task's Dockerfile.
+    - name: uplift-threshold
+      type: string
+      default: "0.0"
+      description: >-
+        Minimum pass-rate uplift (treatment - control) for a 'pass'
+        recommendation. Set to 0.0 to pass whenever treatment >= control.
+
+  workspaces:
+    - name: shared-workspace
+      description: >-
+        Shared PVC across all tasks. Contains the cloned submissions repo,
+        scaffolded task dirs, build contexts, evaluation results, and reports.
+
+  timeouts:
+    pipeline: "4h"
+    tasks: "3h"
+
+  tasks:
+    # ------------------------------------------------------------------
+    # Step 1: Clone submissions repo and validate the submission
+    # ------------------------------------------------------------------
+    - name: clone-repo
+      taskRef:
+        name: git-clone
+        kind: ClusterTask
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+
+    - name: validate
+      runAfter: ["clone-repo"]
+      taskRef:
+        name: validate-submission
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 2: Scaffold treatment and control task directories
+    # ------------------------------------------------------------------
+    - name: scaffold
+      runAfter: ["validate"]
+      taskRef:
+        name: scaffold-submission
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 3: Build and push treatment/control container images
+    # ------------------------------------------------------------------
+    - name: build-push
+      runAfter: ["scaffold"]
+      taskRef:
+        name: build-push-images
+      params:
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: treatment-task-dir
+          value: $(tasks.scaffold.results.treatment-task-dir)
+        - name: control-task-dir
+          value: $(tasks.scaffold.results.control-task-dir)
+        - name: commit-sha
+          value: $(params.revision)
+        - name: registry-url
+          value: $(params.registry-url)
+        - name: registry-namespace
+          value: $(params.registry-namespace)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 4: Run Harbor A/B evaluation (N trials per variant)
+    # ------------------------------------------------------------------
+    - name: harbor-eval
+      runAfter: ["build-push"]
+      taskRef:
+        name: harbor-eval
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: treatment-task-dir
+          value: $(tasks.scaffold.results.treatment-task-dir)
+        - name: control-task-dir
+          value: $(tasks.scaffold.results.control-task-dir)
+        - name: treatment-image-ref
+          value: $(tasks.build-push.results.treatment-image-ref)
+        - name: control-image-ref
+          value: $(tasks.build-push.results.control-image-ref)
+        - name: eval-mode
+          value: $(params.eval-mode)
+        - name: harbor-fork-url
+          value: $(params.harbor-fork-url)
+        - name: harbor-fork-revision
+          value: $(params.harbor-fork-revision)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 5: Analyze results and produce statistical report
+    # ------------------------------------------------------------------
+    - name: analyze
+      runAfter: ["harbor-eval"]
+      taskRef:
+        name: analyze-report
+      params:
+        - name: results-dir
+          value: $(tasks.harbor-eval.results.results-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: commit-sha
+          value: $(params.revision)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: treatment-image-ref
+          value: $(tasks.build-push.results.treatment-image-ref)
+        - name: control-image-ref
+          value: $(tasks.build-push.results.control-image-ref)
+        - name: harbor-fork-revision
+          value: $(params.harbor-fork-revision)
+        - name: uplift-threshold
+          value: $(params.uplift-threshold)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 6: Persist results to PostgreSQL
+    # ------------------------------------------------------------------
+    - name: store-results
+      runAfter: ["analyze"]
+      taskRef:
+        name: store-results
+      params:
+        - name: report-dir
+          value: $(tasks.analyze.results.report-path)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
