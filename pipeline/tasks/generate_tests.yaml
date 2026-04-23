@@ -50,7 +50,7 @@ spec:
       description: JSON array of generated file paths relative to submission dir
   steps:
     - name: clone-pipeline-repo
-      image: registry.access.redhat.com/ubi9/python-311:latest
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -64,7 +64,7 @@ spec:
         echo "Cloned pipeline repo at $(params.pipeline-repo-revision)"
 
     - name: generate
-      image: registry.access.redhat.com/ubi9/python-311:latest
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       env:
         - name: LLM_BASE_URL
           value: "$(params.llm-base-url)"
@@ -87,6 +87,7 @@ spec:
 
         cd "$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml openai
+        export PYTHONPATH="$PIPELINE_DIR"
 
         python scripts/generate_tests.py "$SUBMISSION_PATH" \
           --workspace-dir "$WORKSPACE_DIR" \

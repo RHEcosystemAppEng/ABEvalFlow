@@ -38,7 +38,7 @@ spec:
       description: "true" if the review passed, "false" otherwise
   steps:
     - name: clone-pipeline-repo
-      image: registry.access.redhat.com/ubi9/python-311:latest
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -52,7 +52,7 @@ spec:
         echo "Cloned pipeline repo at $(params.pipeline-repo-revision)"
 
     - name: review
-      image: registry.access.redhat.com/ubi9/python-311:latest
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       env:
         - name: LLM_BASE_URL
           value: "$(params.llm-base-url)"
@@ -72,6 +72,7 @@ spec:
 
         cd "$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml openai
+        export PYTHONPATH="$PIPELINE_DIR"
 
         REVIEW_EXIT=0
         python scripts/ai_review.py "$SUBMISSION_PATH" \

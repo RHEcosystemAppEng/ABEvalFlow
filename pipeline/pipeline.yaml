@@ -351,6 +351,8 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 5: Analyze results and produce statistical report
+    # NOTE: analyze-report Task defined in APPENG-4985 — must be deployed
+    #       to the cluster before this pipeline runs end-to-end.
     # ------------------------------------------------------------------
     - name: analyze
       runAfter: ["harbor-eval"]
@@ -383,6 +385,8 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 6: Persist results to PostgreSQL
+    # NOTE: store-results Task defined in APPENG-4985 — must be deployed
+    #       to the cluster before this pipeline runs end-to-end.
     # ------------------------------------------------------------------
     - name: store-results
       runAfter: ["analyze"]

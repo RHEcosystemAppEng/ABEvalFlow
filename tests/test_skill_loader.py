@@ -131,6 +131,13 @@ class TestPlaceForAgent:
         assert result == expected
         assert (result / "SKILL.md").is_file()
 
+    @patch("abevalflow.skill_loader.shutil.copytree")
+    def test_cursor_mode(self, mock_copy, skill_dir: Path, tmp_path: Path) -> None:
+        result = skill_loader.place_for_agent(skill_dir, tmp_path, "cursor")
+        expected = tmp_path / ".cursor" / "rules" / skill_dir.name
+        assert result == expected
+        mock_copy.assert_called_once()
+
     def test_unknown_agent_returns_same_dir(self, skill_dir: Path, tmp_path: Path) -> None:
         result = skill_loader.place_for_agent(skill_dir, tmp_path, "unknown-agent")
         assert result == skill_dir

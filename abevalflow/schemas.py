@@ -183,9 +183,8 @@ class SubmissionMetadata(BaseModel):
     generation_mode: GenerationMode = Field(
         default=GenerationMode.MANUAL,
         description=(
-            "Whether the submission includes hand-written tests (manual) or "
-            "expects the pipeline to generate instruction/tests from the skill (ai). "
-            "AI mode is not yet implemented; defaults to manual."
+            "'manual' requires submitter-provided instruction.md and tests. "
+            "'ai' generates those files from skills/SKILL.md using an LLM."
         ),
     )
 

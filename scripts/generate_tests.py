@@ -260,8 +260,10 @@ def _analyze_skill(skill_content: str) -> dict:
 
     required_keys = ("novel_aspects", "common_knowledge", "test_focus_areas")
     for key in required_keys:
-        if key not in analysis or not isinstance(analysis[key], list) or not analysis[key]:
-            raise ValueError(f"Skill analysis missing or empty key: {key}")
+        if key not in analysis or not isinstance(analysis[key], list):
+            raise ValueError(f"Skill analysis missing or invalid key: {key}")
+        if not analysis[key]:
+            logger.warning("Skill analysis returned empty list for '%s'; proceeding", key)
 
     logger.info(
         "Step 0: skill analysis — %d novel, %d common, %d focus areas",
@@ -400,11 +402,22 @@ def _generate_via_agent(
         submission_dir=submission_dir,
     )
 
+    # WARNING: Claude's --dangerously-skip-permissions disables safety guardrails.
+    # Only use agent mode with trusted submission sources. Untrusted SKILL.md
+    # content could exploit an unrestricted agent to read secrets or write
+    # arbitrary files. For untrusted submissions, use agent-type=api (default).
     cli_commands: dict[str, list[str]] = {
         "claude": ["claude", "--print", "--dangerously-skip-permissions", "-p", prompt],
         "cursor": ["cursor", "--message", prompt],
         "opencode": ["opencode", "run", prompt],
     }
+
+    if agent_type != "api":
+        logger.warning(
+            "Agent mode '%s' executes with elevated permissions — "
+            "ensure the submission source is trusted",
+            agent_type,
+        )
 
     cmd = cli_commands.get(agent_type)
     if cmd is None:
