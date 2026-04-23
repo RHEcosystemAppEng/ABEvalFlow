@@ -49,25 +49,10 @@ spec:
               configMap:
                 name: cleanup-script
                 defaultMode: 0755
----
-# The cleanup-script ConfigMap should be created from scripts/cleanup.sh
-# to maintain a single source of truth:
+
+# NOTE: The cleanup-script ConfigMap is NOT bundled in this file.
+# Create it from the canonical script before applying this CronJob:
 #
 #   oc create configmap cleanup-script \
 #     --from-file=cleanup.sh=scripts/cleanup.sh \
 #     -n ab-eval-flow --dry-run=client -o yaml | oc apply -f -
-#
-# Alternatively, apply it manually:
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cleanup-script
-  namespace: ab-eval-flow
-  labels:
-    app.kubernetes.io/part-of: abevalflow
-data:
-  cleanup.sh: |
-    #!/usr/bin/env bash
-    echo "ERROR: placeholder — regenerate this ConfigMap from scripts/cleanup.sh:"
-    echo "  oc create configmap cleanup-script --from-file=cleanup.sh=scripts/cleanup.sh -n ab-eval-flow --dry-run=client -o yaml | oc apply -f -"
-    exit 1
