@@ -1,0 +1,141 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: analyze-report
+  namespace: ab-eval-flow
+spec:
+  description: >-
+    Analyzes A/B evaluation results from Harbor and produces JSON + Markdown
+    reports. Computes per-variant pass rates, uplift, and statistical
+    significance (Welch's t-test on continuous reward scores, Fisher's exact
+    test on binary pass/fail counts). Emits a pass/fail recommendation based
+    on a configurable uplift threshold.
+  params:
+    - name: results-dir
+      type: string
+      description: >-
+        Path to the results directory containing treatment/ and control/
+        subdirs (output of harbor-eval task)
+    - name: submission-name
+      type: string
+      description: Validated submission name
+    - name: commit-sha
+      type: string
+      default: ""
+      description: Git commit SHA for provenance
+    - name: pipeline-run-id
+      type: string
+      default: ""
+      description: Tekton PipelineRun name for provenance
+    - name: treatment-image-ref
+      type: string
+      default: ""
+      description: Treatment image digest ref for provenance
+    - name: control-image-ref
+      type: string
+      default: ""
+      description: Control image digest ref for provenance
+    - name: harbor-fork-revision
+      type: string
+      default: ""
+      description: Harbor fork revision used for provenance
+    - name: uplift-threshold
+      type: string
+      default: "0.0"
+      description: >-
+        Minimum pass-rate uplift (treatment - control) for a 'pass'
+        recommendation. Set to 0.0 to pass whenever treatment >= control.
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
+      description: URL of the ABEvalFlow pipeline repository
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+      # TODO: pin to a specific SHA once the pipeline stabilises — "main"
+      # means each TaskRun pulls whatever is current, risking breakage.
+      description: Branch or SHA of the pipeline repo to use for scripts
+  workspaces:
+    - name: source
+      description: Workspace containing the evaluation results and report output
+  results:
+    - name: recommendation
+      description: "'pass' or 'fail' based on uplift threshold"
+    - name: treatment-pass-rate
+      description: Treatment variant pass rate as a decimal string (e.g. "0.8500")
+    - name: control-pass-rate
+      description: Control variant pass rate as a decimal string (e.g. "0.6000")
+    - name: report-path
+      description: Path to the directory containing report.json and report.md
+  steps:
+    - name: run-analysis
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # --- 1. Clone pipeline repo (or update to requested revision) ---
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR" ]; then
+          echo "Pipeline repo exists, updating to requested revision"
+          git -C "$PIPELINE_DIR" fetch origin "$(params.pipeline-repo-revision)" --depth 1
+          git -C "$PIPELINE_DIR" checkout FETCH_HEAD
+        else
+          git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+            "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
+        fi
+
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pydantic scipy
+
+        # --- 2. Run analysis ---
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+
+        ARGS=(
+          --results-dir "$(params.results-dir)"
+          --output-dir "$REPORT_DIR"
+          --submission-name "$(params.submission-name)"
+          --threshold "$(params.uplift-threshold)"
+        )
+
+        if [ -n "$(params.commit-sha)" ]; then
+          ARGS+=(--commit-sha "$(params.commit-sha)")
+        fi
+        if [ -n "$(params.pipeline-run-id)" ]; then
+          ARGS+=(--pipeline-run-id "$(params.pipeline-run-id)")
+        fi
+        if [ -n "$(params.treatment-image-ref)" ]; then
+          ARGS+=(--treatment-image-ref "$(params.treatment-image-ref)")
+        fi
+        if [ -n "$(params.control-image-ref)" ]; then
+          ARGS+=(--control-image-ref "$(params.control-image-ref)")
+        fi
+        if [ -n "$(params.harbor-fork-revision)" ]; then
+          ARGS+=(--harbor-fork-revision "$(params.harbor-fork-revision)")
+        fi
+
+        python scripts/analyze.py "${ARGS[@]}"
+
+        # --- 3. Extract results for Tekton ---
+        echo -n "$REPORT_DIR" > "$(results.report-path.path)"
+
+        python - "$REPORT_DIR/report.json" \
+          "$(results.recommendation.path)" \
+          "$(results.treatment-pass-rate.path)" \
+          "$(results.control-pass-rate.path)" <<'EXTRACT'
+        import json, sys
+        try:
+            report = json.loads(open(sys.argv[1]).read())
+            s = report["summary"]
+            open(sys.argv[2], "w").write(s["recommendation"])
+            open(sys.argv[3], "w").write(f"{s['treatment']['pass_rate']:.4f}")
+            open(sys.argv[4], "w").write(f"{s['control']['pass_rate']:.4f}")
+        except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
+            print(f"ERROR: Failed to extract Tekton results from report: {e}", file=sys.stderr)
+            sys.exit(1)
+        EXTRACT
+
+        echo "=== Analysis complete ==="
+        echo "Report: $REPORT_DIR"
+        cat "$REPORT_DIR/report.md"
