@@ -8,6 +8,10 @@ client) to produce the remaining files the pipeline requires:
   - ``tests/test_outputs.py`` — pytest verification of agent output
   - ``tests/llm_judge.py`` (optional) — LLM-based evaluation
 
+After each generation attempt the output is validated (structural checks +
+LLM content review).  If validation fails, the errors are fed back into the
+prompt and generation is retried up to ``max_retries`` times.
+
 In *api* mode the LLM is called directly with a system prompt that
 incorporates quality criteria extracted from the agentic-contribution-skill.
 
@@ -23,6 +27,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,39 +35,67 @@ from pathlib import Path
 import yaml
 
 from abevalflow import llm_client, skill_loader
+from abevalflow.generation_validator import (
+    check_markdown,
+    check_python,
+    content_check,
+    structural_check,
+)
 from abevalflow.schemas import SubmissionMetadata
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_TEMPLATE = """\
+DEFAULT_MAX_RETRIES = 3
+
+SYSTEM_PROMPT = """\
 You are an expert test engineer for AI skill evaluation pipelines.
-
-Given an AI skill definition (SKILL.md) you must generate two files:
-
-1. **instruction.md** — A clear task description that an AI agent will receive.
-   It must describe what the agent should build or accomplish, including
-   requirements, constraints, and expected outputs.  The task must be
-   objectively verifiable by the accompanying tests.
-
-2. **tests/test_outputs.py** — A pytest-compatible test file that verifies
-   the agent's output.  Tests must:
-   - Import from ``/workspace`` (the agent's working directory)
-   - Be self-contained (no external fixtures)
-   - Cover both success and edge cases
-   - Use plain asserts (no custom frameworks)
-
 {quality_criteria}
-
-IMPORTANT RULES:
-- Output ONLY valid JSON with keys "instruction_md" and "test_outputs_py".
-- Each value is the full file content as a string.
-- Do NOT include markdown fences or extra commentary.
-- The instruction must be achievable by an AI agent in a single session.
-- Tests must be deterministic and pass when the instruction is followed correctly.
+Output ONLY the requested file content — no markdown fences, no commentary.
 """
 
-GENERATE_PROMPT_TEMPLATE = """\
-Generate instruction.md and test_outputs.py for the following skill.
+# --- Step 0: skill analysis ---------------------------------------------------
+
+ANALYZE_SYSTEM_PROMPT = """\
+You are an expert at analyzing AI agent skills for A/B evaluation.
+
+Your job is to separate what a skill *uniquely contributes* from what any \
+competent model already knows. This distinction is critical: the evaluation \
+tests must target the skill's novel value-add, not general knowledge.
+"""
+
+ANALYZE_PROMPT = """\
+Analyze the following skill definition. Identify:
+
+1. **novel_aspects** — specific, opinionated, or non-obvious requirements that \
+a model would likely NOT do (or do differently) without this skill. These are \
+the skill's unique value.
+
+2. **common_knowledge** — things any moderate-to-strong model already knows \
+from training (standard patterns, well-known APIs, obvious approaches).
+
+3. **test_focus_areas** — concrete things the instruction and tests should \
+specifically target to measure whether having the skill actually helps. These \
+should map directly to the novel aspects.
+
+## Skill Content (SKILL.md)
+{skill_content}
+
+Output ONLY valid JSON with keys "novel_aspects", "common_knowledge", and \
+"test_focus_areas". Each value must be a list of short strings.
+"""
+
+# --- Step 1: instruction.md ---------------------------------------------------
+
+INSTRUCTION_PROMPT = """\
+Given the following AI skill definition, write an **instruction.md** file.
+
+The instruction must:
+- Describe a concrete task an AI agent will receive
+- Include requirements, constraints, and expected outputs
+- Be achievable by an AI agent in a single session
+- Be objectively verifiable by automated tests
+- FOCUS on the novel aspects that the skill uniquely adds — design a task \
+where having the skill gives a measurable advantage over not having it
 
 ## Skill Name
 {skill_name}
@@ -73,11 +106,72 @@ Generate instruction.md and test_outputs.py for the following skill.
 ## Skill Content (SKILL.md)
 {skill_content}
 
+## Skill Analysis
+The following analysis identifies what this skill uniquely contributes \
+versus what a model already knows. The instruction MUST target the novel \
+aspects and test focus areas:
+
+{skill_analysis}
+
 ## Metadata
 - Persona: {persona}
 - Tags: {tags}
+{previous_errors}
+Output ONLY the full content of instruction.md — nothing else.
+"""
 
-Respond with a single JSON object containing "instruction_md" and "test_outputs_py".
+# --- Step 2: test_outputs.py --------------------------------------------------
+
+TEST_PROMPT = """\
+Given the skill definition and the instruction below, write a \
+**tests/test_outputs.py** file that verifies the agent completed the task.
+
+Tests must:
+- Import from ``/workspace`` (the agent's working directory)
+- Be self-contained (no external fixtures)
+- Cover both success and edge cases
+- Use plain asserts (no custom frameworks)
+- Be deterministic and pass when the instruction is followed correctly
+- MUST cover every test focus area listed below — these are what \
+differentiate a skilled agent from an unskilled one
+
+## Skill Content (SKILL.md)
+{skill_content}
+
+## Skill Analysis — Test Focus Areas
+{skill_analysis}
+
+## instruction.md (already generated)
+{instruction_content}
+{previous_errors}
+Output ONLY valid Python source for test_outputs.py — nothing else.
+"""
+
+# --- Step 3 (optional): llm_judge.py -----------------------------------------
+
+JUDGE_PROMPT = """\
+Given the skill, instruction, and tests below, write an **optional** \
+LLM-as-judge evaluator in ``tests/llm_judge.py``.
+
+The judge should:
+- Accept the agent's workspace path as input
+- Use an LLM call to assess quality beyond what deterministic tests cover
+- Produce a numeric score (0.0–1.0) and a short rationale
+- Be self-contained (import its own LLM client)
+
+If the skill and tests are simple enough that deterministic tests suffice, \
+output exactly the word SKIP (nothing else).
+
+## Skill Content (SKILL.md)
+{skill_content}
+
+## instruction.md
+{instruction_content}
+
+## tests/test_outputs.py
+{test_content}
+
+Output ONLY valid Python source for llm_judge.py, or the word SKIP.
 """
 
 AGENT_TASK_PROMPT = """\
@@ -109,71 +203,183 @@ def _load_submission(submission_dir: Path) -> tuple[SubmissionMetadata, str]:
     return metadata, skill_content
 
 
+def _error_block(errors: list[str] | None) -> str:
+    if not errors:
+        return ""
+    lines = "\n".join(f"- {e}" for e in errors)
+    return (
+        f"\n## Previous Attempt Issues\n"
+        f"Your previous attempt had these issues — fix them:\n{lines}\n"
+    )
+
+
+def _llm_call(system: str, user: str, *, max_tokens: int = 4096) -> str:
+    """Single LLM call, strips markdown fences if the model wraps its output."""
+    raw = llm_client.chat_completion(
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.3,
+        max_tokens=max_tokens,
+    )
+    text = raw.strip()
+    for fence in ("```python", "```markdown", "```md", "```"):
+        if text.startswith(fence):
+            text = text[len(fence):]
+            break
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
+def _analyze_skill(skill_content: str) -> dict:
+    """Step 0: Analyze the skill to separate novel aspects from common knowledge.
+
+    Returns a dict with keys: novel_aspects, common_knowledge, test_focus_areas.
+    Raises ValueError if the LLM response is not valid JSON or missing keys.
+    """
+    raw = llm_client.chat_completion(
+        messages=[
+            {"role": "system", "content": ANALYZE_SYSTEM_PROMPT},
+            {"role": "user", "content": ANALYZE_PROMPT.format(skill_content=skill_content)},
+        ],
+        temperature=0.2,
+        max_tokens=1024,
+    )
+
+    text = raw.strip()
+    try:
+        analysis = json.loads(text)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if json_match:
+            analysis = json.loads(json_match.group())
+        else:
+            raise ValueError("Skill analysis response is not valid JSON")
+
+    required_keys = ("novel_aspects", "common_knowledge", "test_focus_areas")
+    for key in required_keys:
+        if key not in analysis or not isinstance(analysis[key], list) or not analysis[key]:
+            raise ValueError(f"Skill analysis missing or empty key: {key}")
+
+    logger.info(
+        "Step 0: skill analysis — %d novel, %d common, %d focus areas",
+        len(analysis["novel_aspects"]),
+        len(analysis["common_knowledge"]),
+        len(analysis["test_focus_areas"]),
+    )
+    return analysis
+
+
+def _format_analysis(analysis: dict) -> str:
+    """Format the skill analysis dict into a readable text block for prompts."""
+    lines: list[str] = []
+    lines.append("**Novel aspects (skill's unique value):**")
+    for item in analysis.get("novel_aspects", []):
+        lines.append(f"- {item}")
+    lines.append("")
+    lines.append("**Common knowledge (model already knows):**")
+    for item in analysis.get("common_knowledge", []):
+        lines.append(f"- {item}")
+    lines.append("")
+    lines.append("**Test focus areas (what to specifically verify):**")
+    for item in analysis.get("test_focus_areas", []):
+        lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
 def _generate_via_api(
     submission_dir: Path,
     metadata: SubmissionMetadata,
     skill_content: str,
     quality_criteria: str,
+    previous_errors: list[str] | None = None,
 ) -> list[str]:
-    """Call the LLM directly and parse structured JSON output."""
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+    """Generate files via 4 sequential LLM calls, validating after each step.
+
+    Step 0: Analyze skill   (novel vs common knowledge breakdown)
+    Step 1: instruction.md  (validated: exists, non-empty)
+    Step 2: test_outputs.py (validated: exists, non-empty, compiles)
+    Step 3: llm_judge.py    (optional; validated: compiles if produced)
+    """
+    system = SYSTEM_PROMPT.format(
         quality_criteria=(
-            f"## Quality Criteria (from agentic-contribution-skill)\n\n{quality_criteria}"
+            f"\n## Quality Criteria (from agentic-contribution-skill)\n\n{quality_criteria}"
             if quality_criteria
             else ""
         ),
     )
 
-    user_prompt = GENERATE_PROMPT_TEMPLATE.format(
-        skill_name=metadata.name,
-        skill_description=metadata.description or "(not provided)",
-        skill_content=skill_content,
-        persona=metadata.persona or "general",
-        tags=", ".join(metadata.tags) if metadata.tags else "none",
-    )
-
-    response_text = llm_client.chat_completion(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-        max_tokens=8192,
-    )
-
-    try:
-        parsed = json.loads(response_text)
-    except json.JSONDecodeError:
-        import re
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            parsed = json.loads(json_match.group())
-        else:
-            raise ValueError("LLM response is not valid JSON")
-
     generated: list[str] = []
-
-    instruction_content = parsed.get("instruction_md", "")
-    if not instruction_content:
-        raise ValueError("LLM did not produce instruction_md")
-    (submission_dir / "instruction.md").write_text(instruction_content)
-    generated.append("instruction.md")
-    logger.info("Generated instruction.md (%d chars)", len(instruction_content))
-
-    test_content = parsed.get("test_outputs_py", "")
-    if not test_content:
-        raise ValueError("LLM did not produce test_outputs_py")
     tests_dir = submission_dir / "tests"
     tests_dir.mkdir(exist_ok=True)
-    (tests_dir / "test_outputs.py").write_text(test_content)
-    generated.append("tests/test_outputs.py")
-    logger.info("Generated tests/test_outputs.py (%d chars)", len(test_content))
 
-    llm_judge_content = parsed.get("llm_judge_py", "")
-    if llm_judge_content:
-        (tests_dir / "llm_judge.py").write_text(llm_judge_content)
-        generated.append("tests/llm_judge.py")
-        logger.info("Generated tests/llm_judge.py (%d chars)", len(llm_judge_content))
+    # --- Step 0: skill analysis -----------------------------------------------
+    analysis = _analyze_skill(skill_content)
+    analysis_text = _format_analysis(analysis)
+
+    # --- Step 1: instruction.md -----------------------------------------------
+    instruction_text = _llm_call(
+        system,
+        INSTRUCTION_PROMPT.format(
+            skill_name=metadata.name,
+            skill_description=metadata.description or "(not provided)",
+            skill_content=skill_content,
+            skill_analysis=analysis_text,
+            persona=metadata.persona or "general",
+            tags=", ".join(metadata.tags) if metadata.tags else "none",
+            previous_errors=_error_block(previous_errors),
+        ),
+    )
+    (submission_dir / "instruction.md").write_text(instruction_text)
+    logger.info("Step 1: generated instruction.md (%d chars)", len(instruction_text))
+
+    errors = check_markdown(submission_dir / "instruction.md")
+    if errors:
+        raise ValueError(f"instruction.md validation failed: {errors}")
+    generated.append("instruction.md")
+
+    # --- Step 2: test_outputs.py ----------------------------------------------
+    test_errors = [e for e in (previous_errors or []) if "test_outputs" in e.lower()]
+    test_text = _llm_call(
+        system,
+        TEST_PROMPT.format(
+            skill_content=skill_content,
+            skill_analysis=analysis_text,
+            instruction_content=instruction_text,
+            previous_errors=_error_block(test_errors),
+        ),
+    )
+    (tests_dir / "test_outputs.py").write_text(test_text)
+    logger.info("Step 2: generated test_outputs.py (%d chars)", len(test_text))
+
+    errors = check_python(tests_dir / "test_outputs.py")
+    if errors:
+        raise ValueError(f"test_outputs.py validation failed: {errors}")
+    generated.append("tests/test_outputs.py")
+
+    # --- Step 3: llm_judge.py (optional) --------------------------------------
+    judge_text = _llm_call(
+        system,
+        JUDGE_PROMPT.format(
+            skill_content=skill_content,
+            instruction_content=instruction_text,
+            test_content=test_text,
+        ),
+        max_tokens=2048,
+    )
+    if judge_text.strip().upper() != "SKIP":
+        (tests_dir / "llm_judge.py").write_text(judge_text)
+        logger.info("Step 3: generated llm_judge.py (%d chars)", len(judge_text))
+        errors = check_python(tests_dir / "llm_judge.py")
+        if errors:
+            logger.warning("llm_judge.py failed validation, skipping: %s", errors)
+            (tests_dir / "llm_judge.py").unlink(missing_ok=True)
+        else:
+            generated.append("tests/llm_judge.py")
+    else:
+        logger.info("Step 3: LLM chose to skip llm_judge.py")
 
     return generated
 
@@ -239,8 +445,14 @@ def generate(
     submission_dir: Path,
     workspace_dir: Path,
     agent_type: str = "api",
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[str]:
-    """Run AI-assisted test generation and return list of generated file paths."""
+    """Run AI-assisted test generation with a validate-and-retry loop.
+
+    After each generation attempt the output undergoes structural checks
+    (existence, non-empty, py_compile) and an LLM content review.  On
+    failure, errors are fed back into the next attempt.
+    """
     metadata, skill_content = _load_submission(submission_dir)
 
     if metadata.generation_mode != "ai":
@@ -250,19 +462,70 @@ def generate(
     if not skill_content.strip():
         raise ValueError("skills/SKILL.md is empty — nothing to generate from")
 
-    # Fetch the agentic-contribution-skill
     skill_cache = workspace_dir / "_skill_cache"
     skill_cache.mkdir(parents=True, exist_ok=True)
     skill_md = skill_loader.fetch_skill(skill_cache)
     skill_dir = skill_md.parent if skill_md else None
 
-    if agent_type == "api":
-        quality_criteria = ""
-        if skill_md:
-            quality_criteria = skill_loader.extract_quality_criteria(skill_md)
-        return _generate_via_api(submission_dir, metadata, skill_content, quality_criteria)
-    else:
-        return _generate_via_agent(submission_dir, skill_dir, agent_type, workspace_dir)
+    quality_criteria = ""
+    if skill_md and agent_type == "api":
+        quality_criteria = skill_loader.extract_quality_criteria(skill_md)
+
+    last_errors: list[str] = []
+
+    for attempt in range(1, max_retries + 1):
+        logger.info("Generation attempt %d/%d", attempt, max_retries)
+
+        try:
+            if agent_type == "api":
+                generated = _generate_via_api(
+                    submission_dir,
+                    metadata,
+                    skill_content,
+                    quality_criteria,
+                    previous_errors=last_errors if last_errors else None,
+                )
+            else:
+                generated = _generate_via_agent(
+                    submission_dir, skill_dir, agent_type, workspace_dir,
+                )
+        except (ValueError, RuntimeError) as exc:
+            last_errors = [str(exc)]
+            logger.warning("Attempt %d generation error: %s", attempt, exc)
+            if attempt == max_retries:
+                raise
+            continue
+
+        struct_errors = structural_check(submission_dir)
+        if struct_errors:
+            last_errors = struct_errors
+            logger.warning(
+                "Attempt %d structural validation failed: %s", attempt, struct_errors,
+            )
+            if attempt == max_retries:
+                raise ValueError(
+                    f"Generation failed structural validation after {max_retries} "
+                    f"attempts: {struct_errors}"
+                )
+            continue
+
+        review = content_check(submission_dir)
+        if not review["passed"]:
+            last_errors = review["issues"]
+            logger.warning(
+                "Attempt %d content review failed: %s", attempt, review["issues"],
+            )
+            if attempt == max_retries:
+                raise ValueError(
+                    f"Generation failed content review after {max_retries} "
+                    f"attempts: {review['issues']}"
+                )
+            continue
+
+        logger.info("Generation validated on attempt %d", attempt)
+        return generated
+
+    raise ValueError(f"Generation failed after {max_retries} attempts")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -281,6 +544,12 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("AGENT_TYPE", "api"),
         help="Agent type: api, claude, cursor, opencode (default: api)",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=int(os.environ.get("MAX_RETRIES", str(DEFAULT_MAX_RETRIES))),
+        help=f"Max generation retry attempts (default: {DEFAULT_MAX_RETRIES})",
+    )
     args = parser.parse_args(argv)
 
     workspace = args.workspace_dir or args.submission_dir.parent
@@ -290,7 +559,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        generated = generate(args.submission_dir, workspace, args.agent_type)
+        generated = generate(
+            args.submission_dir, workspace, args.agent_type, args.max_retries,
+        )
     except Exception as exc:
         logger.error("Generation failed: %s", exc)
         result = {"generated": [], "error": str(exc)}

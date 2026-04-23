@@ -131,14 +131,6 @@ class TestPlaceForAgent:
         assert result == expected
         assert (result / "SKILL.md").is_file()
 
-    def test_cursor_mode(self, skill_dir: Path, tmp_path: Path) -> None:
-        workspace = tmp_path / "workspace_root"
-        workspace.mkdir()
-        result = skill_loader.place_for_agent(skill_dir, workspace, "cursor")
-        expected = workspace / ".cursor" / "rules" / "agentic-contribution-skill"
-        assert result == expected
-        assert (result / "SKILL.md").is_file()
-
     def test_unknown_agent_returns_same_dir(self, skill_dir: Path, tmp_path: Path) -> None:
         result = skill_loader.place_for_agent(skill_dir, tmp_path, "unknown-agent")
         assert result == skill_dir

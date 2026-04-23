@@ -156,6 +156,13 @@ spec:
         How the AI generation step invokes the LLM: 'api' for direct API
         calls, or 'claude', 'cursor', 'opencode' to use a native agent CLI
         with skill loading.
+    - name: max-generation-retries
+      type: string
+      default: "3"
+      description: >-
+        Maximum number of generate-validate retry attempts per generation
+        step. Each failed attempt feeds validation errors back into the
+        generation prompt.
 
   workspaces:
     - name: shared-workspace
@@ -207,6 +214,8 @@ spec:
           value: $(params.llm-model)
         - name: agent-type
           value: $(params.agent-type)
+        - name: max-retries
+          value: $(params.max-generation-retries)
       workspaces:
         - name: source
           workspace: shared-workspace
