@@ -12,7 +12,7 @@ Automated Tekton-orchestrated pipeline on OpenShift for evaluating AI skill subm
 4. **Build & Push** — Builds both images and pushes to the OpenShift internal registry.
 5. **Evaluate** — Harbor runs N attempts per variant (default N=20, 40 total) using a custom OpenShift backend.
 6. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value), and generates heatmaps.
-7. **Publish** — Stores reports, promotes passing images to Quay.io, and opens a PR to [agentic-collections](https://github.com/RHEcosystemAppEng/agentic-collections).
+7. **Publish** — Stores reports, promotes passing images to Quay.io, and records results.
 
 ## Repository Structure
 
@@ -33,7 +33,7 @@ ABEvalFlow/
 
 | Repository | Purpose |
 |---|---|
-| [agentic-collections](https://github.com/RHEcosystemAppEng/agentic-collections) | Production skills, committed after evaluation passes |
+| [skill-submissions](https://github.com/RHEcosystemAppEng/skill-submissions) | Submission intake — users push skills here to trigger evaluation |
 | [skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) | Harbor fork with OpenShift backend |
 
 ## Submission Contract

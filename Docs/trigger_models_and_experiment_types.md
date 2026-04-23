@@ -28,7 +28,7 @@ flowchart TD
 ```
 
 **How it works:**
-- A dedicated repo (e.g., `RHEcosystemAppEng/skills-eval-submissions`) exists solely for evaluation requests
+- A dedicated repo ([`RHEcosystemAppEng/skill-submissions`](https://github.com/RHEcosystemAppEng/skill-submissions)) exists solely for evaluation requests
 - Author pushes a folder under `submissions/` with `metadata.yaml` + whatever the experiment needs
 - EventListener watches this repo, fires on push
 - The submission is ephemeral — it's an evaluation request, not permanent storage
@@ -111,9 +111,9 @@ flowchart TD
 
 ### Recommendation
 
-**Start with Option 1** (standalone submissions repo) — it works for all experiment types, matches the current EventListener design, and is simpler to build. This is what we're already mostly building.
+**Option 1 is implemented** — [`skill-submissions`](https://github.com/RHEcosystemAppEng/skill-submissions) repo is live with webhook configured, matching the current EventListener design.
 
-**Add Option 2 later** for the specific case of "skill merged into agentic-collections needs eval" — this is a CI/CD integration (GitHub Action or webhook on PR) that calls the same pipeline but posts results back to the PR.
+**Option 2 can be added later** for the specific case of "skill merged into a target repo needs eval" — this is a CI/CD integration (GitHub Action or webhook on PR) that calls the same pipeline but posts results back to the PR.
 
 The pipeline itself is the same either way — only the trigger and results-delivery differ. The A/B framework handles all experiment types regardless of how they're triggered.
 
@@ -124,4 +124,4 @@ The pipeline itself is the same either way — only the trigger and results-deli
 1. **Pass/fail thresholds** — global defaults or configurable per submission?
 2. **Notification mechanism** — GitHub checks, Slack, dashboard?
 3. **Where do results live permanently?** — PVC, S3/MinIO, committed to a repo?
-4. **Submissions repo** — new repo or a `submissions/` folder in agentic-collections?
+4. ~~**Submissions repo** — new repo or a `submissions/` folder in agentic-collections?~~ **Resolved:** standalone [`skill-submissions`](https://github.com/RHEcosystemAppEng/skill-submissions) repo.

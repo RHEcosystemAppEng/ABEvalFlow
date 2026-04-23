@@ -8,7 +8,7 @@ repository configured with a GitHub webhook pointing at the EventListener.
 ```
 git push (submissions/my-skill/)
     → GitHub webhook (POST)
-    → EventListener (skills-submission-listener)
+    → EventListener (submission-listener)
     → CEL interceptor filters for submissions/ path changes
     → TriggerBinding extracts repo URL, revision, skill directory
     → TriggerTemplate creates a PipelineRun
@@ -50,7 +50,7 @@ The EventListener route is created automatically when the EventListener is
 deployed. To find it:
 
 ```bash
-oc get route -n ab-eval-flow -l eventlistener=skills-submission-listener
+oc get route -n ab-eval-flow -l eventlistener=submission-listener
 ```
 
 ## Manual Trigger (for Testing)
@@ -61,7 +61,7 @@ You can bypass the webhook and trigger the pipeline directly.
 
 ```bash
 tkn pipeline start skills-eval-pipeline \
-  -p repo-url=https://github.com/RHEcosystemAppEng/agentic-collections.git \
+  -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
   -p revision=main \
   -p skill-dir=my-skill \
   -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
@@ -81,7 +81,7 @@ spec:
     name: skills-eval-pipeline
   params:
     - name: repo-url
-      value: https://github.com/RHEcosystemAppEng/agentic-collections.git
+      value: https://github.com/RHEcosystemAppEng/skill-submissions.git
     - name: revision
       value: main
     - name: skill-dir
