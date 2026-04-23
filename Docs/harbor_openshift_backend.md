@@ -1,75 +1,114 @@
 # Harbor OpenShift Backend — Handoff Document
 
 > **Jira:** APPENG-4906 (Phase 4 — Harbor OpenShift Backend)
-> **Target repo:** [GuyZivRH/skills_eval_corrections](https://github.com/GuyZivRH/skills_eval_corrections) (Harbor fork)
-> **Full spec:** See [implementation_plan.md](./implementation_plan.md), Phase 4 (lines 270–343)
+> **Target repo:** [RHEcosystemAppEng/skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) (Harbor fork)
+> **Fork PRs:** [#1 — OpenShift environment backend](https://github.com/RHEcosystemAppEng/skills_eval_corrections/pull/1), [#2 — per-task environment_kwargs](https://github.com/RHEcosystemAppEng/skills_eval_corrections/pull/2)
+> **Full spec:** See [implementation_plan.md](./implementation_plan.md), Phase 4
 
 ---
 
-## What to Build
+## What Was Built
 
-A new `OpenShiftEnvironment` class in the Harbor fork that enables `harbor run --env openshift`. This backend manages trial Pod lifecycle on OpenShift using pre-built container images (built by ABEvalFlow's Tekton pipeline).
+An `OpenShiftEnvironment` class in the Harbor fork that enables
+`harbor run --env openshift`. This backend manages trial Pod lifecycle
+on OpenShift and supports two modes: pre-built container images (from
+the Tekton pipeline) and local build via podman.
 
 ## Where in the Harbor Fork
 
 | File | Action |
 |---|---|
-| `src/harbor/environments/openshift_environment.py` | Create — new backend |
-| `src/harbor/models/environment_type.py` | Edit — add `OPENSHIFT = "openshift"` to enum |
-| Backend registration (entry point or factory) | Edit — register so `--env openshift` works |
-| `tests/` | Create — unit tests with mocked K8s API |
+| `src/harbor/environments/openshift.py` | New backend |
+| `src/harbor/environments/k8s_client_manager.py` | Shared K8s client management (independent instances per caller) |
+| `src/harbor/models/environment_type.py` | `OPENSHIFT = "openshift"` added to enum |
+| `src/harbor/models/trial/config.py` | `environment_kwargs` field added to `TaskConfig` (PR #2) |
+| `src/harbor/job.py` | `_env_config_for_task` merges per-task kwargs into env config (PR #2) |
+| `tests/unit/environments/test_openshift.py` | Unit tests with mocked K8s API |
+| `tests/unit/models/test_trial_task_config.py` | Tests for per-task kwargs merge behavior |
+| `examples/configs/openshift-*.yaml` | Config examples for both modes + per-task kwargs |
 
 ## Reference Implementation
 
-Use the GKE backend as your template: `src/harbor/environments/gke.py` (~1044 lines). It implements the full `BaseEnvironment` interface from `src/harbor/environments/base.py`.
+The GKE backend (`src/harbor/environments/gke.py`) implements the full
+`BaseEnvironment` interface from `src/harbor/environments/base.py`.
 
 ## Key Differences from GKE
 
 ### `_init_client`
 - GKE: `gcloud container clusters get-credentials` + `load_kube_config()`
-- **OpenShift:** `load_incluster_config()` when running inside the cluster (Tekton), or `load_kube_config()` for local dev
+- **OpenShift:** `load_incluster_config()` when running inside the cluster
+  (Tekton), falls back to `load_kube_config()` for local dev
 
 ### `_build_and_push_image`
 - GKE: `gcloud builds submit` (Cloud Build)
-- **OpenShift: No-op.** Image build/push is handled by Tekton (Phase 3). The backend receives a digest-based image reference and only verifies the image exists and is pullable.
+- **OpenShift — two modes:**
 
-**Contract:**
+| Mode | Behavior | When to use |
+|------|----------|-------------|
+| **Prebuilt** (`image_ref` kwarg set) | Verify image is pullable, skip building | Default pipeline flow — Tekton builds with Buildah |
+| **Local build** (`force_build: true`) | Build with podman, push to specified registry | Local dev, skipping the build-push Tekton step |
+
+**Prebuilt contract:**
 - **Input:** Immutable image ref (e.g., `image-registry.openshift-image-registry.svc:5000/ab-eval-flow/my-skill@sha256:abc...`)
 - **Behavior:** Verify image exists using the trial ServiceAccount
 - **Output:** Return the image ref unchanged
-- **Failure:** Raise `ImageNotFoundError` / `ImageNotPullableError` with the image ref and SA identity
+- **Failure:** Raise `ImageNotFoundError` / `ImageNotPullableError`
 
-### `_image_exists`
-- GKE: `gcloud artifacts docker images describe`
-- **OpenShift:** Query internal registry API or use `skopeo inspect`
+**Local build contract:**
+- **Input:** `environment/Dockerfile` in the task directory, `registry` kwarg for push target
+- **Behavior:** `podman build` + `podman push` to the specified registry
+- **Kwargs:** `registry` (push target URL), `tls_verify` (default `"true"`)
 
 ### `start`, `stop`, `exec`, `upload_file/dir`, `download_file/dir`
 - Same K8s API patterns as GKE — the `kubernetes` Python client is identical
 
-## Pod Security Requirements
+## Environment kwargs
 
-Trial Pods must run with hardened security context:
+Kwargs are passed via `environment.kwargs` in the job config YAML or
+via `--ek key=value` on the CLI. Per-task kwargs (PR #2) override
+global kwargs when set.
+
+| Kwarg | Description | Default |
+|-------|-------------|---------|
+| `namespace` | OpenShift namespace for trial Pods | Required |
+| `image_ref` | Digest-based image ref (prebuilt mode) | — |
+| `registry` | Push target URL (local-build mode) | — |
+| `cpu_request` | CPU request for trial Pods (e.g. `"250m"`) | — |
+| `tls_verify` | TLS verification for registry (e.g. `"false"`) | `"true"` |
+
+### Per-task environment_kwargs (PR #2)
+
+`TaskConfig` now supports an `environment_kwargs` dict that merges into
+the global `environment.kwargs` (task-level overrides global). This
+enables treatment and control variants with different image refs in a
+single Harbor job:
 
 ```yaml
-securityContext:
-  runAsNonRoot: true
-  readOnlyRootFilesystem: true
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: ["ALL"]
-  seccompProfile:
-    type: RuntimeDefault
+tasks:
+  - path: /workspace/tasks-treatment/my-submission
+    environment_kwargs:
+      image_ref: "registry/ns/my-submission@sha256:abc..."
+  - path: /workspace/tasks-control/my-submission
+    environment_kwargs:
+      image_ref: "registry/ns/my-submission@sha256:def..."
 ```
 
-Since `readOnlyRootFilesystem: true` prevents writes, mount `emptyDir` volumes for:
-- `/tmp`
-- Agent cache directories (varies by agent)
+ABEvalFlow currently runs each variant as a separate Harbor job (two
+`harbor run` invocations). Per-task kwargs enables a single-job
+alternative if needed in the future.
+
+## Pod Security Requirements
+
+Trial Pods run with OpenShift's default security constraints. The
+`readOnlyRootFilesystem` is intentionally **not** set — many agent
+workloads need filesystem writes. Instead, `HOME=/tmp` is injected to
+direct writes to a writable location.
 
 Verify the target cluster uses `restricted-v2` SCC (OpenShift 4.11+).
 
 ## Trial Execution
 
-- **N = 20** attempts per variant (skilled + unskilled = 40 total sessions)
+- **N = 20** attempts per variant (treatment + control = 40 total sessions)
 - Image refs come as params from the build-push Tekton task (digest-based)
 - LLM endpoint via environment variable — backend is agnostic to LLM access mode
 - Configurable per-trial timeout and global evaluation timeout
@@ -82,37 +121,52 @@ The pipeline ServiceAccount in `ab-eval-flow` namespace needs:
 | Resource | Verbs | Purpose |
 |---|---|---|
 | Pods | create, get, list, watch, delete | Trial Pod lifecycle |
-| ConfigMaps | get, list | Trial configuration |
+| Pods/exec | create | Agent/verifier execution inside trial Pods |
+| Pods/log | get | Retrieving trial output |
 | Secrets | get | LLM credentials injection |
 | Events | get, list | Diagnosing hung/failed Pods |
-| PVCs | get, list, create | Pipeline workspaces |
-| ImageStreams | get, list | Registry access |
+
+## K8s Client Management
+
+The `BaseK8sClientManager` (shared by GKE and OpenShift backends) was
+refactored in PR #2 to return **independent `CoreV1Api` instances** per
+caller, each backed by its own `ApiClient`. This prevents concurrent
+`kubernetes.stream.stream()` calls (which monkey-patch `ApiClient.call_api`)
+from interfering with regular REST calls in other coroutines.
 
 ## Testing Strategy
 
 - **Unit tests:** Mock K8s API with `pytest` + `unittest.mock`. No live cluster needed.
-- **Integration tests:** Test against OpenShift developer sandbox (ROSA/OSD). Do **not** use Kind/Minikube — they won't catch SCC/Routes differences.
+- **Integration tests:** Test against OpenShift developer sandbox (ROSA/OSD).
+  Do **not** use Kind/Minikube — they won't catch SCC/Routes differences.
 
-## Tekton Task (in ABEvalFlow repo, not Harbor fork)
+## Tekton Task (in ABEvalFlow repo)
 
-A `pipeline/tasks/harbor-eval.yaml` Tekton Task will also be needed in ABEvalFlow to invoke Harbor. This task:
-- Accepts `skilled-image-ref` and `unskilled-image-ref` as params
-- Runs `harbor run --env openshift` with the image refs
-- Collects results to workspace/PVC
+The `harbor-eval` Tekton task (`pipeline/tasks/harbor-eval.yaml`) invokes
+Harbor from the ABEvalFlow pipeline:
 
-This can be built after the backend is functional.
+- Installs Harbor from the fork via `pip install git+<fork-url>@<revision>`
+- Generates two per-variant job configs using `scripts/generate_eval_config.py`
+- Runs `harbor run -c treatment-config.yaml` then `harbor run -c control-config.yaml`
+- Parses `result.json` files to compute pass rates as Tekton results
+- Supports `prebuilt` and `local-build` eval modes via a pipeline param
 
 ## Definition of Done
 
-- [ ] 40 trial Pods complete (20 skilled + 20 unskilled)
+- [x] `OpenShiftEnvironment` backend implemented (PR #1)
+- [x] Per-task `environment_kwargs` support (PR #2)
+- [x] Independent K8s client instances per caller (PR #2)
+- [x] Config examples for prebuilt, local-build, and per-task modes (PR #2)
+- [x] Unit tests with mocked K8s API
+- [ ] 40 trial Pods complete (20 treatment + 20 control) on live cluster
 - [ ] Cleanup verified — no stale Pods after evaluation
 - [ ] Retry behavior validated for transient failures
-- [ ] Unit tests pass with mocked K8s API
 - [ ] Integration test passes on OpenShift sandbox
 
 ## LLM Access Modes (for reference)
 
-The backend doesn't need to know which mode is used — it just passes env vars to trial Pods:
+The backend doesn't need to know which mode is used — it just passes
+env vars to trial Pods:
 
 | Mode | Env Var | Infrastructure |
 |---|---|---|

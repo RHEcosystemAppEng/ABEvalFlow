@@ -1,0 +1,183 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: harbor-eval
+  namespace: ab-eval-flow
+spec:
+  description: >-
+    Runs A/B evaluation using Harbor on OpenShift. Installs Harbor from the
+    fork repo, generates per-variant job configs from submission metadata,
+    and executes treatment and control as separate Harbor jobs. Each variant
+    gets its own results directory for clean trial attribution. Supports two
+    modes: prebuilt (uses digest-based image refs from the build-push task)
+    and local-build (Harbor builds from each task's Dockerfile).
+  params:
+    - name: submission-dir
+      type: string
+      description: Path to the submission directory within the workspace (e.g. my-submission)
+    - name: submission-name
+      type: string
+      description: Validated submission name (from validate-submission results)
+    - name: treatment-task-dir
+      type: string
+      description: Path to the scaffolded treatment task directory
+    - name: control-task-dir
+      type: string
+      description: Path to the scaffolded control task directory
+    - name: treatment-image-ref
+      type: string
+      default: ""
+      description: Digest-based image ref for treatment variant (required for prebuilt mode)
+    - name: control-image-ref
+      type: string
+      default: ""
+      description: Digest-based image ref for control variant (required for prebuilt mode)
+    - name: eval-mode
+      type: string
+      default: "prebuilt"
+      description: >-
+        Evaluation mode: 'prebuilt' uses digest image refs from build-push;
+        'local-build' lets Harbor build from each task's Dockerfile.
+    - name: harbor-fork-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
+      description: Harbor fork repository URL
+    - name: harbor-fork-revision
+      type: string
+      default: "main"
+      # TODO: pin to a specific SHA once the fork stabilises — "main" means
+      # each TaskRun pulls whatever is current, risking breakage from
+      # upstream changes.
+      description: Branch or SHA of the Harbor fork to install
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
+      description: URL of the ABEvalFlow pipeline repository
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+      description: Branch or SHA of the pipeline repo to use for scripts
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned submissions and scaffolded task directories
+  results:
+    - name: treatment-pass-rate
+      description: Treatment variant pass rate as a decimal string (e.g. "0.85")
+    - name: control-pass-rate
+      description: Control variant pass rate as a decimal string (e.g. "0.60")
+    - name: results-dir
+      description: Path to the base results directory containing treatment/ and control/ subdirs
+  steps:
+    - name: run-evaluation
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # --- 1. Install Harbor from fork ---
+        echo "=== Installing Harbor from $(params.harbor-fork-url) @ $(params.harbor-fork-revision) ==="
+        INSTALL_START=$(date +%s)
+        pip install --quiet --no-cache-dir \
+          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)"
+        INSTALL_END=$(date +%s)
+        echo "Harbor installed in $((INSTALL_END - INSTALL_START))s"
+        harbor --version
+
+        # --- 2. Clone pipeline repo and generate per-variant configs ---
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR" ]; then
+          echo "Pipeline repo already cloned, skipping"
+        else
+          git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+            "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
+        fi
+
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        CONFIG_DIR="$(workspaces.source.path)/_eval-configs"
+
+        cd "$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pydantic pyyaml
+
+        ARGS=(
+          --submission-dir "$SUBMISSION_PATH"
+          --treatment-task-dir "$(params.treatment-task-dir)"
+          --control-task-dir "$(params.control-task-dir)"
+          --output-dir "$CONFIG_DIR"
+          --eval-mode "$(params.eval-mode)"
+          --results-base-dir "$RESULTS_DIR"
+        )
+
+        if [ "$(params.eval-mode)" = "prebuilt" ]; then
+          ARGS+=(
+            --treatment-image-ref "$(params.treatment-image-ref)"
+            --control-image-ref "$(params.control-image-ref)"
+          )
+        fi
+
+        python scripts/generate_eval_config.py "${ARGS[@]}"
+
+        echo "=== Treatment config ==="
+        cat "$CONFIG_DIR/treatment-config.yaml"
+        echo "=== Control config ==="
+        cat "$CONFIG_DIR/control-config.yaml"
+
+        # --- 3. Run treatment evaluation ---
+        echo "=== Running treatment evaluation ==="
+        EVAL_START=$(date +%s)
+        harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
+        EVAL_MID=$(date +%s)
+        echo "Treatment completed in $((EVAL_MID - EVAL_START))s"
+
+        # --- 4. Run control evaluation ---
+        echo "=== Running control evaluation ==="
+        harbor run -c "$CONFIG_DIR/control-config.yaml" -y
+        EVAL_END=$(date +%s)
+        echo "Control completed in $((EVAL_END - EVAL_MID))s"
+        echo "Total evaluation time: $((EVAL_END - EVAL_START))s"
+
+        # --- 5. Parse results ---
+        echo -n "$RESULTS_DIR" > "$(results.results-dir.path)"
+
+        python - "$RESULTS_DIR" \
+          "$(results.treatment-pass-rate.path)" \
+          "$(results.control-pass-rate.path)" <<'PARSE_SCRIPT'
+        import json
+        import sys
+        from pathlib import Path
+
+        results_dir = Path(sys.argv[1])
+        treatment_result_path = sys.argv[2]
+        control_result_path = sys.argv[3]
+
+        def compute_pass_rate(variant_dir: Path) -> str:
+            """Scan all trial result.json files under a variant's jobs directory."""
+            if not variant_dir.is_dir():
+                return "0.0"
+            total = 0
+            passed = 0
+            for result_file in sorted(variant_dir.rglob("result.json")):
+                try:
+                    data = json.loads(result_file.read_text())
+                    vr = data.get("verifier_result", {})
+                    reward = vr.get("reward")
+                    total += 1
+                    if reward is not None and float(reward) > 0.0:
+                        passed += 1
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    total += 1
+            if total == 0:
+                return "0.0"
+            return f"{passed / total:.4f}"
+
+        t_rate = compute_pass_rate(results_dir / "treatment")
+        c_rate = compute_pass_rate(results_dir / "control")
+
+        with open(treatment_result_path, "w") as f:
+            f.write(t_rate)
+        with open(control_result_path, "w") as f:
+            f.write(c_rate)
+
+        print(f"Treatment pass rate: {t_rate}")
+        print(f"Control pass rate:   {c_rate}")
+        PARSE_SCRIPT

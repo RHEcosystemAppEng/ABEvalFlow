@@ -26,7 +26,7 @@ The `tasks-treatment/` and `tasks-control/` directories generated during scaffol
 
 ### Harbor Fork
 
-The Harbor fork is at [GuyZivRH/skills_eval_corrections](https://github.com/GuyZivRH/skills_eval_corrections), forked from `harbor-framework/harbor`. The OpenShift backend will be added here as a new environment type alongside the existing GKE, Docker, Podman, Daytona, Modal, etc.
+The Harbor fork is at [RHEcosystemAppEng/skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections), forked from `harbor-framework/harbor`. The OpenShift backend will be added here as a new environment type alongside the existing GKE, Docker, Podman, Daytona, Modal, etc.
 
 ### LLM Access Strategy (Updated from ADR)
 
@@ -104,7 +104,7 @@ ABEvalFlow/
 | EventListener route/URL | Webhook target | Exposed via OpenShift Route; URL needed for GitHub webhook setup |
 | Submissions repo deploy key (read) | Clone submission on pipeline trigger | Stored as OpenShift Secret |
 | Quay.io registry | Image storage | Service account + push secret |
-| Harbor fork | Evaluation engine | [GuyZivRH/skills_eval_corrections](https://github.com/GuyZivRH/skills_eval_corrections) with OpenShift backend |
+| Harbor fork | Evaluation engine | [RHEcosystemAppEng/skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) with OpenShift backend |
 | LLM access | Agent inference | One of: direct API key, opencode+self-hosted, or Vertex AI+LiteLLM |
 | PVC or MinIO (S3) | Artifact storage | For reports, logs, images |
 | agentic-collections deploy key (write) | Publish passing skills | Token/deploy key stored as OpenShift Secret |
@@ -269,7 +269,7 @@ Use digest-based references (not mutable tags) between tasks to avoid tag mutati
 
 ### 4.1 OpenShift Environment Backend (in Harbor fork)
 
-**Goal:** Create a new `OpenShiftEnvironment` class extending `BaseEnvironment` (from `src/harbor/environments/base.py`) in the [Harbor fork](https://github.com/GuyZivRH/skills_eval_corrections).
+**Goal:** Create a new `OpenShiftEnvironment` class extending `BaseEnvironment` (from `src/harbor/environments/base.py`) in the [Harbor fork](https://github.com/RHEcosystemAppEng/skills_eval_corrections).
 
 The GKE backend (`src/harbor/environments/gke.py`, ~1044 lines) serves as the reference implementation. The OpenShift backend must implement the full `BaseEnvironment` interface:
 
@@ -300,10 +300,11 @@ Additional requirements:
 
 ### 4.2 Harbor Fork Integration
 
-- [ ] Add `openshift_environment.py` in `src/harbor/environments/`.
-- [ ] Add `OPENSHIFT` to `EnvironmentType` enum.
-- [ ] Register the backend so `harbor run --env openshift` selects it.
+- [x] Add `openshift.py` in `src/harbor/environments/` (PR #1 in fork).
+- [x] Add `OPENSHIFT` to `EnvironmentType` enum (PR #1 in fork).
+- [x] Register the backend so `harbor run --env openshift` selects it (PR #1 in fork).
 - [ ] Pin a fork SHA in the pipeline image; review upstream quarterly for drift.
+- [ ] Add per-task `environment_kwargs` to `TaskConfig` (see `Docs/harbor_fork_requirements.md`).
 
 ### 4.3 Testing Strategy
 
@@ -312,24 +313,28 @@ Additional requirements:
 
 ### 4.4 Trial Execution Configuration
 
-- The `harbor-eval` Tekton task accepts `treatment-image-ref` and `control-image-ref` as **params** wired from Phase 3 results.
-- N = configurable attempts per variant (default 20, treatment + control = 40 total sessions).
-- Configure resource requests/limits per trial Pod.
-- LLM endpoint configured via environment variable — backend is agnostic to whether it points to LiteLLM, a direct API, or a self-hosted model.
-- Trial Pod timeout: configurable, with a global evaluation timeout.
+- [x] `harbor-eval` Tekton task accepts `treatment-image-ref` and `control-image-ref` as params wired from Phase 3 results.
+- [x] N = configurable attempts per variant (default 20, treatment + control = 40 total sessions) via `n-trials` from `metadata.yaml`.
+- [x] Resource requests/limits per trial Pod (from `metadata.yaml`: `cpus`, `memory_mb`, `storage_mb`).
+- [ ] LLM endpoint configured via environment variable — backend is agnostic to whether it points to LiteLLM, a direct API, or a self-hosted model.
+- [x] Trial Pod timeout: configurable via timeout multipliers derived from `metadata.yaml`.
+- [x] Eval config generation script (`scripts/generate_eval_config.py`) reads metadata and produces Harbor job config YAML.
+- [x] Supports two modes: `prebuilt` (digest image refs) and `local-build` (Harbor builds from Dockerfiles).
 
 ### 4.5 RBAC Requirements
 
+- [x] `pipeline-trial-manager` Role + RoleBinding added to `config/rbac.yaml`.
+
 The pipeline ServiceAccount needs (prefer named Secrets for least-privilege where policy requires):
 
-| Resource | Verbs | Purpose |
-|---|---|---|
-| Pods | create, get, list, watch, delete | Trial Pod lifecycle (watch for efficient state tracking) |
-| ConfigMaps | get, list | Trial configuration |
-| Secrets | get | LLM credentials injection via `envFrom` |
-| Events | get, list | Diagnosing hung/failed trial Pods |
-| PVCs | get, list, create | Pipeline workspaces and artifacts |
-| ImageStreams (OpenShift) | get, list | Registry access — validate against target cluster's API version |
+| Resource | Verbs | Purpose | Status |
+|---|---|---|---|
+| Pods, Pods/exec, Pods/log | create, get, list, watch, delete | Trial Pod lifecycle | Done |
+| Secrets | get | LLM credentials injection via `envFrom` | Done |
+| Events | get, list | Diagnosing hung/failed trial Pods | Done |
+| ConfigMaps | get, list | Trial configuration | Deferred — not used by current backend |
+| PVCs | get, list, create | Pipeline workspaces and artifacts | Deferred — handled by Tekton |
+| ImageStreams (OpenShift) | get, list | Registry access | Deferred — not used by current backend |
 
 ### 4.6 Definition of Done
 

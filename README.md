@@ -34,7 +34,7 @@ ABEvalFlow/
 | Repository | Purpose |
 |---|---|
 | [agentic-collections](https://github.com/RHEcosystemAppEng/agentic-collections) | Production skills, committed after evaluation passes |
-| [skills_eval_corrections](https://github.com/GuyZivRH/skills_eval_corrections) | Harbor fork with OpenShift backend |
+| [skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) | Harbor fork with OpenShift backend |
 
 ## Submission Contract
 
