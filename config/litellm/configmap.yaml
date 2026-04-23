@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: ab-eval-flow
+  labels:
+    app.kubernetes.io/part-of: abevalflow
+    app.kubernetes.io/name: litellm
+data:
+  config.yaml: |
+    model_list:
+      - model_name: claude-sonnet
+        litellm_params:
+          model: vertex_ai/claude-3-5-sonnet@20241022
+          vertex_project: "<gcp-project-id>"
+          vertex_location: "global"
+
+    litellm_settings:
+      drop_params: true
+      set_verbose: false
+      num_retries: 2
+      request_timeout: 120
+
+    general_settings:
+      master_key: "os.environ/LITELLM_MASTER_KEY"

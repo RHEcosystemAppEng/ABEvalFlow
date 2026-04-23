@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: ab-eval-flow
+  labels:
+    app.kubernetes.io/part-of: abevalflow
+    app.kubernetes.io/name: litellm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+      protocol: TCP
