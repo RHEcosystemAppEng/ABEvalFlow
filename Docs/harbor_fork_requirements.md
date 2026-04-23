@@ -138,22 +138,20 @@ ABEvalFlow's pass-rate parser expects:
 Where `reward > 0.0` means pass. This is Harbor's standard format — no change
 needed, but any deviation would break the parser.
 
-### Nice-to-have (not blocking)
+### Implemented (fork PR #2)
 
 **4. Per-task `environment_kwargs` support**
 
-ABEvalFlow currently runs each variant as a separate Harbor job to work around
-the global `environment.kwargs`. If we later want to run both variants in a
-single job (e.g., for sweep-based workflows), per-task `environment_kwargs`
-would be needed.
+Implemented in [PR #2](https://github.com/RHEcosystemAppEng/skills_eval_corrections/pull/2).
+`TaskConfig` now has an `environment_kwargs: dict[str, Any]` field. `Job._env_config_for_task`
+merges per-task kwargs into the global `EnvironmentConfig.kwargs` (task-level overrides global).
 
-Proposed change: add `environment_kwargs: dict[str, Any]` to `TaskConfig` in
-`src/harbor/models/trial/config.py`. When `Job` creates `TrialConfig` instances,
-merge per-task kwargs into the trial's `EnvironmentConfig.kwargs` (task-level
-overrides global).
+ABEvalFlow currently runs each variant as a separate Harbor job, which works
+without this feature. Per-task kwargs enables a single-job alternative for
+sweep-based workflows:
 
 ```yaml
-# Single-job example (requires this fork change):
+# Single-job example (supported since PR #2):
 tasks:
   - path: /workspace/tasks-treatment/my-submission
     environment_kwargs:
