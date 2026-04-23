@@ -87,6 +87,38 @@ my-skill/
 └── docs/                  ← reference docs for the agent (optional)
 ```
 
+See `examples/sample_skill/` for a minimal working example (manual mode).
+
+### AI-Assisted Mode
+
+If you only have the skill definition and want the pipeline to generate the
+instruction and tests automatically, set `generation_mode: ai` in
+`metadata.yaml` and provide only `skills/SKILL.md`:
+
+```
+submissions/<skill-name>/
+├── metadata.yaml              # Must include: generation_mode: ai
+└── skills/
+    └── SKILL.md               # Required — the pipeline generates the rest
+```
+
+The pipeline will use an LLM to generate `instruction.md` and
+`tests/test_outputs.py` from the skill definition before validation.
+See `examples/sample_skill_ai/` for a minimal AI-mode example.
+
+To enable AI-assisted features, pass the feature flags when triggering:
+
+```bash
+tkn pipeline start abevalflow-pipeline \
+  -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
+  -p revision=main \
+  -p submission-dir=my-skill \
+  -p enable-ai-generation=true \
+  -p enable-ai-review=true \
+  -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
+  -n ab-eval-flow
+```
+
 ### metadata.yaml (required)
 
 At minimum, you only need a name:
@@ -454,3 +486,6 @@ oc create -f pipelinerun.yaml -n ab-eval-flow
 | EventListener | `pipeline/triggers/event-listener.yaml` | Receives webhooks, filters, extracts submission dir |
 | TriggerBinding | `pipeline/triggers/trigger-binding.yaml` | Maps webhook payload to pipeline params |
 | TriggerTemplate | `pipeline/triggers/trigger-template.yaml` | Creates PipelineRun from params |
+| Validate Task | `pipeline/tasks/validate.yaml` | Validates submission structure and schema |
+| Generate Tests | `pipeline/tasks/generate_tests.yaml` | AI-assisted test generation (optional) |
+| AI Review | `pipeline/tasks/ai_review.yaml` | AI quality review of submission (optional) |

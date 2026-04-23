@@ -1,0 +1,10 @@
+name: sample-skill-ai
+description: >-
+  A minimal AI-mode sample. Only skills/SKILL.md is provided — the pipeline
+  generates instruction.md and tests/test_outputs.py automatically.
+persona: rh-developer
+version: "0.1.0"
+generation_mode: ai
+tags:
+  - sample
+  - ai-generated

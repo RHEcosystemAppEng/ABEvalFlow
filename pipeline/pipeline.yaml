@@ -128,6 +128,35 @@ spec:
       description: "Fisher's exact test p-value (e.g. 0.0271)"
       value: $(tasks.analyze.results.fisher-p-value)
 
+    # AI-assisted evaluation feature flags
+    - name: enable-ai-generation
+      type: string
+      default: "false"
+      description: >-
+        Set to 'true' to enable AI-assisted test generation.
+        Only applies when the submission has generation_mode: ai.
+    - name: enable-ai-review
+      type: string
+      default: "false"
+      description: >-
+        Set to 'true' to enable independent AI quality review of the
+        submission before scaffolding.
+    - name: llm-base-url
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000/v1"
+      description: LLM API base URL (OpenAI-compatible endpoint)
+    - name: llm-model
+      type: string
+      default: "claude-sonnet-4-20250514"
+      description: Model identifier for AI generation and review
+    - name: agent-type
+      type: string
+      default: "api"
+      description: >-
+        How the AI generation step invokes the LLM: 'api' for direct API
+        calls, or 'claude', 'cursor', 'opencode' to use a native agent CLI
+        with skill loading.
+
   workspaces:
     - name: shared-workspace
       description: >-
@@ -140,7 +169,7 @@ spec:
 
   tasks:
     # ------------------------------------------------------------------
-    # Step 1: Clone submissions repo and validate the submission
+    # Step 1a: Clone submissions repo
     # ------------------------------------------------------------------
     - name: clone-repo
       taskRef:
@@ -154,8 +183,36 @@ spec:
         - name: output
           workspace: shared-workspace
 
-    - name: validate
+    # ------------------------------------------------------------------
+    # Step 1b: AI-assisted test generation (optional, before validation)
+    # ------------------------------------------------------------------
+    - name: generate-tests
+      when:
+        - input: $(params.enable-ai-generation)
+          operator: in
+          values: ["true"]
       runAfter: ["clone-repo"]
+      taskRef:
+        name: generate-tests
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: llm-base-url
+          value: $(params.llm-base-url)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: agent-type
+          value: $(params.agent-type)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: validate
+      runAfter: ["clone-repo", "generate-tests"]
       taskRef:
         name: validate-submission
       params:
@@ -170,10 +227,36 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
+    # Step 1c: AI quality review (optional, after validation)
+    # ------------------------------------------------------------------
+    - name: ai-review
+      when:
+        - input: $(params.enable-ai-review)
+          operator: in
+          values: ["true"]
+      runAfter: ["validate"]
+      taskRef:
+        name: ai-review
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: llm-base-url
+          value: $(params.llm-base-url)
+        - name: llm-model
+          value: $(params.llm-model)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
     # Step 2: Scaffold treatment and control task directories
     # ------------------------------------------------------------------
     - name: scaffold
-      runAfter: ["validate"]
+      runAfter: ["validate", "ai-review"]
       taskRef:
         name: scaffold-submission
       params:

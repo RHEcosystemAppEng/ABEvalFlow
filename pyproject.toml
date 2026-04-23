@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
     "minio>=7.0",
+    "openai>=1.0",
 ]
 
 [project.optional-dependencies]
