@@ -161,6 +161,8 @@ spec:
             for result_file in sorted(variant_dir.rglob("result.json")):
                 try:
                     data = json.loads(result_file.read_text())
+                    if "verifier_result" not in data:
+                        continue
                     vr = data.get("verifier_result") or {}
                     rewards = vr.get("rewards") or {}
                     reward = rewards.get("reward")
