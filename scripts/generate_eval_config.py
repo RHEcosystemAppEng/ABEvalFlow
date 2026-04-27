@@ -129,7 +129,7 @@ def build_variant_config(
         "verifier_timeout_multiplier": verifier_mult,
         "agent_setup_timeout_multiplier": setup_mult,
         "environment_build_timeout_multiplier": build_mult,
-        "n_concurrent_trials": 4,
+        "n_concurrent_trials": 1,
         "environment": env_block,
         "agents": [{}],
         "tasks": [task],
