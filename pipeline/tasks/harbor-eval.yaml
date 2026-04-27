@@ -161,8 +161,9 @@ spec:
             for result_file in sorted(variant_dir.rglob("result.json")):
                 try:
                     data = json.loads(result_file.read_text())
-                    vr = data.get("verifier_result", {})
-                    reward = vr.get("reward")
+                    vr = data.get("verifier_result") or {}
+                    rewards = vr.get("rewards") or {}
+                    reward = rewards.get("reward")
                     total += 1
                     if reward is not None and float(reward) > 0.0:
                         passed += 1
