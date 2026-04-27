@@ -156,13 +156,29 @@ class TestParseVariantTrials:
         assert len(trials) == 1
         assert trials[0].reward == pytest.approx(0.85)
 
-    def test_empty_result_json(self, tmp_path: Path):
+    def test_empty_result_json_skipped(self, tmp_path: Path):
+        """result.json without verifier_result is treated as job-level and skipped."""
         variant = tmp_path / "variant" / "job"
         trial = variant / "trial_0"
         trial.mkdir(parents=True)
         (trial / "result.json").write_text("{}")
         trials = parse_variant_trials(tmp_path / "variant")
-        assert trials[0].reward is None
+        assert len(trials) == 0
+
+    def test_job_level_result_filtered(self, tmp_path: Path):
+        """Job-level result.json (no verifier_result) must not inflate trial count."""
+        variant = tmp_path / "variant"
+        job_dir = variant / "sub-treatment"
+        job_dir.mkdir(parents=True)
+        (job_dir / "result.json").write_text(json.dumps({"job_name": "sub-treatment"}))
+        trial_dir = job_dir / "task__001"
+        trial_dir.mkdir()
+        (trial_dir / "result.json").write_text(
+            json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}})
+        )
+        trials = parse_variant_trials(variant)
+        assert len(trials) == 1
+        assert trials[0].reward == 1.0
 
 
 # ---------------------------------------------------------------------------

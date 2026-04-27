@@ -92,7 +92,7 @@ def build_variant_config(
 
     env_block: dict[str, Any] = {
         "type": "openshift",
-        "delete": False,
+        "delete": True,
         "override_memory_mb": metadata.memory_mb,
         "override_storage_mb": metadata.storage_mb,
     }
