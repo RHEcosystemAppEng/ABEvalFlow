@@ -457,6 +457,54 @@ def _generate_via_agent(
     return generated
 
 
+def _generate_via_oracle(
+    submission_dir: Path,
+    metadata: SubmissionMetadata,
+) -> list[str]:
+    """Copy pre-baked files from oracle/ directory — no LLM needed.
+
+    Expects the submission to contain an ``oracle/`` subdirectory with
+    ``instruction.md``, ``test_outputs.py``, and optionally ``llm_judge.py``.
+    """
+    oracle_dir = submission_dir / "oracle"
+    if not oracle_dir.is_dir():
+        raise ValueError(
+            f"Oracle mode requires an oracle/ directory in {submission_dir}"
+        )
+
+    import shutil
+
+    tests_dir = submission_dir / "tests"
+    tests_dir.mkdir(exist_ok=True)
+
+    generated: list[str] = []
+
+    src_instruction = oracle_dir / "instruction.md"
+    if src_instruction.is_file():
+        shutil.copy2(src_instruction, submission_dir / "instruction.md")
+        generated.append("instruction.md")
+        logger.info("Oracle: copied instruction.md (%d bytes)", src_instruction.stat().st_size)
+    else:
+        raise ValueError("oracle/instruction.md not found")
+
+    src_test = oracle_dir / "test_outputs.py"
+    if src_test.is_file():
+        shutil.copy2(src_test, tests_dir / "test_outputs.py")
+        generated.append("tests/test_outputs.py")
+        logger.info("Oracle: copied test_outputs.py (%d bytes)", src_test.stat().st_size)
+    else:
+        raise ValueError("oracle/test_outputs.py not found")
+
+    if not metadata.skip_llm_judge:
+        src_judge = oracle_dir / "llm_judge.py"
+        if src_judge.is_file():
+            shutil.copy2(src_judge, tests_dir / "llm_judge.py")
+            generated.append("tests/llm_judge.py")
+            logger.info("Oracle: copied llm_judge.py (%d bytes)", src_judge.stat().st_size)
+
+    return generated
+
+
 CORRECTION_SYSTEM_PROMPT = """\
 You are an expert test engineer fixing issues in AI-generated evaluation files.
 
@@ -590,6 +638,19 @@ def generate(
 
     if not skill_content.strip():
         raise ValueError("skills/SKILL.md is empty — nothing to generate from")
+
+    # Oracle mode: copy pre-baked files, run deterministic checks only, no LLM
+    if agent_type == "oracle":
+        generated = _generate_via_oracle(submission_dir, metadata)
+        struct_errors = structural_check(submission_dir)
+        if struct_errors:
+            raise ValueError(f"Oracle structural check failed: {struct_errors}")
+        collect_errors = pytest_collect_check(submission_dir)
+        if collect_errors:
+            raise ValueError(f"Oracle pytest collect failed: {collect_errors}")
+        logger.info("Oracle mode: %d files validated", len(generated))
+        _upload_to_minio(submission_dir, metadata.name)
+        return generated
 
     skill_cache = workspace_dir / "_skill_cache"
     skill_cache.mkdir(parents=True, exist_ok=True)

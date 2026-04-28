@@ -773,3 +773,92 @@ class TestMinioUpload:
         ai_submission: Path,
     ) -> None:
         _upload_to_minio(ai_submission, "test-skill")
+
+
+class TestOracleMode:
+    @pytest.fixture()
+    def oracle_submission(self, tmp_path: Path) -> Path:
+        sub = tmp_path / "submissions" / "oracle-skill"
+        sub.mkdir(parents=True)
+        (sub / "metadata.yaml").write_text(yaml.dump(AI_METADATA | {"name": "oracle-skill"}))
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text(SKILL_CONTENT)
+        oracle = sub / "oracle"
+        oracle.mkdir()
+        (oracle / "instruction.md").write_text("<!-- #ai-generated-oracle -->\n# Task\nDo it.\n")
+        (oracle / "test_outputs.py").write_text(
+            "# #ai-generated-oracle\ndef test_ok(): assert True\n"
+        )
+        (oracle / "llm_judge.py").write_text(
+            "# #ai-generated-oracle\nscore = 0.9\n"
+        )
+        return sub
+
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
+    @patch("scripts.generate_tests.structural_check", return_value=[])
+    def test_copies_all_three_files(
+        self,
+        mock_struct: MagicMock,
+        mock_collect: MagicMock,
+        oracle_submission: Path,
+        tmp_path: Path,
+    ) -> None:
+        generated = generate(oracle_submission, tmp_path, agent_type="oracle")
+
+        assert "instruction.md" in generated
+        assert "tests/test_outputs.py" in generated
+        assert "tests/llm_judge.py" in generated
+        assert (oracle_submission / "instruction.md").is_file()
+        assert (oracle_submission / "tests" / "test_outputs.py").is_file()
+        assert (oracle_submission / "tests" / "llm_judge.py").is_file()
+
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
+    @patch("scripts.generate_tests.structural_check", return_value=[])
+    def test_skips_judge_when_metadata_flag_set(
+        self,
+        mock_struct: MagicMock,
+        mock_collect: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        sub = tmp_path / "submissions" / "no-judge-oracle"
+        sub.mkdir(parents=True)
+        meta = {**AI_METADATA, "name": "no-judge-oracle", "skip_llm_judge": True}
+        (sub / "metadata.yaml").write_text(yaml.dump(meta))
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text(SKILL_CONTENT)
+        oracle = sub / "oracle"
+        oracle.mkdir()
+        (oracle / "instruction.md").write_text("# Task\n")
+        (oracle / "test_outputs.py").write_text("def test_ok(): assert True\n")
+        (oracle / "llm_judge.py").write_text("score = 0.9\n")
+
+        generated = generate(sub, tmp_path, agent_type="oracle")
+
+        assert "tests/llm_judge.py" not in generated
+        assert not (sub / "tests" / "llm_judge.py").is_file()
+
+    def test_missing_oracle_dir_raises(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        sub = tmp_path / "submissions" / "no-oracle"
+        sub.mkdir(parents=True)
+        (sub / "metadata.yaml").write_text(yaml.dump(AI_METADATA | {"name": "no-oracle"}))
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text(SKILL_CONTENT)
+
+        with pytest.raises(ValueError, match="oracle/ directory"):
+            generate(sub, tmp_path, agent_type="oracle")
+
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
+    @patch("scripts.generate_tests.structural_check", return_value=[])
+    def test_no_llm_calls_made(
+        self,
+        mock_struct: MagicMock,
+        mock_collect: MagicMock,
+        oracle_submission: Path,
+        tmp_path: Path,
+    ) -> None:
+        with patch("scripts.generate_tests.llm_client.chat_completion") as mock_chat:
+            generate(oracle_submission, tmp_path, agent_type="oracle")
+            mock_chat.assert_not_called()
