@@ -16,6 +16,7 @@ dependencies = [
     "tenacity>=8.2",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
+    "minio>=7.0",
 ]
 
 [project.optional-dependencies]

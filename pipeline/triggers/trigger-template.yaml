@@ -13,6 +13,8 @@ spec:
       description: The full repository name (org/repo)
     - name: submission-dir
       description: The submission directory path under submissions/
+    - name: pr-number
+      description: The pull request number that triggered this run
   resourcetemplates:
     - apiVersion: tekton.dev/v1
       kind: PipelineRun
@@ -30,6 +32,10 @@ spec:
             value: $(tt.params.submission-dir)
           - name: pipeline-repo-revision
             value: "main"
+          - name: repo-name
+            value: $(tt.params.repo-name)
+          - name: pr-number
+            value: $(tt.params.pr-number)
         taskRunTemplate:
           serviceAccountName: pipeline
         workspaces:

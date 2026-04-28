@@ -13,3 +13,5 @@ spec:
       value: $(body.repository.full_name)
     - name: submission-dir
       value: $(extensions.submission_directory)
+    - name: pr-number
+      value: $(body.pull_request.number)
