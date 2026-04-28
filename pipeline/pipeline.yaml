@@ -56,6 +56,28 @@ spec:
       description: >-
         Minimum pass-rate uplift (treatment - control) for a 'pass'
         recommendation. Set to 0.0 to pass whenever treatment >= control.
+    - name: quay-uplift-threshold
+      type: string
+      default: "-1.0"
+      description: >-
+        Minimum uplift for Quay.io image promotion. Default -1.0 disables
+        promotion entirely. Set to 0.0 to promote whenever recommendation is pass.
+    - name: quay-repo
+      type: string
+      default: ""
+      description: Quay.io repository for image promotion (e.g. quay.io/myorg)
+    - name: quay-ttl-days
+      type: string
+      default: "7"
+      description: TTL in days for images promoted to Quay.io
+    - name: repo-name
+      type: string
+      default: ""
+      description: GitHub repo (org/name) for posting PR comments
+    - name: pr-number
+      type: string
+      default: ""
+      description: PR number that triggered this pipeline run
 
   workspaces:
     - name: shared-workspace
@@ -222,6 +244,46 @@ spec:
           value: $(tasks.validate.results.submission-name)
         - name: pipeline-run-id
           value: $(context.pipelineRun.name)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 7: Publish artifacts, PR comment, optional Quay promotion
+    # ------------------------------------------------------------------
+    - name: publish
+      runAfter: ["store-results"]
+      taskRef:
+        name: publish-store
+      params:
+        - name: report-dir
+          value: $(tasks.analyze.results.report-path)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: recommendation
+          value: $(tasks.analyze.results.recommendation)
+        - name: treatment-image-ref
+          value: $(tasks.build-push.results.treatment-image-ref)
+        - name: control-image-ref
+          value: $(tasks.build-push.results.control-image-ref)
+        - name: commit-sha
+          value: $(params.revision)
+        - name: uplift-threshold
+          value: $(params.quay-uplift-threshold)
+        - name: quay-repo
+          value: $(params.quay-repo)
+        - name: quay-ttl-days
+          value: $(params.quay-ttl-days)
+        - name: repo-name
+          value: $(params.repo-name)
+        - name: pr-number
+          value: $(params.pr-number)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
