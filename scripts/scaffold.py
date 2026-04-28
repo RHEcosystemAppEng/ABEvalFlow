@@ -144,6 +144,10 @@ def scaffold_submission(
         for filename, content in rendered.items():
             if filename == "Dockerfile":
                 dest = environment_dir / filename
+            elif filename == "test.sh":
+                tests_dir = target_dir / "tests"
+                tests_dir.mkdir(exist_ok=True)
+                dest = tests_dir / filename
             else:
                 dest = target_dir / filename
             dest.write_text(content)
@@ -156,6 +160,15 @@ def scaffold_submission(
         # Second copy at task root: Harbor reads instruction.md from the task
         # directory (outside the build context) for display/metadata purposes.
         shutil.copy2(submission_dir / "instruction.md", target_dir / "instruction.md")
+
+        # Copy solution/ and tests/ to task root: the OpenShift backend
+        # mounts emptyDir volumes over /tests and /solution inside the pod,
+        # hiding anything the Dockerfile COPY'd.  Harbor uploads these
+        # directories from the task root into the pod at runtime.
+        for rootdir in ("solution", "tests"):
+            src = submission_dir / rootdir
+            if src.is_dir():
+                shutil.copytree(src, target_dir / rootdir, dirs_exist_ok=True)
 
         logger.info("Scaffolded %s variant at %s", variant, target_dir)
 

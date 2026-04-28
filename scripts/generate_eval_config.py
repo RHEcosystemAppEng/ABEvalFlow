@@ -93,14 +93,17 @@ def build_variant_config(
     env_block: dict[str, Any] = {
         "type": "openshift",
         "delete": True,
-        "override_cpus": metadata.cpus,
         "override_memory_mb": metadata.memory_mb,
         "override_storage_mb": metadata.storage_mb,
     }
 
+    kwargs: dict[str, Any] = {"cpu_request": "100m"}
+
     if eval_mode == "prebuilt":
-        env_block["kwargs"] = {"image_ref": image_ref}
-    else:
+        kwargs["image_ref"] = image_ref
+    env_block["kwargs"] = kwargs
+
+    if eval_mode != "prebuilt":
         env_block["force_build"] = True
 
     agent_mult = _timeout_multiplier(
@@ -129,7 +132,7 @@ def build_variant_config(
         "verifier_timeout_multiplier": verifier_mult,
         "agent_setup_timeout_multiplier": setup_mult,
         "environment_build_timeout_multiplier": build_mult,
-        "n_concurrent_trials": 4,
+        "n_concurrent_trials": 1,
         "environment": env_block,
         "agents": [{}],
         "tasks": [task],

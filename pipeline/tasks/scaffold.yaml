@@ -56,6 +56,7 @@ spec:
         OUTPUT_DIR="$(workspaces.source.path)"
 
         cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
         pip install --quiet --no-cache-dir jinja2 pyyaml pydantic
 
         python scripts/scaffold.py "$SUBMISSION_DIR" "$OUTPUT_DIR"

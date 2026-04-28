@@ -77,7 +77,11 @@ def _extract_reward(result: dict) -> float | None:
 
 
 def parse_variant_trials(variant_dir: Path) -> list[TrialResult]:
-    """Scan all trial directories under a variant's results directory."""
+    """Scan all trial directories under a variant's results directory.
+
+    Skips job-level ``result.json`` files (which lack ``verifier_result``)
+    so only actual trial results are counted.
+    """
     trials: list[TrialResult] = []
     if not variant_dir.is_dir():
         return trials
@@ -86,6 +90,8 @@ def parse_variant_trials(variant_dir: Path) -> list[TrialResult]:
         trial_name = result_file.parent.name
         try:
             data = json.loads(result_file.read_text())
+            if "verifier_result" not in data:
+                continue
             reward = _extract_reward(data)
             trials.append(TrialResult(trial_name=trial_name, reward=reward))
         except (json.JSONDecodeError, ValueError, TypeError):

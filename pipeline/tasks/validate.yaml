@@ -70,6 +70,7 @@ spec:
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
 
         cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml
 
         python scripts/validate.py "$SUBMISSION_PATH" \

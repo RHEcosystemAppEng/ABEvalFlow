@@ -6,31 +6,22 @@ metadata:
 spec:
   serviceAccountName: pipeline
   triggers:
-    - name: submission-push-trigger
+    - name: submission-pr-trigger
       interceptors:
         - ref:
             name: "cel"
           params:
             - name: "filter"
-              # Only fire when at least one commit touches submissions/
               value: >-
-                body.commits.exists(c,
-                  c.added.exists(f, f.startsWith('submissions/')) ||
-                  c.modified.exists(f, f.startsWith('submissions/'))
-                )
+                header.match('X-GitHub-Event', 'pull_request') &&
+                body.action in ['opened', 'synchronize', 'reopened'] &&
+                body.pull_request.base.ref == 'main' &&
+                body.pull_request.head.ref.startsWith('eval/')
             - name: "overlays"
               value:
                 - key: submission_directory
-                  # Extract the first subdirectory under submissions/
-                  # e.g. submissions/my-submission/SKILL.md -> my-submission
-                  # NOTE: single-submission-per-push assumed; multi-submission
-                  # pushes only evaluate the first submission found.
                   expression: >-
-                    body.commits.map(c,
-                      c.added + c.modified
-                    ).flatten().filter(f,
-                      f.startsWith('submissions/')
-                    )[0].split('/')[1]
+                    body.pull_request.head.ref.split('/')[1]
       bindings:
         - ref: submission-binding
       template:

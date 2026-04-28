@@ -69,7 +69,7 @@ spec:
       description: Path to the base results directory containing treatment/ and control/ subdirs
   steps:
     - name: run-evaluation
-      image: registry.access.redhat.com/ubi9/python-311:9.6
+      image: registry.access.redhat.com/ubi9/python-312:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -78,7 +78,8 @@ spec:
         echo "=== Installing Harbor from $(params.harbor-fork-url) @ $(params.harbor-fork-revision) ==="
         INSTALL_START=$(date +%s)
         pip install --quiet --no-cache-dir \
-          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)"
+          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+          "kubernetes>=32.0.0"
         INSTALL_END=$(date +%s)
         echo "Harbor installed in $((INSTALL_END - INSTALL_START))s"
         harbor --version
@@ -97,6 +98,7 @@ spec:
         CONFIG_DIR="$(workspaces.source.path)/_eval-configs"
 
         cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml
 
         ARGS=(
@@ -159,8 +161,11 @@ spec:
             for result_file in sorted(variant_dir.rglob("result.json")):
                 try:
                     data = json.loads(result_file.read_text())
-                    vr = data.get("verifier_result", {})
-                    reward = vr.get("reward")
+                    if "verifier_result" not in data:
+                        continue
+                    vr = data.get("verifier_result") or {}
+                    rewards = vr.get("rewards") or {}
+                    reward = rewards.get("reward")
                     total += 1
                     if reward is not None and float(reward) > 0.0:
                         passed += 1
