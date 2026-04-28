@@ -28,6 +28,10 @@ spec:
             value: $(tt.params.revision)
           - name: submission-dir
             value: $(tt.params.submission-dir)
+          - name: pipeline-repo-revision
+            value: "main"
+        taskRunTemplate:
+          serviceAccountName: pipeline
         workspaces:
           - name: shared-workspace
             volumeClaimTemplate:

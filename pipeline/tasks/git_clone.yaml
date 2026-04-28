@@ -25,10 +25,16 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
         CHECKOUT_DIR="$(workspaces.output.path)"
-        # Clean workspace before cloning (Tekton creates the dir)
+        REVISION="$(params.revision)"
+        git config --global --add safe.directory "$CHECKOUT_DIR"
         rm -rf "${CHECKOUT_DIR:?}"/{,.[!.],..?}* 2>/dev/null || true
-        echo "Cloning $(params.url) @ $(params.revision) into $CHECKOUT_DIR"
-        git clone --depth 1 --branch "$(params.revision)" \
-          "$(params.url)" "$CHECKOUT_DIR"
+        echo "Cloning $(params.url) @ ${REVISION} into $CHECKOUT_DIR"
+        if git clone --depth 1 --branch "$REVISION" "$(params.url)" "$CHECKOUT_DIR" 2>/dev/null; then
+          echo "Cloned branch/tag $REVISION"
+        else
+          git clone "$(params.url)" "$CHECKOUT_DIR"
+          cd "$CHECKOUT_DIR"
+          git checkout "$REVISION"
+        fi
         cd "$CHECKOUT_DIR"
         echo "Cloned at $(git rev-parse HEAD)"
