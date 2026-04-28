@@ -1,10 +1,15 @@
 name: sample-skill-ai
-description: >-
-  A minimal AI-mode sample. Only skills/SKILL.md is provided — the pipeline
-  generates instruction.md and tests/test_outputs.py automatically.
-persona: rh-developer
+description: "Create a file with specific content -- oracle AI-mode smoke test"
+persona: general
 version: "0.1.0"
 generation_mode: ai
+skip_llm_judge: true
 tags:
-  - sample
+  - smoke-test
   - ai-generated
+  - oracle
+cpus: 1
+memory_mb: 512
+storage_mb: 1024
+experiment:
+  n_trials: 1

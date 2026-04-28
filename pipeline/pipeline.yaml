@@ -131,16 +131,16 @@ spec:
     # AI-assisted evaluation feature flags
     - name: enable-ai-generation
       type: string
-      default: "false"
+      default: "true"
       description: >-
-        Set to 'true' to enable AI-assisted test generation.
-        Only applies when the submission has generation_mode: ai.
+        Run the AI-assisted test generation step. The step self-skips
+        for submissions with generation_mode: manual.
     - name: enable-ai-review
       type: string
-      default: "false"
+      default: "true"
       description: >-
-        Set to 'true' to enable independent AI quality review of the
-        submission before scaffolding.
+        Run independent AI quality review before scaffolding.
+        Automatically disabled in oracle mode.
     - name: llm-base-url
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000/v1"
@@ -240,6 +240,9 @@ spec:
     # ------------------------------------------------------------------
     - name: ai-review
       when:
+        - input: $(params.agent-type)
+          operator: notin
+          values: ["oracle"]
         - input: $(params.enable-ai-review)
           operator: in
           values: ["true"]
