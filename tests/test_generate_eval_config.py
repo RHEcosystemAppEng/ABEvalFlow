@@ -186,6 +186,63 @@ class TestCustomMetadataFields:
         assert config["jobs_dir"] == "/workspace/results/treatment"
 
 
+class TestAgentConfig:
+    def test_default_oracle_agent(self, minimal_submission: Path):
+        meta = load_metadata(minimal_submission)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+        )
+        assert config["agents"] == [{}]
+
+    def test_llm_model_with_api_base(self, minimal_submission: Path):
+        meta = load_metadata(minimal_submission)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_model="claude-sonnet",
+            llm_api_base="http://litellm:4000",
+        )
+        agent = config["agents"][0]
+        assert agent["model_name"] == "claude-sonnet"
+        assert agent["env"]["OPENAI_BASE_URL"] == "http://litellm:4000"
+
+    def test_llm_model_without_api_base(self, minimal_submission: Path):
+        meta = load_metadata(minimal_submission)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_model="gpt-4o",
+        )
+        agent = config["agents"][0]
+        assert agent["model_name"] == "gpt-4o"
+        assert "env" not in agent
+
+    def test_llm_config_in_generated_yaml(
+        self, minimal_submission: Path, tmp_path: Path,
+    ):
+        out_dir = tmp_path / "configs"
+        configs = generate_eval_configs(
+            submission_dir=minimal_submission,
+            treatment_task_dir=TREATMENT_DIR,
+            control_task_dir=CONTROL_DIR,
+            output_dir=out_dir,
+            eval_mode="prebuilt",
+            results_base_dir="eval-results",
+            treatment_image_ref=TREATMENT_REF,
+            control_image_ref=CONTROL_REF,
+            llm_model="claude-sonnet",
+            llm_api_base="http://litellm:4000",
+        )
+        for variant in ("treatment", "control"):
+            agent = configs[variant]["agents"][0]
+            assert agent["model_name"] == "claude-sonnet"
+            loaded = yaml.safe_load(
+                (out_dir / f"{variant}-config.yaml").read_text()
+            )
+            assert loaded["agents"][0]["model_name"] == "claude-sonnet"
+
+
 class TestGenerateEvalConfigs:
     def test_writes_two_yaml_files(self, minimal_submission: Path, tmp_path: Path):
         out_dir = tmp_path / "configs"

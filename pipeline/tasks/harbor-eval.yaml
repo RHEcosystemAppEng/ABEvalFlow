@@ -57,6 +57,14 @@ spec:
       type: string
       default: "main"
       description: Branch or SHA of the pipeline repo to use for scripts
+    - name: llm-model
+      type: string
+      default: "claude-sonnet"
+      description: LLM model name for Harbor evaluation agents
+    - name: llm-api-base
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000"
+      description: Base URL of the OpenAI-compatible LLM API
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions and scaffolded task directories
@@ -115,6 +123,13 @@ spec:
             --treatment-image-ref "$(params.treatment-image-ref)"
             --control-image-ref "$(params.control-image-ref)"
           )
+        fi
+
+        if [ -n "$(params.llm-model)" ]; then
+          ARGS+=(--llm-model "$(params.llm-model)")
+        fi
+        if [ -n "$(params.llm-api-base)" ]; then
+          ARGS+=(--llm-api-base "$(params.llm-api-base)")
         fi
 
         python scripts/generate_eval_config.py "${ARGS[@]}"
