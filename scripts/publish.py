@@ -33,8 +33,8 @@ def _build_artifact_prefix(
     submission_name: str,
     pipeline_run_id: str,
 ) -> str:
-    """Build the MinIO object prefix: YYYYMMDD_<name>_<run-id>."""
-    datestamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    """Build the MinIO object prefix: YYYYMMDD_hhmmss_<name>_<run-id>."""
+    datestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"{datestamp}_{submission_name}_{pipeline_run_id}"
 
 

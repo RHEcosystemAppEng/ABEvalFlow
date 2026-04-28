@@ -57,8 +57,9 @@ class TestBuildArtifactPrefix:
     def test_format(self):
         prefix = _build_artifact_prefix("hello-world", "abevalflow-xyz")
         parts = prefix.split("_")
-        assert len(parts) >= 3
-        assert parts[0].isdigit() and len(parts[0]) == 8
+        assert len(parts) >= 4
+        assert parts[0].isdigit() and len(parts[0]) == 8  # YYYYMMDD
+        assert parts[1].isdigit() and len(parts[1]) == 6  # hhmmss
         assert "hello-world" in prefix
         assert "abevalflow-xyz" in prefix
 
