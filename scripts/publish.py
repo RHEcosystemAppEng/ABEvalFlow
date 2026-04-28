@@ -92,6 +92,60 @@ def upload_reports(
     return prefix
 
 
+def upload_debug_artifacts(
+    results_dir: Path,
+    prefix: str,
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str = "ab-eval-reports",
+    secure: bool | None = None,
+) -> int:
+    """Upload agent/ and verifier/ folders from each trial to MinIO.
+
+    Walks the Harbor results directory tree and uploads every file found
+    under ``agent/`` or ``verifier/`` subdirectories, preserving the
+    relative path structure.  Returns the number of files uploaded.
+    """
+    from minio import Minio
+
+    if not results_dir.is_dir():
+        logger.warning("Results dir does not exist, skipping debug upload: %s", results_dir)
+        return 0
+
+    parsed = urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    if secure is None:
+        secure = parsed.scheme == "https"
+
+    client = Minio(host, access_key=access_key, secret_key=secret_key, secure=secure)
+
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+    uploaded = 0
+    for variant in ("treatment", "control"):
+        variant_dir = results_dir / variant
+        if not variant_dir.is_dir():
+            continue
+        for fpath in sorted(variant_dir.rglob("*")):
+            if not fpath.is_file():
+                continue
+            rel = fpath.relative_to(results_dir)
+            parts = rel.parts
+            if not any(p in ("agent", "verifier") for p in parts):
+                continue
+            object_name = f"{prefix}/debug/{rel}"
+            try:
+                client.fput_object(bucket, object_name, str(fpath))
+                uploaded += 1
+            except Exception as exc:
+                logger.warning("Failed to upload %s: %s", fpath, exc)
+
+    logger.info("Uploaded %d debug artifact files to s3://%s/%s/debug/", uploaded, bucket, prefix)
+    return uploaded
+
+
 def promote_to_quay(
     treatment_image_ref: str,
     submission_name: str,
@@ -275,6 +329,8 @@ def main() -> int:
                         help="GitHub repo (org/name) for PR comment")
     parser.add_argument("--pr-number", type=str, default="",
                         help="PR number for GitHub comment")
+    parser.add_argument("--results-dir", type=Path, default=None,
+                        help="Path to Harbor results dir (uploads agent/verifier debug artifacts)")
     parser.add_argument("--minio-endpoint", type=str, default=None,
                         help="MinIO endpoint (default: MINIO_ENDPOINT env var)")
     parser.add_argument("--minio-bucket", type=str, default="ab-eval-reports")
@@ -305,6 +361,15 @@ def main() -> int:
             logger.error("Failed to upload reports")
             upload_ok = False
             success = False
+        if prefix and args.results_dir:
+            upload_debug_artifacts(
+                results_dir=args.results_dir,
+                prefix=prefix,
+                endpoint=minio_endpoint,
+                access_key=minio_access_key,
+                secret_key=minio_secret_key,
+                bucket=args.minio_bucket,
+            )
     else:
         logger.warning("MinIO not configured — skipping report upload")
 

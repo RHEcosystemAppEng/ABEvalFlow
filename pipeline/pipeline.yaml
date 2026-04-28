@@ -300,6 +300,8 @@ spec:
           value: $(params.repo-name)
         - name: pr-number
           value: $(params.pr-number)
+        - name: results-dir
+          value: $(tasks.harbor-eval.results.results-dir)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision

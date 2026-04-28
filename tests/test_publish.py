@@ -13,6 +13,7 @@ from scripts.publish import (
     cleanup_images,
     post_pr_comment,
     promote_to_quay,
+    upload_debug_artifacts,
     upload_reports,
 )
 
@@ -270,6 +271,89 @@ class TestCleanupImages:
         cmd = mock_run.call_args[0][0]
         assert cmd[:2] == ["oc", "delete"]
         assert cmd[2] == "istag"
+
+
+@pytest.fixture
+def results_dir(tmp_path: Path) -> Path:
+    """Create a mock Harbor results directory with agent/verifier folders."""
+    for variant in ("treatment", "control"):
+        trial = tmp_path / variant / "job-name" / "trial_001__uuid1"
+        (trial / "agent").mkdir(parents=True)
+        (trial / "agent" / "agent.log").write_text("agent log content")
+        (trial / "agent" / "solution.py").write_text("print('hello')")
+        (trial / "verifier").mkdir(parents=True)
+        (trial / "verifier" / "verifier.log").write_text("verifier log")
+        (trial / "result.json").write_text('{"status": "pass"}')
+    return tmp_path
+
+
+class TestUploadDebugArtifacts:
+    @patch("minio.Minio")
+    def test_uploads_agent_and_verifier_files(self, mock_minio_cls, results_dir):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        count = upload_debug_artifacts(
+            results_dir=results_dir,
+            prefix="20260428_test_run1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        assert count == 6  # 3 files x 2 variants (agent.log, solution.py, verifier.log)
+        uploaded_names = [
+            call[0][1] for call in mock_client.fput_object.call_args_list
+        ]
+        assert any("agent/agent.log" in n for n in uploaded_names)
+        assert any("verifier/verifier.log" in n for n in uploaded_names)
+        assert all(n.startswith("20260428_test_run1/debug/") for n in uploaded_names)
+
+    @patch("minio.Minio")
+    def test_skips_non_agent_verifier_files(self, mock_minio_cls, results_dir):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        upload_debug_artifacts(
+            results_dir=results_dir,
+            prefix="prefix",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        uploaded_names = [
+            call[0][1] for call in mock_client.fput_object.call_args_list
+        ]
+        assert not any("result.json" in n for n in uploaded_names)
+
+    def test_nonexistent_results_dir(self, tmp_path):
+        count = upload_debug_artifacts(
+            results_dir=tmp_path / "nonexistent",
+            prefix="prefix",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+        assert count == 0
+
+    @patch("minio.Minio")
+    def test_creates_bucket_if_missing(self, mock_minio_cls, results_dir):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = False
+
+        upload_debug_artifacts(
+            results_dir=results_dir,
+            prefix="prefix",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        mock_client.make_bucket.assert_called_once_with("ab-eval-reports")
 
 
 class TestUpliftThresholdLogic:
