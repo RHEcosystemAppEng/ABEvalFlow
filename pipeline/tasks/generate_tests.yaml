@@ -78,6 +78,26 @@ spec:
               name: llm-credentials
               key: api-key
               optional: true
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: endpoint-url
+              optional: true
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-user
+              optional: true
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-password
+              optional: true
+        - name: PIPELINE_RUN_ID
+          value: "$(context.taskRun.name)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -86,7 +106,7 @@ spec:
         WORKSPACE_DIR="$(workspaces.source.path)"
 
         cd "$PIPELINE_DIR"
-        pip install --quiet --no-cache-dir pydantic pyyaml openai
+        pip install --quiet --no-cache-dir pydantic pyyaml openai minio pytest
         export PYTHONPATH="$PIPELINE_DIR"
 
         python scripts/generate_tests.py "$SUBMISSION_PATH" \

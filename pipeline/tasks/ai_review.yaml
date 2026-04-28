@@ -35,7 +35,7 @@ spec:
     - name: review-result
       description: JSON quality assessment with scores and findings
     - name: review-passed
-      description: "true" if the review passed, "false" otherwise
+      description: Whether the review passed (true or false)
   steps:
     - name: clone-pipeline-repo
       image: registry.access.redhat.com/ubi9/python-311:9.6
