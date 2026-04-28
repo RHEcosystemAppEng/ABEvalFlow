@@ -54,6 +54,10 @@ spec:
       type: string
       default: ""
       description: PR number for GitHub comment
+    - name: results-dir
+      type: string
+      default: ""
+      description: Path to Harbor results dir for debug artifact upload (agent/verifier logs)
     - name: minio-bucket
       type: string
       default: "ab-eval-reports"
@@ -147,6 +151,9 @@ spec:
         fi
         if [ -n "$(params.pr-number)" ]; then
           ARGS+=(--pr-number "$(params.pr-number)")
+        fi
+        if [ -n "$(params.results-dir)" ]; then
+          ARGS+=(--results-dir "$(params.results-dir)")
         fi
 
         python scripts/publish.py "${ARGS[@]}"
