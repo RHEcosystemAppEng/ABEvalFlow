@@ -39,9 +39,13 @@ from abevalflow.generation_validator import (
     check_markdown,
     check_python,
     content_check,
+    final_review,
+    multi_reviewer_check,
+    pytest_collect_check,
     structural_check,
 )
 from abevalflow.schemas import SubmissionMetadata
+from scripts.publish import upload_generated_files
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +154,7 @@ Output ONLY valid Python source for test_outputs.py — nothing else.
 # --- Step 3 (optional): llm_judge.py -----------------------------------------
 
 JUDGE_PROMPT = """\
-Given the skill, instruction, and tests below, write an **optional** \
+Given the skill, instruction, and tests below, write an \
 LLM-as-judge evaluator in ``tests/llm_judge.py``.
 
 The judge should:
@@ -158,9 +162,8 @@ The judge should:
 - Use an LLM call to assess quality beyond what deterministic tests cover
 - Produce a numeric score (0.0–1.0) and a short rationale
 - Be self-contained (import its own LLM client)
-
-If the skill and tests are simple enough that deterministic tests suffice, \
-output exactly the word SKIP (nothing else).
+- Focus on aspects that deterministic tests cannot capture (code quality, \
+  adherence to best practices, completeness of approach)
 
 ## Skill Content (SKILL.md)
 {skill_content}
@@ -171,7 +174,7 @@ output exactly the word SKIP (nothing else).
 ## tests/test_outputs.py
 {test_content}
 
-Output ONLY valid Python source for llm_judge.py, or the word SKIP.
+Output ONLY valid Python source for llm_judge.py — nothing else.
 """
 
 AGENT_TASK_PROMPT = """\
@@ -361,27 +364,27 @@ def _generate_via_api(
         raise ValueError(f"test_outputs.py validation failed: {errors}")
     generated.append("tests/test_outputs.py")
 
-    # --- Step 3: llm_judge.py (optional) --------------------------------------
-    judge_text = _llm_call(
-        system,
-        JUDGE_PROMPT.format(
-            skill_content=skill_content,
-            instruction_content=instruction_text,
-            test_content=test_text,
-        ),
-        max_tokens=2048,
-    )
-    if judge_text.strip().upper() != "SKIP":
+    # --- Step 3: llm_judge.py (default: generated; skip via metadata) ---------
+    if metadata.skip_llm_judge:
+        logger.info("Step 3: skipping llm_judge.py (skip_llm_judge=true in metadata)")
+    else:
+        judge_text = _llm_call(
+            system,
+            JUDGE_PROMPT.format(
+                skill_content=skill_content,
+                instruction_content=instruction_text,
+                test_content=test_text,
+            ),
+            max_tokens=2048,
+        )
         (tests_dir / "llm_judge.py").write_text(judge_text)
         logger.info("Step 3: generated llm_judge.py (%d chars)", len(judge_text))
         errors = check_python(tests_dir / "llm_judge.py")
         if errors:
-            logger.warning("llm_judge.py failed validation, skipping: %s", errors)
+            logger.warning("llm_judge.py failed validation, removing: %s", errors)
             (tests_dir / "llm_judge.py").unlink(missing_ok=True)
         else:
             generated.append("tests/llm_judge.py")
-    else:
-        logger.info("Step 3: LLM chose to skip llm_judge.py")
 
     return generated
 
@@ -454,17 +457,130 @@ def _generate_via_agent(
     return generated
 
 
+CORRECTION_SYSTEM_PROMPT = """\
+You are an expert test engineer fixing issues in AI-generated evaluation files.
+
+You will receive the current instruction.md and tests/test_outputs.py along \
+with a list of issues identified by reviewers. Fix ONLY the cited issues — \
+preserve everything else.
+
+Output the corrected file content when asked. No markdown fences, no commentary.
+"""
+
+CORRECTION_INSTRUCTION_PROMPT = """\
+Fix the following issues in instruction.md. Preserve all content that is not \
+related to the issues.
+
+## Current instruction.md
+{instruction_content}
+
+## Issues to Fix
+{issues}
+
+Output ONLY the corrected instruction.md — nothing else.
+"""
+
+CORRECTION_TEST_PROMPT = """\
+Fix the following issues in tests/test_outputs.py. Preserve all content that \
+is not related to the issues.
+
+## Current tests/test_outputs.py
+{test_content}
+
+## Issues to Fix
+{issues}
+
+Output ONLY the corrected test_outputs.py — nothing else.
+"""
+
+
+def _correction_pass(
+    submission_dir: Path,
+    issues: list[str],
+    system: str = CORRECTION_SYSTEM_PROMPT,
+) -> None:
+    """Apply targeted corrections based on consolidated reviewer feedback."""
+    issues_text = "\n".join(f"- {issue}" for issue in issues)
+    logger.info("Correction pass: addressing %d issues", len(issues))
+
+    instruction_path = submission_dir / "instruction.md"
+    test_path = submission_dir / "tests" / "test_outputs.py"
+
+    instruction_issues = [i for i in issues if "test" not in i.lower() or "instruction" in i.lower()]
+    test_issues = [i for i in issues if "test" in i.lower() or "coverage" in i.lower()]
+
+    if not test_issues:
+        test_issues = issues
+    if not instruction_issues:
+        instruction_issues = issues
+
+    if instruction_path.is_file():
+        corrected = _llm_call(
+            system,
+            CORRECTION_INSTRUCTION_PROMPT.format(
+                instruction_content=instruction_path.read_text(),
+                issues="\n".join(f"- {i}" for i in instruction_issues),
+            ),
+        )
+        if corrected.strip():
+            instruction_path.write_text(corrected)
+            logger.info("Correction pass: rewrote instruction.md (%d chars)", len(corrected))
+
+    if test_path.is_file():
+        corrected = _llm_call(
+            system,
+            CORRECTION_TEST_PROMPT.format(
+                test_content=test_path.read_text(),
+                issues="\n".join(f"- {i}" for i in test_issues),
+            ),
+        )
+        if corrected.strip():
+            test_path.write_text(corrected)
+            logger.info("Correction pass: rewrote test_outputs.py (%d chars)", len(corrected))
+
+
+def _upload_to_minio(submission_dir: Path, submission_name: str) -> None:
+    """Upload approved generated files to MinIO if credentials are configured."""
+    endpoint = os.environ.get("MINIO_ENDPOINT", "")
+    access_key = os.environ.get("MINIO_ACCESS_KEY", "")
+    secret_key = os.environ.get("MINIO_SECRET_KEY", "")
+    pipeline_run_id = os.environ.get("PIPELINE_RUN_ID", "unknown")
+
+    if not all([endpoint, access_key, secret_key]):
+        logger.info("MinIO credentials not set, skipping generated-file upload")
+        return
+
+    try:
+        prefix = upload_generated_files(
+            submission_dir=submission_dir,
+            submission_name=submission_name,
+            pipeline_run_id=pipeline_run_id,
+            endpoint=endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+        )
+        if prefix:
+            logger.info("Generated files stored in MinIO: %s/generated/", prefix)
+    except Exception as exc:
+        logger.warning("MinIO upload failed (non-fatal): %s", exc)
+
+
 def generate(
     submission_dir: Path,
     workspace_dir: Path,
     agent_type: str = "api",
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[str]:
-    """Run AI-assisted test generation with a validate-and-retry loop.
+    """Run AI-assisted test generation with a multi-stage validation loop.
 
-    After each generation attempt the output undergoes structural checks
-    (existence, non-empty, py_compile) and an LLM content review.  On
-    failure, errors are fed back into the next attempt.
+    After each generation attempt the output undergoes:
+      4. structural_check     — file existence, non-empty, ast.parse
+      5. pytest_collect_check  — ``pytest --collect-only``
+      6. multi_reviewer_check  — 3 parallel LLM reviewers
+      7. correction_pass       — targeted LLM fix (only if reviewers found issues)
+      8. final_review          — single strict go/no-go gate
+
+    On failure, errors are fed back into the next full generation attempt.
     """
     metadata, skill_content = _load_submission(submission_dir)
 
@@ -489,6 +605,7 @@ def generate(
     for attempt in range(1, max_retries + 1):
         logger.info("Generation attempt %d/%d", attempt, max_retries)
 
+        # --- Steps 0-3: generate files -----------------------------------------
         try:
             if agent_type == "api":
                 generated = _generate_via_api(
@@ -509,6 +626,7 @@ def generate(
                 raise
             continue
 
+        # --- Step 4: structural check ------------------------------------------
         struct_errors = structural_check(submission_dir)
         if struct_errors:
             last_errors = struct_errors
@@ -522,20 +640,64 @@ def generate(
                 )
             continue
 
-        review = content_check(submission_dir)
-        if not review["passed"]:
-            last_errors = review["issues"]
+        # --- Step 5: pytest --collect-only -------------------------------------
+        collect_errors = pytest_collect_check(submission_dir)
+        if collect_errors:
+            last_errors = collect_errors
             logger.warning(
-                "Attempt %d content review failed: %s", attempt, review["issues"],
+                "Attempt %d pytest collect failed: %s", attempt, collect_errors,
             )
             if attempt == max_retries:
                 raise ValueError(
-                    f"Generation failed content review after {max_retries} "
-                    f"attempts: {review['issues']}"
+                    f"Generation failed pytest collect after {max_retries} "
+                    f"attempts: {collect_errors}"
+                )
+            continue
+
+        # --- Step 6: multi-reviewer check --------------------------------------
+        review = multi_reviewer_check(submission_dir)
+        if not review["passed"]:
+            logger.warning(
+                "Attempt %d multi-reviewer check found %d issues",
+                attempt, len(review["issues"]),
+            )
+
+            # --- Step 7: correction pass ---------------------------------------
+            _correction_pass(submission_dir, review["issues"])
+
+            post_errors = structural_check(submission_dir)
+            post_errors += pytest_collect_check(submission_dir)
+            if post_errors:
+                last_errors = post_errors
+                logger.warning(
+                    "Attempt %d post-correction validation failed: %s",
+                    attempt, post_errors,
+                )
+                if attempt == max_retries:
+                    raise ValueError(
+                        f"Generation failed post-correction validation after "
+                        f"{max_retries} attempts: {post_errors}"
+                    )
+                continue
+
+        # --- Step 8: final review ----------------------------------------------
+        final = final_review(submission_dir)
+        if not final["passed"]:
+            last_errors = final["issues"]
+            logger.warning(
+                "Attempt %d final review failed: %s", attempt, final["issues"],
+            )
+            if attempt == max_retries:
+                raise ValueError(
+                    f"Generation failed final review after {max_retries} "
+                    f"attempts: {final['issues']}"
                 )
             continue
 
         logger.info("Generation validated on attempt %d", attempt)
+
+        _upload_to_minio(submission_dir, metadata.name)
+
         return generated
 
     raise ValueError(f"Generation failed after {max_retries} attempts")

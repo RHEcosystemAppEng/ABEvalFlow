@@ -146,6 +146,66 @@ def upload_debug_artifacts(
     return uploaded
 
 
+def upload_generated_files(
+    submission_dir: Path,
+    submission_name: str,
+    pipeline_run_id: str,
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str = "ab-eval-reports",
+    secure: bool | None = None,
+) -> str | None:
+    """Upload AI-generated files to MinIO alongside evaluation reports.
+
+    Uploads instruction.md, tests/test_outputs.py, and tests/llm_judge.py
+    (if present) under the same YYYYMMDD_<name>_<run-id>/generated/ prefix.
+
+    Returns the artifact prefix on success, None if no files were uploaded.
+    """
+    from minio import Minio
+
+    prefix = _build_artifact_prefix(submission_name, pipeline_run_id)
+
+    parsed = urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    if secure is None:
+        secure = parsed.scheme == "https"
+
+    client = Minio(
+        host,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=secure,
+    )
+
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+        logger.info("Created bucket: %s", bucket)
+
+    candidates = [
+        (submission_dir / "instruction.md", "instruction.md"),
+        (submission_dir / "tests" / "test_outputs.py", "test_outputs.py"),
+        (submission_dir / "tests" / "llm_judge.py", "llm_judge.py"),
+    ]
+
+    uploaded = 0
+    for filepath, name in candidates:
+        if not filepath.exists():
+            continue
+        object_name = f"{prefix}/generated/{name}"
+        client.fput_object(bucket, object_name, str(filepath))
+        logger.info("Uploaded %s -> s3://%s/%s", filepath, bucket, object_name)
+        uploaded += 1
+
+    if uploaded == 0:
+        logger.warning("No generated files found in %s", submission_dir)
+        return None
+
+    logger.info("Uploaded %d generated file(s) to %s/generated/", uploaded, prefix)
+    return prefix
+
+
 def promote_to_quay(
     treatment_image_ref: str,
     submission_name: str,

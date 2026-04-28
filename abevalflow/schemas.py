@@ -187,6 +187,13 @@ class SubmissionMetadata(BaseModel):
             "'ai' generates those files from skills/SKILL.md using an LLM."
         ),
     )
+    skip_llm_judge: bool = Field(
+        default=False,
+        description=(
+            "Set to true to skip LLM judge generation in AI mode. "
+            "By default the pipeline generates tests/llm_judge.py."
+        ),
+    )
 
     experiment: ExperimentConfig = Field(
         default_factory=ExperimentConfig,

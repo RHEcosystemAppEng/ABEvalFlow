@@ -1,8 +1,10 @@
 """Validate AI-generated submission files before they proceed down the pipeline.
 
-Two layers:
-  1. structural_check — file existence, non-empty, Python compilation (no LLM cost)
-  2. content_check   — lightweight LLM coherence review (single cheap call)
+Four layers:
+  1. structural_check    — file existence, non-empty, Python compilation (no LLM cost)
+  2. pytest_collect_check — ``pytest --collect-only`` to verify tests are discoverable
+  3. multi_reviewer_check — 3 parallel LLM reviewers with distinct personas
+  4. final_review         — single strict LLM go/no-go gate after corrections
 
 Used inside the generate-validate retry loop in scripts/generate_tests.py.
 """
@@ -13,11 +15,15 @@ import ast
 import json
 import logging
 import re
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from abevalflow import llm_client
 
 logger = logging.getLogger(__name__)
+
+_PYTEST_COLLECT_TIMEOUT = 10
 
 CONTENT_CHECK_SYSTEM_PROMPT = """\
 You are a QA gate for AI-generated skill evaluation files.
@@ -96,6 +102,41 @@ def structural_check(submission_dir: Path) -> list[str]:
     return errors
 
 
+def pytest_collect_check(submission_dir: Path) -> list[str]:
+    """Run ``pytest --collect-only`` on generated tests to verify discoverability.
+
+    Returns a list of error strings (empty = all tests collected successfully).
+    """
+    test_file = submission_dir / "tests" / "test_outputs.py"
+    if not test_file.is_file():
+        return ["test_outputs.py is missing — cannot collect"]
+
+    try:
+        result = subprocess.run(
+            ["python", "-m", "pytest", "--collect-only", "-q", str(test_file)],
+            capture_output=True,
+            text=True,
+            timeout=_PYTEST_COLLECT_TIMEOUT,
+            cwd=str(submission_dir),
+        )
+    except FileNotFoundError:
+        logger.warning("pytest not available, skipping collect check")
+        return []
+    except subprocess.TimeoutExpired:
+        return ["pytest --collect-only timed out (possible import hang)"]
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        detail = stderr or stdout or "unknown error"
+        lines = detail.splitlines()
+        summary = lines[-1] if lines else detail
+        return [f"pytest --collect-only failed: {summary}"]
+
+    logger.info("pytest --collect-only passed for %s", test_file.name)
+    return []
+
+
 def content_check(submission_dir: Path) -> dict:
     """Run a lightweight LLM coherence review of the generated files.
 
@@ -129,6 +170,197 @@ def content_check(submission_dir: Path) -> dict:
         else:
             logger.warning("Content check returned non-JSON: %s", response_text[:200])
             return {"passed": False, "issues": ["LLM content check returned invalid JSON"]}
+
+    passed = bool(result.get("pass", False))
+    issues = result.get("issues", [])
+    if not isinstance(issues, list):
+        issues = [str(issues)]
+
+    return {"passed": passed, "issues": issues}
+
+
+_REVIEWER_JSON_INSTRUCTION = """\
+
+Output ONLY valid JSON:
+{"pass": true, "issues": []}          // if acceptable
+{"pass": false, "issues": ["..."]}    // if problems found
+
+Be strict but pragmatic — minor style issues are acceptable."""
+
+_COVERAGE_REVIEWER_SYSTEM = """\
+You are a **test coverage reviewer** for AI-generated skill evaluation files.
+
+You will receive a skill definition (SKILL.md), a generated task instruction \
+(instruction.md), and generated tests (test_outputs.py).
+
+Focus exclusively on test coverage:
+1. Do the tests cover ALL requirements stated in instruction.md?
+2. Are edge cases and error paths tested?
+3. Are there any untested requirements?
+4. Do the tests actually assert meaningful outcomes (not just "assert True")?
+""" + _REVIEWER_JSON_INSTRUCTION
+
+_ALIGNMENT_REVIEWER_SYSTEM = """\
+You are a **skill alignment reviewer** for AI-generated skill evaluation files.
+
+You will receive a skill definition (SKILL.md), a generated task instruction \
+(instruction.md), and generated tests (test_outputs.py).
+
+Focus exclusively on skill-instruction alignment:
+1. Does the instruction faithfully exercise the skill's NOVEL aspects (not \
+common knowledge any model already has)?
+2. Would an agent WITH the skill have a measurable advantage over one WITHOUT it?
+3. Is the instruction too generic (testing general ability rather than the skill)?
+4. Do the tests target the skill's unique value-add?
+""" + _REVIEWER_JSON_INSTRUCTION
+
+_FEASIBILITY_REVIEWER_SYSTEM = """\
+You are a **feasibility reviewer** for AI-generated skill evaluation files.
+
+You will receive a skill definition (SKILL.md), a generated task instruction \
+(instruction.md), and generated tests (test_outputs.py).
+
+Focus exclusively on practical feasibility:
+1. Can an AI agent realistically complete this task in a single session?
+2. Are the tests deterministic (no randomness, timing, or external dependencies)?
+3. Do the tests import from /workspace correctly?
+4. Are there any circular or impossible requirements?
+""" + _REVIEWER_JSON_INSTRUCTION
+
+_REVIEWERS = [
+    ("coverage", _COVERAGE_REVIEWER_SYSTEM),
+    ("alignment", _ALIGNMENT_REVIEWER_SYSTEM),
+    ("feasibility", _FEASIBILITY_REVIEWER_SYSTEM),
+]
+
+
+def _run_single_review(
+    reviewer_name: str, system_prompt: str, user_prompt: str,
+) -> tuple[str, dict]:
+    """Execute a single LLM reviewer call. Returns (name, result_dict)."""
+    response_text = llm_client.chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.1,
+        max_tokens=512,
+    )
+
+    try:
+        result = json.loads(response_text)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            logger.warning(
+                "%s reviewer returned non-JSON: %s", reviewer_name, response_text[:200],
+            )
+            return reviewer_name, {
+                "pass": False,
+                "issues": [f"{reviewer_name} reviewer returned invalid JSON"],
+            }
+
+    issues = result.get("issues", [])
+    if not isinstance(issues, list):
+        issues = [str(issues)]
+
+    return reviewer_name, {"pass": bool(result.get("pass", False)), "issues": issues}
+
+
+def multi_reviewer_check(submission_dir: Path) -> dict:
+    """Run 3 parallel LLM reviewers with distinct personas.
+
+    Returns ``{"passed": True/False, "issues": [str], "reviewer_results": dict}``.
+    """
+    skill_content = _read_safe(submission_dir / "skills" / "SKILL.md")
+    instruction_content = _read_safe(submission_dir / "instruction.md")
+    test_content = _read_safe(submission_dir / "tests" / "test_outputs.py")
+
+    user_prompt = CONTENT_CHECK_USER_TEMPLATE.format(
+        skill_content=skill_content,
+        instruction_content=instruction_content,
+        test_content=test_content,
+    )
+
+    reviewer_results: dict[str, dict] = {}
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {
+            pool.submit(_run_single_review, name, system, user_prompt): name
+            for name, system in _REVIEWERS
+        }
+        for future in as_completed(futures):
+            name, result = future.result()
+            reviewer_results[name] = result
+            status = "passed" if result["pass"] else "FAILED"
+            logger.info("Reviewer '%s': %s", name, status)
+
+    all_issues: list[str] = []
+    for name, result in reviewer_results.items():
+        if not result["pass"]:
+            for issue in result["issues"]:
+                all_issues.append(f"[{name}] {issue}")
+
+    passed = len(all_issues) == 0
+    return {"passed": passed, "issues": all_issues, "reviewer_results": reviewer_results}
+
+
+_FINAL_REVIEW_SYSTEM = """\
+You are a senior QA reviewer performing a final go/no-go check on AI-generated \
+skill evaluation files.
+
+You will receive a skill definition (SKILL.md), a generated task instruction \
+(instruction.md), and generated tests (test_outputs.py). These files may have \
+already been through one round of corrections.
+
+Apply a high bar — this is the last gate before the files enter the evaluation \
+pipeline. Verify:
+1. The instruction exercises the skill's unique value, not just general knowledge.
+2. The tests are comprehensive, deterministic, and correctly structured.
+3. The instruction and tests are coherent with each other AND the skill.
+4. The task is achievable by an AI agent in a single session.
+
+Output ONLY valid JSON:
+{"pass": true, "issues": []}          // if ready for evaluation
+{"pass": false, "issues": ["..."]}    // if still problematic
+"""
+
+
+def final_review(submission_dir: Path) -> dict:
+    """Strict single-call go/no-go gate after corrections.
+
+    Returns ``{"passed": True/False, "issues": [str]}``.
+    """
+    skill_content = _read_safe(submission_dir / "skills" / "SKILL.md")
+    instruction_content = _read_safe(submission_dir / "instruction.md")
+    test_content = _read_safe(submission_dir / "tests" / "test_outputs.py")
+
+    user_prompt = CONTENT_CHECK_USER_TEMPLATE.format(
+        skill_content=skill_content,
+        instruction_content=instruction_content,
+        test_content=test_content,
+    )
+
+    response_text = llm_client.chat_completion(
+        messages=[
+            {"role": "system", "content": _FINAL_REVIEW_SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.0,
+        max_tokens=512,
+    )
+
+    try:
+        result = json.loads(response_text)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            logger.warning("Final review returned non-JSON: %s", response_text[:200])
+            return {"passed": False, "issues": ["Final review returned invalid JSON"]}
 
     passed = bool(result.get("pass", False))
     issues = result.get("issues", [])

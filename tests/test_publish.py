@@ -14,6 +14,7 @@ from scripts.publish import (
     post_pr_comment,
     promote_to_quay,
     upload_debug_artifacts,
+    upload_generated_files,
     upload_reports,
 )
 
@@ -126,6 +127,98 @@ class TestUploadReports:
         )
 
         assert result is None
+
+
+class TestUploadGeneratedFiles:
+    @pytest.fixture
+    def gen_dir(self, tmp_path: Path) -> Path:
+        """Submission dir with all three generated files."""
+        (tmp_path / "instruction.md").write_text("# Task\nDo something.\n")
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_outputs.py").write_text("def test_ok(): assert True\n")
+        (tests / "llm_judge.py").write_text("score = 0.9\n")
+        return tmp_path
+
+    @patch("minio.Minio")
+    def test_uploads_all_three_files(self, mock_minio_cls, gen_dir):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        prefix = upload_generated_files(
+            submission_dir=gen_dir,
+            submission_name="ai-skill",
+            pipeline_run_id="run-42",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        assert prefix is not None
+        assert "ai-skill" in prefix
+        assert mock_client.fput_object.call_count == 3
+        object_names = [c.args[1] for c in mock_client.fput_object.call_args_list]
+        assert any("generated/instruction.md" in n for n in object_names)
+        assert any("generated/test_outputs.py" in n for n in object_names)
+        assert any("generated/llm_judge.py" in n for n in object_names)
+
+    @patch("minio.Minio")
+    def test_handles_missing_judge(self, mock_minio_cls, tmp_path):
+        (tmp_path / "instruction.md").write_text("# Task\n")
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_outputs.py").write_text("def test_ok(): assert True\n")
+
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        prefix = upload_generated_files(
+            submission_dir=tmp_path,
+            submission_name="test",
+            pipeline_run_id="run-1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        assert prefix is not None
+        assert mock_client.fput_object.call_count == 2
+
+    @patch("minio.Minio")
+    def test_returns_none_on_empty_dir(self, mock_minio_cls, tmp_path):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        result = upload_generated_files(
+            submission_dir=tmp_path,
+            submission_name="test",
+            pipeline_run_id="run-1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        assert result is None
+
+    @patch("minio.Minio")
+    def test_creates_bucket_if_missing(self, mock_minio_cls, gen_dir):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = False
+
+        upload_generated_files(
+            submission_dir=gen_dir,
+            submission_name="test",
+            pipeline_run_id="run-1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        mock_client.make_bucket.assert_called_once_with("ab-eval-reports")
 
 
 class TestPromoteToQuay:

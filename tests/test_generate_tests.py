@@ -9,7 +9,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from scripts.generate_tests import DEFAULT_MAX_RETRIES, generate, main
+from scripts.generate_tests import (
+    DEFAULT_MAX_RETRIES,
+    _correction_pass,
+    _upload_to_minio,
+    generate,
+    main,
+)
 
 AI_METADATA = {
     "name": "ai-skill",
@@ -60,18 +66,33 @@ MOCK_TEST = (
 MOCK_JUDGE_SKIP = "SKIP"
 MOCK_JUDGE_CODE = "score = 0.9\n"
 
-CONTENT_PASS = {"passed": True, "issues": []}
-CONTENT_FAIL = {"passed": False, "issues": ["instruction does not match skill"]}
+REVIEW_PASS = {"passed": True, "issues": [], "reviewer_results": {}}
+REVIEW_FAIL = {
+    "passed": False,
+    "issues": ["[coverage] instruction does not match skill"],
+    "reviewer_results": {},
+}
+FINAL_PASS = {"passed": True, "issues": []}
+FINAL_FAIL = {"passed": False, "issues": ["tests are not deterministic"]}
 
 
 def _four_step_responses(
     analysis: str = MOCK_ANALYSIS,
     instruction: str = MOCK_INSTRUCTION,
     test: str = MOCK_TEST,
-    judge: str = MOCK_JUDGE_SKIP,
+    judge: str = MOCK_JUDGE_CODE,
 ) -> list[str]:
     """Return the 4 sequential LLM responses for a single attempt."""
     return [analysis, instruction, test, judge]
+
+
+def _three_step_responses(
+    analysis: str = MOCK_ANALYSIS,
+    instruction: str = MOCK_INSTRUCTION,
+    test: str = MOCK_TEST,
+) -> list[str]:
+    """Return the 3 LLM responses when llm_judge is skipped."""
+    return [analysis, instruction, test]
 
 
 @pytest.fixture()
@@ -98,7 +119,9 @@ def manual_submission(tmp_path: Path) -> Path:
 
 
 class TestGenerate:
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -107,7 +130,9 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -146,7 +171,9 @@ class TestGenerate:
         with pytest.raises(ValueError, match="empty"):
             generate(sub, tmp_path, agent_type="api")
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -155,11 +182,13 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
-        """Step 0 succeeds, Step 1 produces empty → retry from Step 0."""
+        """Step 0 succeeds, Step 1 produces empty -> retry from Step 0."""
         mock_chat.side_effect = [
             MOCK_ANALYSIS,
             "",
@@ -168,7 +197,9 @@ class TestGenerate:
         generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=2)
         assert "instruction.md" in generated
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -177,11 +208,13 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
-        """Step 2 produces invalid Python → retry from Step 0."""
+        """Step 2 produces invalid Python -> retry from Step 0."""
         mock_chat.side_effect = [
             MOCK_ANALYSIS,
             MOCK_INSTRUCTION,
@@ -191,7 +224,9 @@ class TestGenerate:
         generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=2)
         assert "tests/test_outputs.py" in generated
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill")
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -200,7 +235,9 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -219,7 +256,9 @@ class TestGenerate:
         system_msg = messages[0]["content"]
         assert "Quality Criteria" in system_msg
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -228,7 +267,9 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -238,25 +279,39 @@ class TestGenerate:
         assert "tests/llm_judge.py" in generated
         assert (ai_submission / "tests" / "llm_judge.py").is_file()
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
-    def test_llm_judge_skipped_when_skip_returned(
+    def test_llm_judge_skipped_when_metadata_flag_set(
         self,
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
-        ai_submission: Path,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         tmp_path: Path,
     ) -> None:
-        mock_chat.side_effect = _four_step_responses(judge="SKIP")
-        generated = generate(ai_submission, tmp_path, agent_type="api")
+        """skip_llm_judge=true in metadata skips judge generation entirely."""
+        sub = tmp_path / "submissions" / "no-judge"
+        sub.mkdir(parents=True)
+        meta = {**AI_METADATA, "name": "no-judge", "skip_llm_judge": True}
+        (sub / "metadata.yaml").write_text(yaml.dump(meta))
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text(SKILL_CONTENT)
+
+        mock_chat.side_effect = _three_step_responses()
+        generated = generate(sub, tmp_path, agent_type="api")
 
         assert "tests/llm_judge.py" not in generated
+        assert mock_chat.call_count == 3
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -265,7 +320,9 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -274,7 +331,9 @@ class TestGenerate:
 
         assert "tests/llm_judge.py" not in generated
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -283,20 +342,24 @@ class TestGenerate:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
         fenced_instruction = "```markdown\n# Task\nDo something.\n```"
         fenced_test = "```python\ndef test_ok(): assert True\n```"
-        mock_chat.side_effect = [MOCK_ANALYSIS, fenced_instruction, fenced_test, "SKIP"]
+        mock_chat.side_effect = [MOCK_ANALYSIS, fenced_instruction, fenced_test, MOCK_JUDGE_CODE]
         generated = generate(ai_submission, tmp_path, agent_type="api")
         assert "instruction.md" in generated
         assert "tests/test_outputs.py" in generated
 
 
 class TestSkillAnalysis:
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -305,7 +368,9 @@ class TestSkillAnalysis:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -318,7 +383,9 @@ class TestSkillAnalysis:
         assert "Novel aspects" in user_msg
         assert "anti-patterns specific to this project" in user_msg
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -327,7 +394,9 @@ class TestSkillAnalysis:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -340,7 +409,9 @@ class TestSkillAnalysis:
         assert "Test focus areas" in user_msg
         assert "anti-pattern detection" in user_msg
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -349,7 +420,9 @@ class TestSkillAnalysis:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -361,7 +434,9 @@ class TestSkillAnalysis:
         generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=2)
         assert "instruction.md" in generated
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -370,11 +445,13 @@ class TestSkillAnalysis:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
-        """Analysis missing test_focus_areas key → retry."""
+        """Analysis missing test_focus_areas key -> retry."""
         bad_analysis = json.dumps({"novel_aspects": ["x"], "common_knowledge": ["y"]})
         mock_chat.side_effect = [
             bad_analysis,
@@ -383,7 +460,9 @@ class TestSkillAnalysis:
         generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=2)
         assert "instruction.md" in generated
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -392,7 +471,9 @@ class TestSkillAnalysis:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -403,7 +484,9 @@ class TestSkillAnalysis:
 
 
 class TestRetryLoop:
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check")
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -412,7 +495,9 @@ class TestRetryLoop:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -423,45 +508,83 @@ class TestRetryLoop:
         assert "instruction.md" in generated
         assert mock_chat.call_count == 8
 
-    @patch("scripts.generate_tests.content_check")
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check")
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
-    def test_content_fail_then_pass_retries(
+    def test_reviewer_fail_triggers_correction_then_pass(
         self,
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
+        ai_submission: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Multi-reviewer fails, correction pass runs, final review passes."""
+        mock_chat.side_effect = [
+            *_four_step_responses(),
+            "corrected instruction",
+            "def test_ok(): assert True\n",
+        ]
+        mock_review.return_value = REVIEW_FAIL
+
+        generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=1)
+        assert "instruction.md" in generated
+        assert mock_chat.call_count == 6
+
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_FAIL)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
+    @patch("scripts.generate_tests.structural_check", return_value=[])
+    @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
+    @patch("scripts.generate_tests.llm_client.chat_completion")
+    def test_final_review_fail_exhausts_retries(
+        self,
+        mock_chat: MagicMock,
+        mock_fetch: MagicMock,
+        mock_struct: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
         mock_chat.side_effect = [*_four_step_responses(), *_four_step_responses()]
-        mock_content.side_effect = [CONTENT_FAIL, CONTENT_PASS]
+
+        with pytest.raises(ValueError, match="final review after 2 attempts"):
+            generate(ai_submission, tmp_path, agent_type="api", max_retries=2)
+
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check")
+    @patch("scripts.generate_tests.structural_check", return_value=[])
+    @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
+    @patch("scripts.generate_tests.llm_client.chat_completion")
+    def test_pytest_collect_fail_then_pass_retries(
+        self,
+        mock_chat: MagicMock,
+        mock_fetch: MagicMock,
+        mock_struct: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
+        ai_submission: Path,
+        tmp_path: Path,
+    ) -> None:
+        mock_chat.side_effect = [*_four_step_responses(), *_four_step_responses()]
+        mock_collect.side_effect = [["pytest --collect-only failed"], []]
 
         generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=3)
         assert "instruction.md" in generated
-        assert mock_chat.call_count == 8
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_FAIL)
-    @patch("scripts.generate_tests.structural_check", return_value=[])
-    @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
-    @patch("scripts.generate_tests.llm_client.chat_completion")
-    def test_all_retries_exhausted_raises(
-        self,
-        mock_chat: MagicMock,
-        mock_fetch: MagicMock,
-        mock_struct: MagicMock,
-        mock_content: MagicMock,
-        ai_submission: Path,
-        tmp_path: Path,
-    ) -> None:
-        mock_chat.side_effect = [*_four_step_responses(), *_four_step_responses()]
-
-        with pytest.raises(ValueError, match="content review after 2 attempts"):
-            generate(ai_submission, tmp_path, agent_type="api", max_retries=2)
-
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -470,15 +593,13 @@ class TestRetryLoop:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
-        """On retry, previous errors appear in the instruction prompt.
-
-        Attempt 1: analysis(0), instruction(1)="" → ValueError.
-        Attempt 2: analysis(2), instruction(3) ← should contain feedback.
-        """
+        """On retry, previous errors appear in the instruction prompt."""
         mock_chat.side_effect = [
             MOCK_ANALYSIS,
             "",
@@ -496,8 +617,48 @@ class TestRetryLoop:
         assert "Previous Attempt Issues" in user_msg
 
 
+class TestCorrectionPass:
+    @patch("scripts.generate_tests.llm_client.chat_completion")
+    def test_rewrites_both_files(
+        self,
+        mock_chat: MagicMock,
+        ai_submission: Path,
+    ) -> None:
+        (ai_submission / "instruction.md").write_text("old instruction")
+        (ai_submission / "tests").mkdir(exist_ok=True)
+        (ai_submission / "tests" / "test_outputs.py").write_text("def test_old(): pass\n")
+
+        mock_chat.side_effect = [
+            "corrected instruction",
+            "def test_fixed(): assert True\n",
+        ]
+        _correction_pass(ai_submission, ["[coverage] missing edge case test"])
+
+        assert "corrected instruction" in (ai_submission / "instruction.md").read_text()
+        assert "test_fixed" in (ai_submission / "tests" / "test_outputs.py").read_text()
+        assert mock_chat.call_count == 2
+
+    @patch("scripts.generate_tests.llm_client.chat_completion")
+    def test_empty_correction_preserves_original(
+        self,
+        mock_chat: MagicMock,
+        ai_submission: Path,
+    ) -> None:
+        original = "original content"
+        (ai_submission / "instruction.md").write_text(original)
+        (ai_submission / "tests").mkdir(exist_ok=True)
+        (ai_submission / "tests" / "test_outputs.py").write_text("def test_x(): pass\n")
+
+        mock_chat.side_effect = ["", ""]
+        _correction_pass(ai_submission, ["some issue"])
+
+        assert (ai_submission / "instruction.md").read_text() == original
+
+
 class TestMain:
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -506,7 +667,9 @@ class TestMain:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -541,7 +704,9 @@ class TestMain:
         output = json.loads(capsys.readouterr().out)
         assert "error" in output
 
-    @patch("scripts.generate_tests.content_check", return_value=CONTENT_PASS)
+    @patch("scripts.generate_tests.final_review", return_value=FINAL_PASS)
+    @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)
+    @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
     @patch("scripts.generate_tests.structural_check", return_value=[])
     @patch("scripts.generate_tests.skill_loader.fetch_skill", return_value=None)
     @patch("scripts.generate_tests.llm_client.chat_completion")
@@ -550,10 +715,61 @@ class TestMain:
         mock_chat: MagicMock,
         mock_fetch: MagicMock,
         mock_struct: MagicMock,
-        mock_content: MagicMock,
+        mock_collect: MagicMock,
+        mock_review: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         mock_chat.side_effect = _four_step_responses()
         rc = main([str(ai_submission), "--max-retries", "1"])
         assert rc == 0
+
+
+class TestMinioUpload:
+    def test_skips_when_no_credentials(self, ai_submission: Path) -> None:
+        """No MinIO env vars → returns immediately without error."""
+        _upload_to_minio(ai_submission, "test-skill")
+
+    @patch.dict(
+        "os.environ",
+        {
+            "MINIO_ENDPOINT": "http://minio:9000",
+            "MINIO_ACCESS_KEY": "key",
+            "MINIO_SECRET_KEY": "secret",
+            "PIPELINE_RUN_ID": "run-99",
+        },
+    )
+    @patch("scripts.generate_tests.upload_generated_files")
+    def test_calls_upload_when_configured(
+        self,
+        mock_upload: MagicMock,
+        ai_submission: Path,
+    ) -> None:
+        mock_upload.return_value = "20260428_test-skill_run-99"
+        _upload_to_minio(ai_submission, "test-skill")
+
+        mock_upload.assert_called_once_with(
+            submission_dir=ai_submission,
+            submission_name="test-skill",
+            pipeline_run_id="run-99",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+    @patch.dict(
+        "os.environ",
+        {
+            "MINIO_ENDPOINT": "http://minio:9000",
+            "MINIO_ACCESS_KEY": "key",
+            "MINIO_SECRET_KEY": "secret",
+        },
+    )
+    @patch("scripts.generate_tests.upload_generated_files", side_effect=Exception("conn refused"))
+    def test_upload_failure_is_non_fatal(
+        self,
+        mock_upload: MagicMock,
+        ai_submission: Path,
+    ) -> None:
+        _upload_to_minio(ai_submission, "test-skill")
