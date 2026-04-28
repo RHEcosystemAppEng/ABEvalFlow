@@ -88,13 +88,19 @@ spec:
             secretKeyRef:
               name: minio-credentials
               key: root-password
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: github-token
+              key: token
+              optional: true
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         # --- 1. Clone pipeline repo (or update to requested revision) ---
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
-        if [ -d "$PIPELINE_DIR" ]; then
+        if [ -d "$PIPELINE_DIR/.git" ]; then
           echo "Pipeline repo exists, updating to requested revision"
           git -C "$PIPELINE_DIR" fetch origin "$(params.pipeline-repo-revision)" --depth 1
           git -C "$PIPELINE_DIR" checkout FETCH_HEAD
@@ -109,7 +115,7 @@ spec:
         # --- 2. Install dependencies ---
         pip install --quiet --no-cache-dir minio
 
-        # --- 3. Run publish script ---
+        # --- 3. Run publish script (MinIO upload, Quay promotion, PR comment) ---
         echo "Publishing artifacts for submission=$(params.submission-name) run=$(params.pipeline-run-id)"
 
         ARGS=(

@@ -170,44 +170,57 @@ class TestPromoteToQuay:
 
 
 class TestPostPrComment:
-    @patch("scripts.publish.subprocess.run")
-    def test_posts_comment(self, mock_run, report_dir):
-        mock_run.return_value = MagicMock(returncode=0)
+    @patch("scripts.publish.urllib.request.urlopen")
+    def test_posts_comment(self, mock_urlopen, report_dir):
+        mock_resp = MagicMock()
+        mock_resp.status = 201
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
 
         ok = post_pr_comment(
             repo_name="org/repo",
             pr_number="42",
             submission_name="hello-world",
             report_dir=report_dir,
+            github_token="ghp_test",
         )
 
         assert ok is True
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "gh" in cmd[0]
-        assert "repos/org/repo/issues/42/comments" in cmd[2]
+        mock_urlopen.assert_called_once()
+        req = mock_urlopen.call_args[0][0]
+        assert "repos/org/repo/issues/42/comments" in req.full_url
 
-    @patch("scripts.publish.subprocess.run")
-    def test_no_report_file(self, mock_run, tmp_path):
+    def test_no_report_file(self, tmp_path):
         ok = post_pr_comment(
             repo_name="org/repo",
             pr_number="1",
             submission_name="test",
             report_dir=tmp_path,
+            github_token="ghp_test",
         )
 
         assert ok is False
-        mock_run.assert_not_called()
 
-    @patch("scripts.publish.subprocess.run")
-    def test_gh_failure(self, mock_run, report_dir):
-        mock_run.return_value = MagicMock(returncode=1, stderr="not found")
-
+    def test_no_token(self, report_dir):
         ok = post_pr_comment(
             repo_name="org/repo",
             pr_number="1",
             submission_name="test",
             report_dir=report_dir,
+            github_token="",
+        )
+
+        assert ok is False
+
+    @patch("scripts.publish.urllib.request.urlopen", side_effect=Exception("network error"))
+    def test_api_failure(self, mock_urlopen, report_dir):
+        ok = post_pr_comment(
+            repo_name="org/repo",
+            pr_number="1",
+            submission_name="test",
+            report_dir=report_dir,
+            github_token="ghp_test",
         )
 
         assert ok is False
@@ -215,14 +228,34 @@ class TestPostPrComment:
 
 class TestCleanupImages:
     @patch("scripts.publish.subprocess.run")
-    def test_skips_digest_refs(self, mock_run):
+    def test_digest_refs_delete_imagestream(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
         cleaned = cleanup_images(
             ["registry/ns/skill@sha256:abc123"],
             registry_url="registry",
         )
 
-        assert cleaned == 0
-        mock_run.assert_not_called()
+        assert cleaned == 1
+        cmd = mock_run.call_args[0][0]
+        assert cmd[:2] == ["oc", "delete"]
+        assert cmd[2] == "imagestream"
+        assert cmd[3] == "skill"
+
+    @patch("scripts.publish.subprocess.run")
+    def test_deduplicates_digest_imagestreams(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        cleaned = cleanup_images(
+            [
+                "registry/ns/skill@sha256:aaa",
+                "registry/ns/skill@sha256:bbb",
+            ],
+            registry_url="registry",
+        )
+
+        assert cleaned == 1
+        assert mock_run.call_count == 1
 
     @patch("scripts.publish.subprocess.run")
     def test_deletes_tag_refs(self, mock_run):
@@ -234,9 +267,8 @@ class TestCleanupImages:
 
         assert cleaned == 1
         cmd = mock_run.call_args[0][0]
-        assert "oc" in cmd[0]
-        assert "delete" in cmd[1]
-        assert "istag" in cmd[2]
+        assert cmd[:2] == ["oc", "delete"]
+        assert cmd[2] == "istag"
 
 
 class TestUpliftThresholdLogic:

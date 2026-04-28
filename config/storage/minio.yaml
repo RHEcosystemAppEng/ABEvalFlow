@@ -12,7 +12,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: gp3
+  # storageClassName: gp3  # AWS EBS; remove or adjust for your cluster
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
         - name: minio
-          image: quay.io/minio/minio:latest
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
           args:
             - server
             - /data
@@ -105,4 +105,4 @@ spec:
       targetPort: 9001
       name: console
   selector:
-    app: minio
+    app.kubernetes.io/name: minio

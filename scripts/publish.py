@@ -21,8 +21,10 @@ import json
 import logging
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +46,24 @@ def upload_reports(
     access_key: str,
     secret_key: str,
     bucket: str = "ab-eval-reports",
-    secure: bool = False,
+    secure: bool | None = None,
 ) -> str | None:
     """Upload report.json and report.md to MinIO.
 
     Returns the artifact prefix on success, None on failure.
+    ``secure`` is auto-detected from the endpoint scheme when not provided.
     """
     from minio import Minio
 
     prefix = _build_artifact_prefix(submission_name, pipeline_run_id)
 
+    parsed = urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    if secure is None:
+        secure = parsed.scheme == "https"
+
     client = Minio(
-        endpoint.replace("http://", "").replace("https://", ""),
+        host,
         access_key=access_key,
         secret_key=secret_key,
         secure=secure,
@@ -126,8 +134,20 @@ def post_pr_comment(
     pr_number: str,
     submission_name: str,
     report_dir: Path,
+    github_token: str | None = None,
 ) -> bool:
-    """Post evaluation summary as a GitHub PR comment using gh CLI."""
+    """Post evaluation summary as a GitHub PR comment.
+
+    Uses the GitHub REST API via ``urllib`` (no ``gh`` CLI required).
+    ``github_token`` falls back to the ``GITHUB_TOKEN`` environment variable.
+    """
+    import os
+
+    token = github_token or os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        logger.error("GITHUB_TOKEN not set — cannot post PR comment")
+        return False
+
     report_path = report_dir / "report.json"
     if not report_path.exists():
         logger.warning("No report.json found, skipping PR comment")
@@ -160,24 +180,28 @@ def post_pr_comment(
         f"**Commit:** `{provenance.get('commit_sha', 'N/A')[:12] if provenance.get('commit_sha') else 'N/A'}`\n"
     )
 
-    cmd = [
-        "gh", "api",
-        f"repos/{repo_name}/issues/{pr_number}/comments",
-        "-f", f"body={comment_body}",
-    ]
+    url = f"https://api.github.com/repos/{repo_name}/issues/{pr_number}/comments"
+    payload = json.dumps({"body": comment_body}).encode()
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            logger.error("gh api failed: %s", result.stderr)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if 200 <= resp.status < 300:
+                logger.info("Posted PR comment to %s#%s", repo_name, pr_number)
+                return True
+            logger.error("GitHub API returned %d", resp.status)
             return False
-        logger.info("Posted PR comment to %s#%s", repo_name, pr_number)
-        return True
-    except FileNotFoundError:
-        logger.error("gh CLI not found — cannot post PR comment")
-        return False
-    except subprocess.TimeoutExpired:
-        logger.error("gh api timed out")
+    except Exception as exc:
+        logger.error("Failed to post PR comment: %s", exc)
         return False
 
 
@@ -187,31 +211,41 @@ def cleanup_images(
 ) -> int:
     """Delete images from the OpenShift internal registry.
 
-    Uses ``oc delete`` on ImageStreamTag resources. Returns the number of
-    successfully deleted images.
+    For digest refs (``@sha256:…``), deletes the parent ImageStream so all
+    tags and layers are removed.  For tag refs, deletes the specific
+    ImageStreamTag.  Returns the number of successfully deleted resources.
     """
     deleted = 0
-    for ref in image_refs:
-        tag_part = ref.split("/")[-1] if "/" in ref else ref
-        if "@" in tag_part:
-            logger.info("Skipping digest ref cleanup (not tag-based): %s", ref)
-            continue
+    seen_imagestreams: set[str] = set()
 
-        parts = ref.replace(f"{registry_url}/", "").split("/", 1)
+    for ref in image_refs:
+        stripped = ref.replace(f"{registry_url}/", "")
+        parts = stripped.split("/", 1)
         if len(parts) != 2:
             logger.warning("Cannot parse image ref for cleanup: %s", ref)
             continue
 
-        namespace, name_tag = parts
-        cmd = ["oc", "delete", "istag", name_tag, "-n", namespace]
+        namespace = parts[0]
+        name_part = parts[1]
+
+        if "@" in name_part:
+            is_name = name_part.split("@")[0]
+            key = f"{namespace}/{is_name}"
+            if key in seen_imagestreams:
+                continue
+            seen_imagestreams.add(key)
+            cmd = ["oc", "delete", "imagestream", is_name, "-n", namespace,
+                   "--ignore-not-found"]
+        else:
+            cmd = ["oc", "delete", "istag", name_part, "-n", namespace]
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
-                logger.info("Deleted image: %s/%s", namespace, name_tag)
+                logger.info("Deleted %s in %s", name_part, namespace)
                 deleted += 1
             else:
-                logger.warning("Failed to delete %s: %s", name_tag, result.stderr.strip())
+                logger.warning("Failed to delete %s: %s", name_part, result.stderr.strip())
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             logger.warning("Cleanup failed for %s: %s", ref, exc)
 
@@ -251,6 +285,7 @@ def main() -> int:
     minio_access_key = os.environ.get("MINIO_ACCESS_KEY", "")
     minio_secret_key = os.environ.get("MINIO_SECRET_KEY", "")
 
+    upload_ok = True
     success = True
 
     # --- 1. Upload reports to MinIO ---
@@ -268,6 +303,7 @@ def main() -> int:
             logger.info("Reports uploaded to s3://%s/%s/", args.minio_bucket, prefix)
         else:
             logger.error("Failed to upload reports")
+            upload_ok = False
             success = False
     else:
         logger.warning("MinIO not configured — skipping report upload")
@@ -317,11 +353,13 @@ def main() -> int:
     else:
         logger.info("No repo-name/pr-number — skipping PR comment")
 
-    # --- 4. Cleanup internal registry images ---
+    # --- 4. Cleanup internal registry images (only after successful upload) ---
     image_refs = [r for r in [args.treatment_image_ref, args.control_image_ref] if r]
-    if image_refs:
+    if image_refs and upload_ok:
         cleaned = cleanup_images(image_refs)
         logger.info("Cleaned up %d/%d images", cleaned, len(image_refs))
+    elif image_refs and not upload_ok:
+        logger.warning("Skipping cleanup — reports were not successfully uploaded")
 
     return 0 if success else 1
 
