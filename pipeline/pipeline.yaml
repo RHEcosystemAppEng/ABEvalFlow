@@ -78,6 +78,18 @@ spec:
       type: string
       default: ""
       description: PR number that triggered this pipeline run
+    - name: llm-model
+      type: string
+      default: "claude-sonnet"
+      description: >-
+        LLM model name for Harbor evaluation agents. Must match a model
+        registered in the LiteLLM proxy (or provider API).
+    - name: llm-api-base
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000"
+      description: >-
+        Base URL of the OpenAI-compatible LLM API (e.g. LiteLLM proxy).
+        Set to empty string to use Harbor's default oracle agent.
 
   workspaces:
     - name: shared-workspace
@@ -194,6 +206,10 @@ spec:
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
           value: $(params.pipeline-repo-revision)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: llm-api-base
+          value: $(params.llm-api-base)
       workspaces:
         - name: source
           workspace: shared-workspace

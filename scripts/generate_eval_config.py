@@ -77,6 +77,8 @@ def build_variant_config(
     eval_mode: str,
     jobs_dir: str,
     image_ref: str = "",
+    llm_model: str = "",
+    llm_api_base: str = "",
 ) -> dict[str, Any]:
     """Build a Harbor JobConfig dict for a single variant.
 
@@ -119,10 +121,12 @@ def build_variant_config(
         metadata.build_timeout_sec, _HARBOR_DEFAULT_BUILD_TIMEOUT
     )
 
-    # n_concurrent_trials=4 is Harbor's default; kept explicit so operators
-    # can tune it per-cluster via a future CLI param or metadata field.
-    # agents=[{}] inherits Harbor's default agent (oracle agent); the
-    # pipeline will wire agent_name/model via params in a future iteration.
+    agent_config: dict[str, Any] = {}
+    if llm_model:
+        agent_config["model_name"] = llm_model
+        if llm_api_base:
+            agent_config["env"] = {"OPENAI_BASE_URL": llm_api_base}
+
     config: dict[str, Any] = {
         "job_name": f"{metadata.name}-{variant}",
         "jobs_dir": jobs_dir,
@@ -134,7 +138,7 @@ def build_variant_config(
         "environment_build_timeout_multiplier": build_mult,
         "n_concurrent_trials": 1,
         "environment": env_block,
-        "agents": [{}],
+        "agents": [agent_config],
         "tasks": [task],
     }
 
@@ -150,6 +154,8 @@ def generate_eval_configs(
     results_base_dir: str,
     treatment_image_ref: str = "",
     control_image_ref: str = "",
+    llm_model: str = "",
+    llm_api_base: str = "",
 ) -> dict[str, dict[str, Any]]:
     """Generate per-variant Harbor configs, write YAML files, return both."""
     metadata = load_metadata(submission_dir)
@@ -171,6 +177,8 @@ def generate_eval_configs(
             eval_mode=eval_mode,
             jobs_dir=jobs_dir,
             image_ref=img_ref,
+            llm_model=llm_model,
+            llm_api_base=llm_api_base,
         )
         out_path = output_dir / f"{variant}-config.yaml"
         with out_path.open("w") as f:
@@ -230,6 +238,16 @@ def main(argv: list[str] | None = None) -> int:
         default="eval-results",
         help="Base directory for Harbor job results (default: eval-results)",
     )
+    parser.add_argument(
+        "--llm-model",
+        default="",
+        help="LLM model name for Harbor agents (e.g. claude-sonnet). Empty uses oracle.",
+    )
+    parser.add_argument(
+        "--llm-api-base",
+        default="",
+        help="Base URL of the OpenAI-compatible LLM API (e.g. http://litellm:4000)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -253,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
         results_base_dir=args.results_base_dir,
         treatment_image_ref=args.treatment_image_ref,
         control_image_ref=args.control_image_ref,
+        llm_model=args.llm_model,
+        llm_api_base=args.llm_api_base,
     )
     return 0
 
