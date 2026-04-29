@@ -2,6 +2,7 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 
 USER 0
 RUN curl -LsSf https://astral.sh/uv/0.9.7/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+RUN mkdir -p /installed-agent && chmod 777 /installed-agent
 USER 1001
 
 WORKDIR /workspace
