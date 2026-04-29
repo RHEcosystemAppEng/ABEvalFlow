@@ -183,6 +183,8 @@ spec:
           value: $(params.registry-url)
         - name: registry-namespace
           value: $(params.registry-namespace)
+        - name: llm-agent-wrapper
+          value: $(params.llm-agent-wrapper)
       workspaces:
         - name: source
           workspace: shared-workspace

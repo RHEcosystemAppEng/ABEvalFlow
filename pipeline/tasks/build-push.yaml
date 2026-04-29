@@ -7,16 +7,14 @@ spec:
   description: >-
     Builds treatment and control container images from scaffolded directories
     using Buildah (rootless, daemonless) and pushes them to the OpenShift
-    internal registry. Emits digest-based image references for downstream tasks.
-    Uses --tls-verify=false because the OpenShift internal registry uses a
-    cluster-signed certificate not trusted by the container runtime.
+    internal registry. A shared base image is built first (heavy layers like
+    uv and claude-code) so variant builds only COPY submission-specific files.
     SETFCAP capability is required for rootless Buildah (newuidmap/newgidmap).
   params:
     - name: submission-name
       type: string
       description: >-
         Submission name used for image tagging and registry path
-        (skill, model comparison, prompt experiment, etc.)
     - name: treatment-task-dir
       type: string
       description: Path to the scaffolded treatment task directory
@@ -34,6 +32,16 @@ spec:
       type: string
       default: "ab-eval-flow"
       description: Registry namespace / project name
+    - name: pipeline-repo-dir
+      type: string
+      default: "_pipeline"
+      description: Directory name of the cloned pipeline repo within the workspace
+    - name: llm-agent-wrapper
+      type: string
+      default: ""
+      description: >-
+        If empty, claude-code is used as agent and pre-installed in the base
+        image. If set (e.g. opencode), claude-code installation is skipped.
   workspaces:
     - name: source
       description: Workspace containing the scaffolded task directories
@@ -43,6 +51,54 @@ spec:
     - name: control-image-ref
       description: Digest-based reference for the control image
   steps:
+    - name: build-base
+      image: registry.access.redhat.com/ubi9/buildah:9.6
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        REGISTRY="$(params.registry-url)"
+        NS="$(params.registry-namespace)"
+        NAME="$(params.submission-name)"
+        SHA="$(params.commit-sha)"
+        BASE_TAG="${REGISTRY}/${NS}/${NAME}:base-${SHA}"
+        PIPELINE_DIR="$(workspaces.source.path)/$(params.pipeline-repo-dir)"
+        DOCKERFILE="${PIPELINE_DIR}/templates/Dockerfile.base"
+
+        INSTALL_CLAUDE="false"
+        if [ -z "$(params.llm-agent-wrapper)" ]; then
+          INSTALL_CLAUDE="true"
+        fi
+
+        buildah login \
+          --tls-verify=false \
+          -u serviceaccount \
+          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+          "$REGISTRY"
+
+        echo "=== Building base image (INSTALL_CLAUDE_CODE=${INSTALL_CLAUDE}) ==="
+        buildah build \
+          --storage-driver=vfs \
+          --build-arg "INSTALL_CLAUDE_CODE=${INSTALL_CLAUDE}" \
+          -f "$DOCKERFILE" \
+          -t "$BASE_TAG" \
+          "$PIPELINE_DIR/templates"
+
+        buildah push \
+          --storage-driver=vfs \
+          --tls-verify=false \
+          --digestfile /tmp/base-digest \
+          "$BASE_TAG" \
+          "docker://$BASE_TAG"
+
+        DIGEST=$(tr -d '\n' < /tmp/base-digest)
+        BASE_REF="${REGISTRY}/${NS}/${NAME}@${DIGEST}"
+        echo -n "$BASE_REF" > /tmp/base-image-ref
+        echo "Pushed base image: $BASE_REF"
+
     - name: build-push-treatment
       image: registry.access.redhat.com/ubi9/buildah:9.6
       securityContext:
@@ -52,38 +108,39 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        build_and_push() {
-          local variant="$1" context_dir="$2" result_path="$3"
-          local image_tag="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name):${variant}-$(params.commit-sha)"
+        BASE_REF=$(cat /tmp/base-image-ref)
+        REGISTRY="$(params.registry-url)"
+        NS="$(params.registry-namespace)"
+        NAME="$(params.submission-name)"
+        SHA="$(params.commit-sha)"
+        IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:treatment-${SHA}"
+        CONTEXT="$(params.treatment-task-dir)/environment"
 
-          buildah login \
-            --tls-verify=false \
-            -u serviceaccount \
-            -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
-            "$(params.registry-url)"
+        buildah login \
+          --tls-verify=false \
+          -u serviceaccount \
+          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+          "$REGISTRY"
 
-          buildah build \
-            --storage-driver=vfs \
-            -t "$image_tag" \
-            "$context_dir"
+        echo "=== Building treatment (FROM ${BASE_REF}) ==="
+        buildah build \
+          --storage-driver=vfs \
+          --tls-verify=false \
+          --build-arg "BASE_IMAGE=${BASE_REF}" \
+          -t "$IMAGE_TAG" \
+          "$CONTEXT"
 
-          buildah push \
-            --storage-driver=vfs \
-            --tls-verify=false \
-            --digestfile "/tmp/${variant}-digest" \
-            "$image_tag" \
-            "docker://$image_tag"
+        buildah push \
+          --storage-driver=vfs \
+          --tls-verify=false \
+          --digestfile /tmp/treatment-digest \
+          "$IMAGE_TAG" \
+          "docker://$IMAGE_TAG"
 
-          local digest
-          digest=$(tr -d '\n' < "/tmp/${variant}-digest")
-          local image_ref="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name)@${digest}"
-          echo -n "$image_ref" > "$result_path"
-          echo "Pushed ${variant} image: $image_ref"
-        }
-
-        build_and_push "treatment" \
-          "$(params.treatment-task-dir)/environment" \
-          "$(results.treatment-image-ref.path)"
+        DIGEST=$(tr -d '\n' < /tmp/treatment-digest)
+        IMAGE_REF="${REGISTRY}/${NS}/${NAME}@${DIGEST}"
+        echo -n "$IMAGE_REF" > "$(results.treatment-image-ref.path)"
+        echo "Pushed treatment image: $IMAGE_REF"
 
     - name: build-push-control
       image: registry.access.redhat.com/ubi9/buildah:9.6
@@ -94,35 +151,36 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        build_and_push() {
-          local variant="$1" context_dir="$2" result_path="$3"
-          local image_tag="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name):${variant}-$(params.commit-sha)"
+        BASE_REF=$(cat /tmp/base-image-ref)
+        REGISTRY="$(params.registry-url)"
+        NS="$(params.registry-namespace)"
+        NAME="$(params.submission-name)"
+        SHA="$(params.commit-sha)"
+        IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:control-${SHA}"
+        CONTEXT="$(params.control-task-dir)/environment"
 
-          buildah login \
-            --tls-verify=false \
-            -u serviceaccount \
-            -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
-            "$(params.registry-url)"
+        buildah login \
+          --tls-verify=false \
+          -u serviceaccount \
+          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+          "$REGISTRY"
 
-          buildah build \
-            --storage-driver=vfs \
-            -t "$image_tag" \
-            "$context_dir"
+        echo "=== Building control (FROM ${BASE_REF}) ==="
+        buildah build \
+          --storage-driver=vfs \
+          --tls-verify=false \
+          --build-arg "BASE_IMAGE=${BASE_REF}" \
+          -t "$IMAGE_TAG" \
+          "$CONTEXT"
 
-          buildah push \
-            --storage-driver=vfs \
-            --tls-verify=false \
-            --digestfile "/tmp/${variant}-digest" \
-            "$image_tag" \
-            "docker://$image_tag"
+        buildah push \
+          --storage-driver=vfs \
+          --tls-verify=false \
+          --digestfile /tmp/control-digest \
+          "$IMAGE_TAG" \
+          "docker://$IMAGE_TAG"
 
-          local digest
-          digest=$(tr -d '\n' < "/tmp/${variant}-digest")
-          local image_ref="$(params.registry-url)/$(params.registry-namespace)/$(params.submission-name)@${digest}"
-          echo -n "$image_ref" > "$result_path"
-          echo "Pushed ${variant} image: $image_ref"
-        }
-
-        build_and_push "control" \
-          "$(params.control-task-dir)/environment" \
-          "$(results.control-image-ref.path)"
+        DIGEST=$(tr -d '\n' < /tmp/control-digest)
+        IMAGE_REF="${REGISTRY}/${NS}/${NAME}@${DIGEST}"
+        echo -n "$IMAGE_REF" > "$(results.control-image-ref.path)"
+        echo "Pushed control image: $IMAGE_REF"
