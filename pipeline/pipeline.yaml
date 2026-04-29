@@ -101,6 +101,12 @@ spec:
       description: >-
         Agent wrapper for non-Claude models (e.g. opencode, qwen-coder).
         Empty uses claude-code agent directly.
+    - name: base-image
+      type: string
+      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:latest"
+      description: >-
+        Pre-built base image ref (with uv, claude-code, etc.).
+        Build it with scripts/build_base_image.sh and push to the registry.
 
   workspaces:
     - name: shared-workspace
@@ -183,8 +189,8 @@ spec:
           value: $(params.registry-url)
         - name: registry-namespace
           value: $(params.registry-namespace)
-        - name: llm-agent-wrapper
-          value: $(params.llm-agent-wrapper)
+        - name: base-image
+          value: $(params.base-image)
       workspaces:
         - name: source
           workspace: shared-workspace
