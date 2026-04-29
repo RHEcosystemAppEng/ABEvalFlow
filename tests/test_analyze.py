@@ -322,6 +322,21 @@ class TestBuildAnalysis:
         assert result.summary.uplift == 0.0
         assert result.summary.recommendation == Recommendation.FAIL
 
+    def test_all_zero_passes_is_fail(self, tmp_path: Path):
+        """Both variants have trials but zero passes (e.g. agent exceptions)."""
+        base = tmp_path / "all-fail"
+        for variant in ("treatment", "control"):
+            job = base / variant / f"sub-{variant}"
+            trial = job / "trial-0__abc"
+            trial.mkdir(parents=True)
+            (trial / "result.json").write_text(json.dumps({
+                "verifier_result": {"rewards": {"reward": 0.0}},
+            }))
+        result = build_analysis(base, "all-fail", threshold=0.0)
+        assert result.summary.treatment.n_passed == 0
+        assert result.summary.control.n_passed == 0
+        assert result.summary.recommendation == Recommendation.FAIL
+
     def test_provenance_passthrough(self, results_dir: Path):
         prov = Provenance(commit_sha="abc123", pipeline_run_id="run-42")
         result = build_analysis(results_dir, "my-submission", provenance=prov)

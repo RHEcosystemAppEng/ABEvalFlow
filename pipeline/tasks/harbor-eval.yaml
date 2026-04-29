@@ -148,21 +148,25 @@ spec:
 
         python scripts/generate_eval_config.py "${ARGS[@]}"
 
-        echo "=== Treatment config ==="
-        cat "$CONFIG_DIR/treatment-config.yaml"
-        echo "=== Control config ==="
-        cat "$CONFIG_DIR/control-config.yaml"
+        echo "=== Treatment config (credentials masked) ==="
+        sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/treatment-config.yaml"
+        echo "=== Control config (credentials masked) ==="
+        sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/control-config.yaml"
 
         # --- 3. Run treatment evaluation ---
+        TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y"
         echo "=== Running treatment evaluation ==="
+        echo "Command: $TREATMENT_CMD"
         EVAL_START=$(date +%s)
-        harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
+        $TREATMENT_CMD
         EVAL_MID=$(date +%s)
         echo "Treatment completed in $((EVAL_MID - EVAL_START))s"
 
         # --- 4. Run control evaluation ---
+        CONTROL_CMD="harbor run -c $CONFIG_DIR/control-config.yaml -y"
         echo "=== Running control evaluation ==="
-        harbor run -c "$CONFIG_DIR/control-config.yaml" -y
+        echo "Command: $CONTROL_CMD"
+        $CONTROL_CMD
         EVAL_END=$(date +%s)
         echo "Control completed in $((EVAL_END - EVAL_MID))s"
         echo "Total evaluation time: $((EVAL_END - EVAL_START))s"
