@@ -44,7 +44,7 @@ spec:
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
-      default: "fix/skip-preinstalled-claude-code"
+      default: "main"
       # TODO: pin to a specific SHA once the fork stabilises
       description: Branch or SHA of the Harbor fork to install
     - name: pipeline-repo-url

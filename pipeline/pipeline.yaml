@@ -42,7 +42,7 @@ spec:
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
-      default: "fix/skip-preinstalled-claude-code"
+      default: "main"
       description: Branch or SHA of the Harbor fork to install
     - name: eval-mode
       type: string
