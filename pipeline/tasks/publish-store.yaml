@@ -107,7 +107,7 @@ spec:
         if [ -d "$PIPELINE_DIR/.git" ]; then
           echo "Pipeline repo exists, updating to requested revision"
           git -C "$PIPELINE_DIR" fetch origin "$(params.pipeline-repo-revision)" --depth 1
-          git -C "$PIPELINE_DIR" checkout FETCH_HEAD
+          git -C "$PIPELINE_DIR" -c advice.detachedHead=false checkout FETCH_HEAD
         else
           git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
             "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
