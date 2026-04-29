@@ -38,11 +38,11 @@ spec:
       description: Registry namespace / project name
     - name: harbor-fork-url
       type: string
-      default: "https://github.com/GuyZivRH/skills_eval_corrections.git"
+      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
-      default: "my_corrections"
+      default: "fix/skip-preinstalled-claude-code"
       description: Branch or SHA of the Harbor fork to install
     - name: eval-mode
       type: string

@@ -40,11 +40,11 @@ spec:
         'local-build' lets Harbor build from each task's Dockerfile.
     - name: harbor-fork-url
       type: string
-      default: "https://github.com/GuyZivRH/skills_eval_corrections.git"
+      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
-      default: "my_corrections"
+      default: "fix/skip-preinstalled-claude-code"
       # TODO: pin to a specific SHA once the fork stabilises
       description: Branch or SHA of the Harbor fork to install
     - name: pipeline-repo-url
@@ -151,20 +151,40 @@ spec:
         echo "=== Control config (credentials masked) ==="
         sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/control-config.yaml"
 
-        # --- 3. Run treatment evaluation ---
-        TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y"
+        # --- 3. Export LLM env vars (matching local workflow) ---
+        if [ -n "$(params.llm-api-key)" ]; then
+          export ANTHROPIC_API_KEY="$(params.llm-api-key)"
+        fi
+        if [ -n "$(params.llm-api-base)" ]; then
+          export ANTHROPIC_BASE_URL="$(params.llm-api-base)"
+        fi
+
+        # Build agent/model CLI flags
+        AGENT_FLAGS=""
+        if [ -z "$(params.llm-agent-wrapper)" ] && [ -n "$(params.llm-model)" ]; then
+          AGENT_FLAGS="-a claude-code -m '$(params.llm-model)'"
+        elif [ -n "$(params.llm-agent-wrapper)" ]; then
+          AGENT_FLAGS="-a '$(params.llm-agent-wrapper)'"
+          if [ -n "$(params.llm-model)" ]; then
+            AGENT_FLAGS="$AGENT_FLAGS -m '$(params.llm-model)'"
+          fi
+          export OPENAI_BASE_URL="$(params.llm-api-base)"
+        fi
+
+        # --- 4. Run treatment evaluation ---
+        TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y $AGENT_FLAGS"
         echo "=== Running treatment evaluation ==="
-        echo "Command: $TREATMENT_CMD"
+        echo "Command: $(echo "$TREATMENT_CMD" | sed 's/API_KEY=\S*/API_KEY=***/g')"
         EVAL_START=$(date +%s)
-        $TREATMENT_CMD
+        eval $TREATMENT_CMD
         EVAL_MID=$(date +%s)
         echo "Treatment completed in $((EVAL_MID - EVAL_START))s"
 
-        # --- 4. Run control evaluation ---
-        CONTROL_CMD="harbor run -c $CONFIG_DIR/control-config.yaml -y"
+        # --- 5. Run control evaluation ---
+        CONTROL_CMD="harbor run -c $CONFIG_DIR/control-config.yaml -y $AGENT_FLAGS"
         echo "=== Running control evaluation ==="
-        echo "Command: $CONTROL_CMD"
-        $CONTROL_CMD
+        echo "Command: $(echo "$CONTROL_CMD" | sed 's/API_KEY=\S*/API_KEY=***/g')"
+        eval $CONTROL_CMD
         EVAL_END=$(date +%s)
         echo "Control completed in $((EVAL_END - EVAL_MID))s"
         echo "Total evaluation time: $((EVAL_END - EVAL_START))s"
