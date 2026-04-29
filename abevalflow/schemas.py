@@ -24,6 +24,35 @@ class GenerationMode(StrEnum):
     AI = "ai"
 
 
+class LlmConfig(BaseModel):
+    """Optional per-submission LLM overrides.
+
+    When set in metadata.yaml, these override the pipeline-level defaults
+    from the pipeline-defaults ConfigMap.  ``None`` means "use pipeline
+    default" -- only explicitly set fields override.
+    """
+
+    model: str | None = Field(
+        default=None,
+        description="LLM model name (e.g. claude-sonnet, or openai/llama3 with a wrapper)",
+    )
+    api_base: str | None = Field(
+        default=None,
+        description="Base URL of the LLM API proxy",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="API key for the LLM provider (mock for LiteLLM proxy)",
+    )
+    agent_wrapper: str | None = Field(
+        default=None,
+        description=(
+            "Agent wrapper for non-Claude models (e.g. opencode, qwen-coder). "
+            "Empty or None uses claude-code agent directly."
+        ),
+    )
+
+
 class ExperimentType(StrEnum):
     SKILL = "skill"
     MODEL = "model"
@@ -176,3 +205,11 @@ class SubmissionMetadata(BaseModel):
     cpus: int = Field(default=1, gt=0, description="CPU cores for trial container")
     memory_mb: int = Field(default=2048, gt=0, description="Memory in MB for trial container")
     storage_mb: int = Field(default=10240, gt=0, description="Storage in MB for trial container")
+
+    llm: LlmConfig | None = Field(
+        default=None,
+        description=(
+            "Optional LLM config overrides for Harbor evaluation agents. "
+            "Overrides pipeline-level defaults from the pipeline-defaults ConfigMap."
+        ),
+    )

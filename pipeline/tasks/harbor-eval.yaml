@@ -60,11 +60,19 @@ spec:
     - name: llm-model
       type: string
       default: "claude-sonnet"
-      description: LLM model name for Harbor evaluation agents
+      description: LLM model name (e.g. claude-sonnet). Empty falls back to oracle.
     - name: llm-api-base
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000"
-      description: Base URL of the OpenAI-compatible LLM API
+      description: Base URL of the LLM API proxy
+    - name: llm-api-key
+      type: string
+      default: "mock"
+      description: API key for the LLM provider (mock for LiteLLM proxy)
+    - name: llm-agent-wrapper
+      type: string
+      default: ""
+      description: Agent wrapper for non-Claude models (e.g. opencode). Empty uses claude-code.
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions and scaffolded task directories
@@ -130,6 +138,12 @@ spec:
         fi
         if [ -n "$(params.llm-api-base)" ]; then
           ARGS+=(--llm-api-base "$(params.llm-api-base)")
+        fi
+        if [ -n "$(params.llm-api-key)" ]; then
+          ARGS+=(--llm-api-key "$(params.llm-api-key)")
+        fi
+        if [ -n "$(params.llm-agent-wrapper)" ]; then
+          ARGS+=(--llm-agent-wrapper "$(params.llm-agent-wrapper)")
         fi
 
         python scripts/generate_eval_config.py "${ARGS[@]}"

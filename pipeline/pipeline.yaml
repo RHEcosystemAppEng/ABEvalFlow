@@ -82,14 +82,25 @@ spec:
       type: string
       default: "claude-sonnet"
       description: >-
-        LLM model name for Harbor evaluation agents. Must match a model
-        registered in the LiteLLM proxy (or provider API).
+        LLM model name (e.g. claude-sonnet, claude-haiku).
+        Empty string falls back to Harbor's oracle agent.
     - name: llm-api-base
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000"
       description: >-
-        Base URL of the OpenAI-compatible LLM API (e.g. LiteLLM proxy).
-        Set to empty string to use Harbor's default oracle agent.
+        Base URL of the LLM API proxy.
+    - name: llm-api-key
+      type: string
+      default: "mock"
+      description: >-
+        API key for the LLM provider. Use 'mock' for LiteLLM proxy,
+        or a real key for direct API access.
+    - name: llm-agent-wrapper
+      type: string
+      default: ""
+      description: >-
+        Agent wrapper for non-Claude models (e.g. opencode, qwen-coder).
+        Empty uses claude-code agent directly.
 
   workspaces:
     - name: shared-workspace
@@ -210,6 +221,10 @@ spec:
           value: $(params.llm-model)
         - name: llm-api-base
           value: $(params.llm-api-base)
+        - name: llm-api-key
+          value: $(params.llm-api-key)
+        - name: llm-agent-wrapper
+          value: $(params.llm-agent-wrapper)
       workspaces:
         - name: source
           workspace: shared-workspace
