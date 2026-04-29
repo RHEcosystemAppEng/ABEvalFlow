@@ -40,14 +40,12 @@ spec:
         'local-build' lets Harbor build from each task's Dockerfile.
     - name: harbor-fork-url
       type: string
-      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
+      default: "https://github.com/GuyZivRH/skills_eval_corrections.git"
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
-      default: "main"
-      # TODO: pin to a specific SHA once the fork stabilises — "main" means
-      # each TaskRun pulls whatever is current, risking breakage from
-      # upstream changes.
+      default: "my_corrections"
+      # TODO: pin to a specific SHA once the fork stabilises
       description: Branch or SHA of the Harbor fork to install
     - name: pipeline-repo-url
       type: string
