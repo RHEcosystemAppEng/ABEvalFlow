@@ -70,6 +70,26 @@ def _timeout_multiplier(actual: float, default: float) -> float:
     return actual / default
 
 
+def _resolve_llm_params(
+    metadata: SubmissionMetadata,
+    llm_model: str,
+    llm_api_base: str,
+    llm_api_key: str,
+    llm_agent_wrapper: str,
+) -> tuple[str, str, str, str]:
+    """Apply per-submission LLM overrides from metadata.yaml over pipeline defaults."""
+    if metadata.llm:
+        if metadata.llm.model is not None:
+            llm_model = metadata.llm.model
+        if metadata.llm.api_base is not None:
+            llm_api_base = metadata.llm.api_base
+        if metadata.llm.api_key is not None:
+            llm_api_key = metadata.llm.api_key
+        if metadata.llm.agent_wrapper is not None:
+            llm_agent_wrapper = metadata.llm.agent_wrapper
+    return llm_model, llm_api_base, llm_api_key, llm_agent_wrapper
+
+
 def build_variant_config(
     metadata: SubmissionMetadata,
     variant: str,
@@ -79,6 +99,8 @@ def build_variant_config(
     image_ref: str = "",
     llm_model: str = "",
     llm_api_base: str = "",
+    llm_api_key: str = "",
+    llm_agent_wrapper: str = "",
 ) -> dict[str, Any]:
     """Build a Harbor JobConfig dict for a single variant.
 
@@ -89,6 +111,10 @@ def build_variant_config(
         raise ValueError(
             f"image_ref is required for variant '{variant}' in prebuilt mode"
         )
+
+    llm_model, llm_api_base, llm_api_key, llm_agent_wrapper = _resolve_llm_params(
+        metadata, llm_model, llm_api_base, llm_api_key, llm_agent_wrapper,
+    )
 
     task: dict[str, Any] = {"path": task_dir}
 
@@ -122,10 +148,22 @@ def build_variant_config(
     )
 
     agent_config: dict[str, Any] = {}
-    if llm_model:
-        agent_config["model_name"] = llm_model
+    if llm_agent_wrapper:
+        agent_config["name"] = llm_agent_wrapper
+        if llm_model:
+            agent_config["model_name"] = llm_model
         if llm_api_base:
-            agent_config["env"] = {"OPENAI_BASE_URL": llm_api_base}
+            agent_config.setdefault("env", {})["OPENAI_BASE_URL"] = llm_api_base
+    elif llm_model:
+        agent_config["name"] = "claude-code"
+        agent_config["model_name"] = llm_model
+        env: dict[str, str] = {}
+        if llm_api_key:
+            env["ANTHROPIC_API_KEY"] = llm_api_key
+        if llm_api_base:
+            env["ANTHROPIC_BASE_URL"] = llm_api_base
+        if env:
+            agent_config["env"] = env
 
     config: dict[str, Any] = {
         "job_name": f"{metadata.name}-{variant}",
@@ -156,6 +194,8 @@ def generate_eval_configs(
     control_image_ref: str = "",
     llm_model: str = "",
     llm_api_base: str = "",
+    llm_api_key: str = "",
+    llm_agent_wrapper: str = "",
 ) -> dict[str, dict[str, Any]]:
     """Generate per-variant Harbor configs, write YAML files, return both."""
     metadata = load_metadata(submission_dir)
@@ -179,6 +219,8 @@ def generate_eval_configs(
             image_ref=img_ref,
             llm_model=llm_model,
             llm_api_base=llm_api_base,
+            llm_api_key=llm_api_key,
+            llm_agent_wrapper=llm_agent_wrapper,
         )
         out_path = output_dir / f"{variant}-config.yaml"
         with out_path.open("w") as f:
@@ -241,12 +283,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--llm-model",
         default="",
-        help="LLM model name for Harbor agents (e.g. claude-sonnet). Empty uses oracle.",
+        help="LLM model name (e.g. claude-sonnet). Empty falls back to oracle.",
     )
     parser.add_argument(
         "--llm-api-base",
         default="",
-        help="Base URL of the OpenAI-compatible LLM API (e.g. http://litellm:4000)",
+        help="Base URL of the LLM API proxy (e.g. http://litellm:4000)",
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        default="",
+        help="API key for the LLM provider (mock for LiteLLM proxy)",
+    )
+    parser.add_argument(
+        "--llm-agent-wrapper",
+        default="",
+        help="Agent wrapper for non-Claude models (e.g. opencode). Empty uses claude-code.",
     )
 
     args = parser.parse_args(argv)
@@ -273,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         control_image_ref=args.control_image_ref,
         llm_model=args.llm_model,
         llm_api_base=args.llm_api_base,
+        llm_api_key=args.llm_api_key,
+        llm_agent_wrapper=args.llm_agent_wrapper,
     )
     return 0
 

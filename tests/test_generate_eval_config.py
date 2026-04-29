@@ -187,7 +187,8 @@ class TestCustomMetadataFields:
 
 
 class TestAgentConfig:
-    def test_default_oracle_agent(self, minimal_submission: Path):
+    def test_default_oracle_when_no_llm(self, minimal_submission: Path):
+        """No LLM params at all -> oracle agent (empty dict)."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
             meta, "treatment", TREATMENT_DIR, "prebuilt",
@@ -195,27 +196,62 @@ class TestAgentConfig:
         )
         assert config["agents"] == [{}]
 
-    def test_llm_model_with_api_base(self, minimal_submission: Path):
+    def test_claude_code_default(self, minimal_submission: Path):
+        """Model without wrapper -> claude-code agent with Anthropic env."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
             meta, "treatment", TREATMENT_DIR, "prebuilt",
             jobs_dir="results/treatment", image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
+            llm_api_key="mock",
         )
         agent = config["agents"][0]
+        assert agent["name"] == "claude-code"
         assert agent["model_name"] == "claude-sonnet"
-        assert agent["env"]["OPENAI_BASE_URL"] == "http://litellm:4000"
+        assert agent["env"]["ANTHROPIC_BASE_URL"] == "http://litellm:4000"
+        assert agent["env"]["ANTHROPIC_API_KEY"] == "mock"
 
-    def test_llm_model_without_api_base(self, minimal_submission: Path):
+    def test_claude_code_model_only(self, minimal_submission: Path):
+        """Model without api_base or key -> claude-code, model_name, no env."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
             meta, "treatment", TREATMENT_DIR, "prebuilt",
             jobs_dir="results/treatment", image_ref=TREATMENT_REF,
-            llm_model="gpt-4o",
+            llm_model="claude-sonnet",
         )
         agent = config["agents"][0]
-        assert agent["model_name"] == "gpt-4o"
+        assert agent["name"] == "claude-code"
+        assert agent["model_name"] == "claude-sonnet"
+        assert "env" not in agent
+
+    def test_wrapper_agent_opencode(self, minimal_submission: Path):
+        """Wrapper agent -> opencode with OPENAI_BASE_URL."""
+        meta = load_metadata(minimal_submission)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_agent_wrapper="opencode",
+            llm_model="openai/llama3",
+            llm_api_base="http://litellm:4000",
+        )
+        agent = config["agents"][0]
+        assert agent["name"] == "opencode"
+        assert agent["model_name"] == "openai/llama3"
+        assert agent["env"]["OPENAI_BASE_URL"] == "http://litellm:4000"
+
+    def test_wrapper_without_api_base(self, minimal_submission: Path):
+        """Wrapper agent with model but no api_base -> no env block."""
+        meta = load_metadata(minimal_submission)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_agent_wrapper="opencode",
+            llm_model="openai/gpt-4o",
+        )
+        agent = config["agents"][0]
+        assert agent["name"] == "opencode"
+        assert agent["model_name"] == "openai/gpt-4o"
         assert "env" not in agent
 
     def test_llm_config_in_generated_yaml(
@@ -233,14 +269,113 @@ class TestAgentConfig:
             control_image_ref=CONTROL_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
+            llm_api_key="mock",
         )
         for variant in ("treatment", "control"):
             agent = configs[variant]["agents"][0]
+            assert agent["name"] == "claude-code"
             assert agent["model_name"] == "claude-sonnet"
             loaded = yaml.safe_load(
                 (out_dir / f"{variant}-config.yaml").read_text()
             )
+            assert loaded["agents"][0]["name"] == "claude-code"
             assert loaded["agents"][0]["model_name"] == "claude-sonnet"
+
+
+class TestMetadataLlmOverrides:
+    """Test that metadata.yaml llm: block overrides pipeline defaults."""
+
+    @pytest.fixture()
+    def submission_with_wrapper_override(self, tmp_path: Path) -> Path:
+        """Submission overrides to use opencode wrapper with a different model."""
+        sub = tmp_path / "wrapper-override"
+        sub.mkdir()
+        meta = {
+            "name": "wrapper-override",
+            "llm": {
+                "agent_wrapper": "opencode",
+                "model": "openai/llama3",
+            },
+        }
+        (sub / "metadata.yaml").write_text(yaml.dump(meta))
+        return sub
+
+    @pytest.fixture()
+    def submission_model_override(self, tmp_path: Path) -> Path:
+        """Submission overrides only the model name."""
+        sub = tmp_path / "model-override"
+        sub.mkdir()
+        meta = {
+            "name": "model-override",
+            "llm": {"model": "claude-haiku"},
+        }
+        (sub / "metadata.yaml").write_text(yaml.dump(meta))
+        return sub
+
+    def test_wrapper_override(self, submission_with_wrapper_override: Path):
+        """Metadata switches from claude-code default to opencode wrapper."""
+        meta = load_metadata(submission_with_wrapper_override)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_model="claude-sonnet",
+            llm_api_base="http://litellm:4000",
+            llm_api_key="mock",
+        )
+        agent = config["agents"][0]
+        assert agent["name"] == "opencode"
+        assert agent["model_name"] == "openai/llama3"
+        assert agent["env"]["OPENAI_BASE_URL"] == "http://litellm:4000"
+
+    def test_model_override_keeps_claude_code(self, submission_model_override: Path):
+        """Overriding only model keeps claude-code as the agent."""
+        meta = load_metadata(submission_model_override)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_model="claude-sonnet",
+            llm_api_base="http://litellm:4000",
+            llm_api_key="mock",
+        )
+        agent = config["agents"][0]
+        assert agent["name"] == "claude-code"
+        assert agent["model_name"] == "claude-haiku"
+        assert agent["env"]["ANTHROPIC_BASE_URL"] == "http://litellm:4000"
+        assert agent["env"]["ANTHROPIC_API_KEY"] == "mock"
+
+    def test_no_llm_block_uses_pipeline_defaults(self, minimal_submission: Path):
+        """No llm: in metadata -> pipeline defaults (claude-code) used."""
+        meta = load_metadata(minimal_submission)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_model="claude-sonnet",
+            llm_api_base="http://litellm:4000",
+            llm_api_key="mock",
+        )
+        agent = config["agents"][0]
+        assert agent["name"] == "claude-code"
+        assert agent["model_name"] == "claude-sonnet"
+
+    def test_oracle_override(self, tmp_path: Path):
+        """Submission can force oracle mode by clearing model."""
+        sub = tmp_path / "force-oracle"
+        sub.mkdir()
+        meta = {
+            "name": "force-oracle",
+            "llm": {"model": "", "api_base": "", "api_key": "", "agent_wrapper": ""},
+        }
+        (sub / "metadata.yaml").write_text(yaml.dump(meta))
+        meta = load_metadata(sub)
+        config = build_variant_config(
+            meta, "treatment", TREATMENT_DIR, "prebuilt",
+            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            llm_model="claude-sonnet",
+            llm_api_base="http://litellm:4000",
+            llm_api_key="mock",
+        )
+        agent = config["agents"][0]
+        assert agent == {}
 
 
 class TestGenerateEvalConfigs:

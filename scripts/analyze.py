@@ -196,6 +196,9 @@ def build_analysis(
     if t_summary.n_trials == 0 or c_summary.n_trials == 0:
         logger.warning("No trial data for one or both variants — defaulting to FAIL")
         recommendation = Recommendation.FAIL
+    elif t_summary.n_passed == 0 and c_summary.n_passed == 0:
+        logger.warning("Zero passes in both variants — defaulting to FAIL")
+        recommendation = Recommendation.FAIL
     else:
         recommendation = Recommendation.PASS if uplift >= threshold else Recommendation.FAIL
 

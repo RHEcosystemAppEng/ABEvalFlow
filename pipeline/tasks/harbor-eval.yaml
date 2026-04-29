@@ -44,10 +44,8 @@ spec:
       description: Harbor fork repository URL
     - name: harbor-fork-revision
       type: string
-      default: "main"
-      # TODO: pin to a specific SHA once the fork stabilises — "main" means
-      # each TaskRun pulls whatever is current, risking breakage from
-      # upstream changes.
+      default: "fix/skip-preinstalled-claude-code"
+      # TODO: pin to a specific SHA once the fork stabilises
       description: Branch or SHA of the Harbor fork to install
     - name: pipeline-repo-url
       type: string
@@ -60,11 +58,19 @@ spec:
     - name: llm-model
       type: string
       default: "claude-sonnet"
-      description: LLM model name for Harbor evaluation agents
+      description: LLM model name (e.g. claude-sonnet). Empty falls back to oracle.
     - name: llm-api-base
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000"
-      description: Base URL of the OpenAI-compatible LLM API
+      description: Base URL of the LLM API proxy
+    - name: llm-api-key
+      type: string
+      default: "mock"
+      description: API key for the LLM provider (mock for LiteLLM proxy)
+    - name: llm-agent-wrapper
+      type: string
+      default: ""
+      description: Agent wrapper for non-Claude models (e.g. opencode). Empty uses claude-code.
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions and scaffolded task directories
@@ -131,24 +137,54 @@ spec:
         if [ -n "$(params.llm-api-base)" ]; then
           ARGS+=(--llm-api-base "$(params.llm-api-base)")
         fi
+        if [ -n "$(params.llm-api-key)" ]; then
+          ARGS+=(--llm-api-key "$(params.llm-api-key)")
+        fi
+        if [ -n "$(params.llm-agent-wrapper)" ]; then
+          ARGS+=(--llm-agent-wrapper "$(params.llm-agent-wrapper)")
+        fi
 
         python scripts/generate_eval_config.py "${ARGS[@]}"
 
-        echo "=== Treatment config ==="
-        cat "$CONFIG_DIR/treatment-config.yaml"
-        echo "=== Control config ==="
-        cat "$CONFIG_DIR/control-config.yaml"
+        echo "=== Treatment config (credentials masked) ==="
+        sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/treatment-config.yaml"
+        echo "=== Control config (credentials masked) ==="
+        sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/control-config.yaml"
 
-        # --- 3. Run treatment evaluation ---
+        # --- 3. Export LLM env vars (matching local workflow) ---
+        if [ -n "$(params.llm-api-key)" ]; then
+          export ANTHROPIC_API_KEY="$(params.llm-api-key)"
+        fi
+        if [ -n "$(params.llm-api-base)" ]; then
+          export ANTHROPIC_BASE_URL="$(params.llm-api-base)"
+        fi
+
+        # Build agent/model CLI flags
+        AGENT_FLAGS=""
+        if [ -z "$(params.llm-agent-wrapper)" ] && [ -n "$(params.llm-model)" ]; then
+          AGENT_FLAGS="-a claude-code -m '$(params.llm-model)'"
+        elif [ -n "$(params.llm-agent-wrapper)" ]; then
+          AGENT_FLAGS="-a '$(params.llm-agent-wrapper)'"
+          if [ -n "$(params.llm-model)" ]; then
+            AGENT_FLAGS="$AGENT_FLAGS -m '$(params.llm-model)'"
+          fi
+          export OPENAI_BASE_URL="$(params.llm-api-base)"
+        fi
+
+        # --- 4. Run treatment evaluation ---
+        TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y $AGENT_FLAGS"
         echo "=== Running treatment evaluation ==="
+        echo "Command: $(echo "$TREATMENT_CMD" | sed 's/API_KEY=\S*/API_KEY=***/g')"
         EVAL_START=$(date +%s)
-        harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
+        eval $TREATMENT_CMD
         EVAL_MID=$(date +%s)
         echo "Treatment completed in $((EVAL_MID - EVAL_START))s"
 
-        # --- 4. Run control evaluation ---
+        # --- 5. Run control evaluation ---
+        CONTROL_CMD="harbor run -c $CONFIG_DIR/control-config.yaml -y $AGENT_FLAGS"
         echo "=== Running control evaluation ==="
-        harbor run -c "$CONFIG_DIR/control-config.yaml" -y
+        echo "Command: $(echo "$CONTROL_CMD" | sed 's/API_KEY=\S*/API_KEY=***/g')"
+        eval $CONTROL_CMD
         EVAL_END=$(date +%s)
         echo "Control completed in $((EVAL_END - EVAL_MID))s"
         echo "Total evaluation time: $((EVAL_END - EVAL_START))s"
