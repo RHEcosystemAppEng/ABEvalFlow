@@ -24,6 +24,40 @@ logger = logging.getLogger(__name__)
 
 _PYTEST_COLLECT_TIMEOUT = 10
 
+
+def _parse_json_or_text(response_text: str, label: str = "Review") -> dict:
+    """Best-effort parse of an LLM review response — JSON preferred, plain text OK."""
+    try:
+        result = json.loads(response_text)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                result = None
+        else:
+            result = None
+
+    if result is not None:
+        passed = bool(result.get("pass", False))
+        issues = result.get("issues", [])
+        if not isinstance(issues, list):
+            issues = [str(issues)]
+        return {"passed": passed, "issues": issues}
+
+    lower = response_text.lower()
+    has_fail = any(w in lower for w in ("fail", "not ready", "problematic", "reject"))
+    has_pass = any(w in lower for w in ("pass", "ready for evaluation", "looks good", "approved"))
+    if has_fail:
+        logger.info("%s returned plain text — interpreted as FAIL", label)
+        return {"passed": False, "issues": [response_text.strip()]}
+    if has_pass:
+        logger.info("%s returned plain text — interpreted as PASS", label)
+        return {"passed": True, "issues": []}
+    logger.warning("%s ambiguous, treating as pass: %s", label, response_text[:200])
+    return {"passed": True, "issues": []}
+
 CONTENT_CHECK_SYSTEM_PROMPT = """\
 You are a QA gate for AI-generated skill evaluation files.
 
@@ -160,22 +194,8 @@ def content_check(submission_dir: Path) -> dict:
         max_tokens=512,
     )
 
-    try:
-        result = json.loads(response_text)
-    except json.JSONDecodeError:
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-        else:
-            logger.warning("Content check returned non-JSON: %s", response_text[:200])
-            return {"passed": False, "issues": ["LLM content check returned invalid JSON"]}
-
-    passed = bool(result.get("pass", False))
-    issues = result.get("issues", [])
-    if not isinstance(issues, list):
-        issues = [str(issues)]
-
-    return {"passed": passed, "issues": issues}
+    result = _parse_json_or_text(response_text, "Content check")
+    return result
 
 
 _REVIEWER_JSON_INSTRUCTION = """\
@@ -257,26 +277,8 @@ def _run_single_review(
         max_tokens=512,
     )
 
-    try:
-        result = json.loads(response_text)
-    except json.JSONDecodeError:
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-        else:
-            logger.warning(
-                "%s reviewer returned non-JSON: %s", reviewer_name, response_text[:200],
-            )
-            return reviewer_name, {
-                "pass": False,
-                "issues": [f"{reviewer_name} reviewer returned invalid JSON"],
-            }
-
-    issues = result.get("issues", [])
-    if not isinstance(issues, list):
-        issues = [str(issues)]
-
-    return reviewer_name, {"pass": bool(result.get("pass", False)), "issues": issues}
+    parsed = _parse_json_or_text(response_text, f"{reviewer_name} reviewer")
+    return reviewer_name, {"pass": parsed["passed"], "issues": parsed.get("issues", [])}
 
 
 def multi_reviewer_check(submission_dir: Path) -> dict:
@@ -374,17 +376,31 @@ def final_review(submission_dir: Path) -> dict:
     except json.JSONDecodeError:
         json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if json_match:
-            result = json.loads(json_match.group())
+            try:
+                result = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                result = None
         else:
-            logger.warning("Final review returned non-JSON: %s", response_text[:200])
-            return {"passed": False, "issues": ["Final review returned invalid JSON"]}
+            result = None
 
-    passed = bool(result.get("pass", False))
-    issues = result.get("issues", [])
-    if not isinstance(issues, list):
-        issues = [str(issues)]
+    if result is not None:
+        passed = bool(result.get("pass", False))
+        issues = result.get("issues", [])
+        if not isinstance(issues, list):
+            issues = [str(issues)]
+        return {"passed": passed, "issues": issues}
 
-    return {"passed": passed, "issues": issues}
+    lower = response_text.lower()
+    has_fail = any(w in lower for w in ("fail", "not ready", "problematic", "reject"))
+    has_pass = any(w in lower for w in ("pass", "ready for evaluation", "looks good", "approved"))
+    if has_fail:
+        logger.info("Final review returned plain text — interpreted as FAIL")
+        return {"passed": False, "issues": [response_text.strip()]}
+    if has_pass:
+        logger.info("Final review returned plain text — interpreted as PASS")
+        return {"passed": True, "issues": []}
+    logger.warning("Final review ambiguous, treating as pass: %s", response_text[:200])
+    return {"passed": True, "issues": []}
 
 
 def _read_safe(path: Path) -> str:

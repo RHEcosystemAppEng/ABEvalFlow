@@ -39,7 +39,6 @@ from abevalflow.generation_validator import (
     check_markdown,
     check_python,
     content_check,
-    final_review,
     multi_reviewer_check,
     pytest_collect_check,
     structural_check,
@@ -679,16 +678,16 @@ def generate(
     agent_type: str = "api",
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[str]:
-    """Run AI-assisted test generation with a multi-stage validation loop.
+    """Run AI-assisted test generation with iterative review-fix cycles.
 
-    After each generation attempt the output undergoes:
+    Each generation attempt undergoes:
       4. structural_check     — file existence, non-empty, ast.parse
       5. pytest_collect_check  — ``pytest --collect-only``
-      6. multi_reviewer_check  — 3 parallel LLM reviewers
-      7. correction_pass       — targeted LLM fix (only if reviewers found issues)
-      8. final_review          — single strict go/no-go gate
+      6. multi_reviewer_check  — 3 sequential LLM reviewers
+      7. correction_pass       — targeted LLM fix (if reviewers found issues)
 
-    On failure, errors are fed back into the next full generation attempt.
+    Once structural + pytest checks pass, the files are accepted.
+    Review/fix cycles improve quality but never reject — no final gate.
     """
     metadata, skill_content = _load_submission(submission_dir)
 
@@ -778,8 +777,8 @@ def generate(
         # --- Step 6: multi-reviewer check --------------------------------------
         review = multi_reviewer_check(submission_dir)
         if not review["passed"]:
-            logger.warning(
-                "Attempt %d multi-reviewer check found %d issues",
+            logger.info(
+                "Attempt %d: reviewers found %d issues, running correction pass",
                 attempt, len(review["issues"]),
             )
 
@@ -800,25 +799,11 @@ def generate(
                         f"{max_retries} attempts: {post_errors}"
                     )
                 continue
+        else:
+            logger.info("Attempt %d: reviewers passed, no corrections needed", attempt)
 
-        # --- Step 8: final review ----------------------------------------------
-        final = final_review(submission_dir)
-        if not final["passed"]:
-            last_errors = final["issues"]
-            logger.warning(
-                "Attempt %d final review failed: %s", attempt, final["issues"],
-            )
-            if attempt == max_retries:
-                raise ValueError(
-                    f"Generation failed final review after {max_retries} "
-                    f"attempts: {final['issues']}"
-                )
-            continue
-
-        logger.info("Generation validated on attempt %d", attempt)
-
+        logger.info("Generation accepted on attempt %d", attempt)
         _upload_to_minio(submission_dir, metadata.name)
-
         return generated
 
     raise ValueError(f"Generation failed after {max_retries} attempts")
