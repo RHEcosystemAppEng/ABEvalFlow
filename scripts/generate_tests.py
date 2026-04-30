@@ -414,7 +414,7 @@ def _generate_via_api(
             instruction_content=instruction_text,
             previous_errors=_error_block(test_errors),
         ),
-        max_tokens=8192,
+        max_tokens=65536,
     )
     (tests_dir / "test_outputs.py").write_text(test_text)
     logger.info("Step 2: generated test_outputs.py (%d chars)", len(test_text))
@@ -435,7 +435,7 @@ def _generate_via_api(
                 instruction_content=instruction_text,
                 test_content=test_text,
             ),
-            max_tokens=2048,
+            max_tokens=65536,
         )
         (tests_dir / "llm_judge.py").write_text(judge_text)
         logger.info("Step 3: generated llm_judge.py (%d chars)", len(judge_text))
