@@ -3,7 +3,7 @@
 Four layers:
   1. structural_check    — file existence, non-empty, Python compilation (no LLM cost)
   2. pytest_collect_check — ``pytest --collect-only`` to verify tests are discoverable
-  3. multi_reviewer_check — 3 parallel LLM reviewers with distinct personas
+  3. multi_reviewer_check — 3 sequential LLM reviewers with distinct personas
   4. final_review         — single strict LLM go/no-go gate after corrections
 
 Used inside the generate-validate retry loop in scripts/generate_tests.py.
@@ -16,7 +16,6 @@ import json
 import logging
 import re
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from abevalflow import llm_client
@@ -281,7 +280,11 @@ def _run_single_review(
 
 
 def multi_reviewer_check(submission_dir: Path) -> dict:
-    """Run 3 parallel LLM reviewers with distinct personas.
+    """Run 3 LLM reviewers sequentially, each as an independent session.
+
+    Each reviewer gets a fresh LLM call (no shared context with generation
+    or other reviewers).  Results are persisted to a ``_reviews/`` directory
+    so they can be inspected later.
 
     Returns ``{"passed": True/False, "issues": [str], "reviewer_results": dict}``.
     """
@@ -295,18 +298,21 @@ def multi_reviewer_check(submission_dir: Path) -> dict:
         test_content=test_content,
     )
 
+    reviews_dir = submission_dir / "_reviews"
+    reviews_dir.mkdir(exist_ok=True)
+
     reviewer_results: dict[str, dict] = {}
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {
-            pool.submit(_run_single_review, name, system, user_prompt): name
-            for name, system in _REVIEWERS
-        }
-        for future in as_completed(futures):
-            name, result = future.result()
-            reviewer_results[name] = result
-            status = "passed" if result["pass"] else "FAILED"
-            logger.info("Reviewer '%s': %s", name, status)
+    for name, system in _REVIEWERS:
+        logger.info("Running reviewer '%s'...", name)
+        name, result = _run_single_review(name, system, user_prompt)
+        reviewer_results[name] = result
+
+        review_file = reviews_dir / f"{name}.json"
+        review_file.write_text(json.dumps(result, indent=2))
+
+        status = "passed" if result["pass"] else "FAILED"
+        logger.info("Reviewer '%s': %s", name, status)
 
     all_issues: list[str] = []
     for name, result in reviewer_results.items():
