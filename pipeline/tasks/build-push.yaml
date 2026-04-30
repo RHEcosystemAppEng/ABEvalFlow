@@ -59,7 +59,7 @@ spec:
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
-        SHA="$(params.commit-sha)"
+        SHA="$(echo '$(params.commit-sha)' | tr '/' '-')"
         IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:treatment-${SHA}"
         CONTEXT="$(params.treatment-task-dir)/environment"
 
@@ -102,7 +102,7 @@ spec:
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
-        SHA="$(params.commit-sha)"
+        SHA="$(echo '$(params.commit-sha)' | tr '/' '-')"
         IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:control-${SHA}"
         CONTEXT="$(params.control-task-dir)/environment"
 
