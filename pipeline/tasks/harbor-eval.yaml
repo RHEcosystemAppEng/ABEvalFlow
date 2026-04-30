@@ -151,24 +151,28 @@ spec:
         echo "=== Control config (credentials masked) ==="
         sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/control-config.yaml"
 
-        # --- 3. Export LLM env vars (matching local workflow) ---
-        if [ -n "$(params.llm-api-key)" ]; then
-          export ANTHROPIC_API_KEY="$(params.llm-api-key)"
-        fi
-        if [ -n "$(params.llm-api-base)" ]; then
-          export ANTHROPIC_BASE_URL="$(params.llm-api-base)"
-        fi
+        # --- 3. Extract resolved agent/model/env from generated config ---
+        # The config already has the correct merged values (pipeline defaults + metadata overrides).
+        # We extract them here for CLI flags and env var exports.
+        eval "$(python3 - "$CONFIG_DIR/treatment-config.yaml" <<'EXTRACT'
+        import yaml, sys
+        cfg = yaml.safe_load(open(sys.argv[1]))
+        agents = cfg.get("agents", [{}])
+        a = agents[0] if agents else {}
+        env = a.get("env", {})
+        print(f'AGENT_NAME="{a.get("name", "")}"')
+        print(f'MODEL_NAME="{a.get("model_name", "")}"')
+        for k, v in env.items():
+            print(f'export {k}="{v}"')
+        EXTRACT
+        )"
 
-        # Build agent/model CLI flags
         AGENT_FLAGS=""
-        if [ -z "$(params.llm-agent-wrapper)" ] && [ -n "$(params.llm-model)" ]; then
-          AGENT_FLAGS="-a claude-code -m '$(params.llm-model)'"
-        elif [ -n "$(params.llm-agent-wrapper)" ]; then
-          AGENT_FLAGS="-a '$(params.llm-agent-wrapper)'"
-          if [ -n "$(params.llm-model)" ]; then
-            AGENT_FLAGS="$AGENT_FLAGS -m '$(params.llm-model)'"
-          fi
-          export OPENAI_BASE_URL="$(params.llm-api-base)"
+        if [ -n "$AGENT_NAME" ]; then
+          AGENT_FLAGS="-a '$AGENT_NAME'"
+        fi
+        if [ -n "$MODEL_NAME" ]; then
+          AGENT_FLAGS="$AGENT_FLAGS -m '$MODEL_NAME'"
         fi
 
         # --- 4. Run treatment evaluation ---

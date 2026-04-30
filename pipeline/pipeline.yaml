@@ -108,6 +108,26 @@ spec:
         Pre-built base image ref (with uv, claude-code, etc.).
         Build it with scripts/build_base_image.sh and push to the registry.
 
+  results:
+    - name: recommendation
+      description: "pass or fail based on uplift threshold"
+      value: $(tasks.analyze.results.recommendation)
+    - name: treatment-pass-rate
+      description: "Treatment variant pass rate (e.g. 0.8500)"
+      value: $(tasks.analyze.results.treatment-pass-rate)
+    - name: control-pass-rate
+      description: "Control variant pass rate (e.g. 0.6000)"
+      value: $(tasks.analyze.results.control-pass-rate)
+    - name: uplift
+      description: "Pass-rate uplift, treatment - control (e.g. +0.1500)"
+      value: $(tasks.analyze.results.uplift)
+    - name: ttest-p-value
+      description: "Welch's t-test p-value (e.g. 0.0342)"
+      value: $(tasks.analyze.results.ttest-p-value)
+    - name: fisher-p-value
+      description: "Fisher's exact test p-value (e.g. 0.0271)"
+      value: $(tasks.analyze.results.fisher-p-value)
+
   workspaces:
     - name: shared-workspace
       description: >-
@@ -332,3 +352,14 @@ spec:
       workspaces:
         - name: source
           workspace: shared-workspace
+
+  # ------------------------------------------------------------------
+  # Cleanup: delete workspace PVC after run completes (success or fail)
+  # ------------------------------------------------------------------
+  finally:
+    - name: cleanup-pvc
+      taskRef:
+        name: cleanup-pvc
+      params:
+        - name: pipelinerun-name
+          value: $(context.pipelineRun.name)
