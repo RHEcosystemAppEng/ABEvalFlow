@@ -49,7 +49,7 @@ from scripts.publish import upload_generated_files
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_RETRIES = 3
+DEFAULT_MAX_RETRIES = 5
 
 SYSTEM_PROMPT = """\
 You are an expert test engineer for AI skill evaluation pipelines.
@@ -191,6 +191,12 @@ trick questions that only pass if the agent memorized a specific table.
 free-form output, check for the presence of key information rather than \
 demanding exact formatting. For structured output (JSON, tables), exact \
 value matching is appropriate.
+
+5. **Keep tests concise and complete** — aim for 15-25 focused test \
+functions, not 40+. Every test function MUST have a complete body (no \
+truncated or stub functions). If the file would be too long, reduce the \
+number of tests rather than risk truncation. Initialize all module-level \
+variables inside functions or fixtures, not at import time.
 
 ## Skill Content (SKILL.md)
 {skill_content}
@@ -408,6 +414,7 @@ def _generate_via_api(
             instruction_content=instruction_text,
             previous_errors=_error_block(test_errors),
         ),
+        max_tokens=8192,
     )
     (tests_dir / "test_outputs.py").write_text(test_text)
     logger.info("Step 2: generated test_outputs.py (%d chars)", len(test_text))
