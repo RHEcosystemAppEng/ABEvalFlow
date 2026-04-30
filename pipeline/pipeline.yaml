@@ -107,6 +107,41 @@ spec:
       description: >-
         Pre-built base image ref (with uv, claude-code, etc.).
         Build it with scripts/build_base_image.sh and push to the registry.
+    # AI-assisted evaluation feature flags
+    - name: enable-ai-generation
+      type: string
+      default: "true"
+      description: >-
+        Run the AI-assisted test generation step. The step self-skips
+        for submissions with generation_mode: manual.
+    - name: enable-ai-review
+      type: string
+      default: "true"
+      description: >-
+        Run independent AI quality review before scaffolding.
+        Automatically disabled in oracle mode.
+    - name: llm-base-url
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000/v1"
+      description: LLM API base URL (OpenAI-compatible endpoint)
+    - name: llm-generation-model
+      type: string
+      default: "claude-sonnet"
+      description: Model identifier for AI generation and review
+    - name: agent-type
+      type: string
+      default: "api"
+      description: >-
+        How the AI generation step invokes the LLM: 'api' for direct API
+        calls, or 'claude', 'cursor', 'opencode' to use a native agent CLI
+        with skill loading.
+    - name: max-generation-retries
+      type: string
+      default: "3"
+      description: >-
+        Maximum number of generate-validate retry attempts per generation
+        step. Each failed attempt feeds validation errors back into the
+        generation prompt.
 
   results:
     - name: recommendation
@@ -127,42 +162,6 @@ spec:
     - name: fisher-p-value
       description: "Fisher's exact test p-value (e.g. 0.0271)"
       value: $(tasks.analyze.results.fisher-p-value)
-
-    # AI-assisted evaluation feature flags
-    - name: enable-ai-generation
-      type: string
-      default: "true"
-      description: >-
-        Run the AI-assisted test generation step. The step self-skips
-        for submissions with generation_mode: manual.
-    - name: enable-ai-review
-      type: string
-      default: "true"
-      description: >-
-        Run independent AI quality review before scaffolding.
-        Automatically disabled in oracle mode.
-    - name: llm-base-url
-      type: string
-      default: "http://litellm.ab-eval-flow.svc:4000/v1"
-      description: LLM API base URL (OpenAI-compatible endpoint)
-    - name: llm-model
-      type: string
-      default: "claude-sonnet-4-20250514"
-      description: Model identifier for AI generation and review
-    - name: agent-type
-      type: string
-      default: "api"
-      description: >-
-        How the AI generation step invokes the LLM: 'api' for direct API
-        calls, or 'claude', 'cursor', 'opencode' to use a native agent CLI
-        with skill loading.
-    - name: max-generation-retries
-      type: string
-      default: "3"
-      description: >-
-        Maximum number of generate-validate retry attempts per generation
-        step. Each failed attempt feeds validation errors back into the
-        generation prompt.
 
   workspaces:
     - name: shared-workspace
@@ -211,7 +210,7 @@ spec:
         - name: llm-base-url
           value: $(params.llm-base-url)
         - name: llm-model
-          value: $(params.llm-model)
+          value: $(params.llm-generation-model)
         - name: agent-type
           value: $(params.agent-type)
         - name: max-retries
@@ -259,7 +258,7 @@ spec:
         - name: llm-base-url
           value: $(params.llm-base-url)
         - name: llm-model
-          value: $(params.llm-model)
+          value: $(params.llm-generation-model)
       workspaces:
         - name: source
           workspace: shared-workspace

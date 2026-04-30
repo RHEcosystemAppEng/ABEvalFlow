@@ -212,6 +212,17 @@ common knowledge any model already has)?
 2. Would an agent WITH the skill have a measurable advantage over one WITHOUT it?
 3. Is the instruction too generic (testing general ability rather than the skill)?
 4. Do the tests target the skill's unique value-add?
+5. **CRITICAL — Skill leakage check:** Does the instruction leak skill \
+knowledge that would allow an unskilled agent to pass the tests? The \
+instruction must NOT reference the skill by name, embed its internal \
+rules/tables/mappings, or reveal expected answers. It should describe \
+WHAT to do, not HOW the skill says to do it. If the instruction contains \
+skill-specific details (e.g. exact image names, priority orders, decision \
+tables), flag it as a skill leakage issue.
+6. **Test overfitting check:** Are the tests overfitted to a single \
+hardcoded scenario with no room for the agent to demonstrate genuine \
+understanding? Tests should verify correct behavior, not just pattern-match \
+against pre-embedded answers from the instruction.
 """ + _REVIEWER_JSON_INSTRUCTION
 
 _FEASIBILITY_REVIEWER_SYSTEM = """\

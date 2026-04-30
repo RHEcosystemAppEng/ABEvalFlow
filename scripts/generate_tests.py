@@ -101,6 +101,36 @@ The instruction must:
 - FOCUS on the novel aspects that the skill uniquely adds — design a task \
 where having the skill gives a measurable advantage over not having it
 
+## CRITICAL: Instruction Isolation Rules
+
+The instruction will be given to BOTH a skilled agent (with the SKILL.md) \
+and an unskilled agent (WITHOUT the SKILL.md). To produce a valid A/B \
+comparison you MUST follow these rules:
+
+1. **DO NOT expose skill internals** — never mention the skill by name, \
+reference its rules, tables, mappings, workflows, or internal logic in the \
+instruction. The instruction must read as a natural task description, not \
+as a summary of the skill.
+
+2. **DO NOT embed answers** — the instruction must not contain the expected \
+values, correct outputs, or decision criteria that only the skill defines. \
+For example, do NOT say "the image should be registry.../nodejs-20" or \
+"use priority order X". Just ask for the result and let the agent figure \
+it out.
+
+3. **DO NOT reference the skill document** — phrases like "per the skill", \
+"as defined in SKILL.md", "using the /skill-name skill", or "the skill's \
+table" are forbidden in the instruction.
+
+4. **DO describe the task naturally** — state what the agent should do \
+(e.g. "analyze this project and produce a detection report"), what inputs \
+are available, and what output format is expected. The task should be \
+understandable to someone who has never seen the skill.
+
+5. **Let the skill provide the edge** — the advantage of having the skill \
+should come from the knowledge it provides (correct mappings, priority \
+orders, conventions), NOT from the instruction repeating that knowledge.
+
 ## Skill Name
 {skill_name}
 
@@ -113,7 +143,8 @@ where having the skill gives a measurable advantage over not having it
 ## Skill Analysis
 The following analysis identifies what this skill uniquely contributes \
 versus what a model already knows. The instruction MUST target the novel \
-aspects and test focus areas:
+aspects and test focus areas — but must do so by designing a scenario \
+that requires that knowledge, NOT by revealing the knowledge itself:
 
 {skill_analysis}
 
@@ -138,6 +169,28 @@ Tests must:
 - Be deterministic and pass when the instruction is followed correctly
 - MUST cover every test focus area listed below — these are what \
 differentiate a skilled agent from an unskilled one
+
+## CRITICAL: Test Design Rules
+
+1. **Test the WHAT, not the HOW** — verify that the agent produced the \
+correct output values, not that it followed a specific internal process. \
+Tests should check results against ground truth, not parrot skill rules.
+
+2. **Avoid overfitting to a single scenario** — where possible, include \
+tests that verify the agent's understanding of the underlying concepts, \
+not just rote pattern matching for one hardcoded input. For example, test \
+that the agent correctly identifies a language AND that it handles edge \
+cases like missing version info or ambiguous indicators.
+
+3. **Tests must be fair to both variants** — remember these tests run \
+against both a skilled agent (with SKILL.md) and an unskilled agent \
+(without it). Tests should measure genuine capability differences, not \
+trick questions that only pass if the agent memorized a specific table.
+
+4. **Prefer semantic checks over exact string matching** — when verifying \
+free-form output, check for the presence of key information rather than \
+demanding exact formatting. For structured output (JSON, tables), exact \
+value matching is appropriate.
 
 ## Skill Content (SKILL.md)
 {skill_content}
