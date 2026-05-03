@@ -187,6 +187,7 @@ def upload_generated_files(
         (submission_dir / "instruction.md", "instruction.md"),
         (submission_dir / "tests" / "test_outputs.py", "test_outputs.py"),
         (submission_dir / "tests" / "llm_judge.py", "llm_judge.py"),
+        (submission_dir / "scenario_brief.json", "scenario_brief.json"),
     ]
 
     uploaded = 0

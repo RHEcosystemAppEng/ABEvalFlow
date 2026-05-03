@@ -96,6 +96,51 @@ Is this set coherent and usable? Respond with JSON only.
 """
 
 
+def scenario_coherence_check(
+    submission_dir: Path,
+    scenario_brief: dict,
+) -> list[str]:
+    """Verify that the scenario brief's expected values appear in both artifacts.
+
+    Lightweight string-matching check (no LLM cost). Returns error strings.
+    """
+    errors: list[str] = []
+    expected = scenario_brief.get("expected_outputs", {})
+    project_files = scenario_brief.get("project_files", {})
+
+    instruction_path = submission_dir / "instruction.md"
+    test_path = submission_dir / "tests" / "test_outputs.py"
+
+    instruction = instruction_path.read_text() if instruction_path.is_file() else ""
+    test_content = test_path.read_text() if test_path.is_file() else ""
+
+    missing_in_instruction = []
+    for filepath in project_files:
+        basename = filepath.rsplit("/", 1)[-1]
+        if basename not in instruction:
+            missing_in_instruction.append(filepath)
+    if missing_in_instruction:
+        errors.append(
+            f"Instruction is missing project files from scenario brief: "
+            f"{missing_in_instruction}"
+        )
+
+    missing_in_tests = []
+    for field, value in expected.items():
+        val_str = str(value)
+        if val_str.lower() in ("null", "none", "n/a", ""):
+            continue
+        if val_str not in test_content:
+            missing_in_tests.append(f"{field}={val_str}")
+    if missing_in_tests:
+        errors.append(
+            f"Tests are missing expected_outputs from scenario brief: "
+            f"{missing_in_tests}"
+        )
+
+    return errors
+
+
 def check_markdown(path: Path) -> list[str]:
     """Validate a markdown file exists and is non-empty."""
     if not path.is_file():

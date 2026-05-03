@@ -175,6 +175,9 @@ spec:
           AGENT_FLAGS="$AGENT_FLAGS -m '$MODEL_NAME'"
         fi
 
+        # Harbor's verifier needs LLM_API_KEY for llm_judge.py
+        export LLM_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-mock}}"
+
         # --- 4. Run treatment evaluation ---
         TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y $AGENT_FLAGS"
         echo "=== Running treatment evaluation ==="

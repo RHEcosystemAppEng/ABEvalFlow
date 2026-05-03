@@ -41,6 +41,7 @@ from abevalflow.generation_validator import (
     content_check,
     multi_reviewer_check,
     pytest_collect_check,
+    scenario_coherence_check,
     structural_check,
 )
 from abevalflow.schemas import SubmissionMetadata
@@ -87,18 +88,84 @@ Output ONLY valid JSON with keys "novel_aspects", "common_knowledge", and \
 "test_focus_areas". Each value must be a list of short strings.
 """
 
+# --- Step 0.5: scenario brief -------------------------------------------------
+
+SCENARIO_PROMPT = """\
+You are designing a concrete test scenario for an A/B evaluation of an AI \
+skill. Given the skill definition and analysis below, produce a \
+**scenario brief** — a single JSON document that defines ALL the concrete \
+data the evaluation will use.
+
+The scenario brief is the SINGLE SOURCE OF TRUTH. Both the instruction \
+(given to the agent) and the tests (verifying the agent's output) will be \
+generated from this brief. Nothing may be invented outside of it.
+
+## What to include
+
+1. **project_files** — a dict mapping file paths to their full contents. \
+These are the files the agent will analyze. Make them realistic, \
+internally consistent, and rich enough to exercise the skill's novel \
+aspects. Include 3-7 files.
+
+2. **expected_outputs** — a dict mapping every output field/variable \
+the agent must produce to its correct value. These are the ground-truth \
+answers that tests will assert against. Every value must be derivable \
+from the project_files + the skill's knowledge.
+
+3. **rationale** — a dict mapping each expected output field to a short \
+explanation of why that value is correct (referencing specific files or \
+skill rules). This is for validation only — it will NOT appear in the \
+instruction or tests.
+
+## Design rules
+
+- The scenario MUST exercise the skill's **novel aspects** (listed below) \
+— include project files that create situations where the skill's unique \
+knowledge matters.
+- Expected outputs MUST be deterministically derivable from the project \
+files. Do NOT include subjective or ambiguous expected values.
+- Project file contents must be realistic and internally consistent \
+(e.g. if pyproject.toml says Python >=3.11, requirements.txt should have \
+compatible packages).
+- Do NOT reference the skill by name anywhere in the project files.
+
+## Skill Content (SKILL.md)
+{skill_content}
+
+## Skill Analysis
+{skill_analysis}
+
+Output ONLY valid JSON with keys "project_files", "expected_outputs", \
+and "rationale". No markdown fences, no commentary.
+"""
+
 # --- Step 1: instruction.md ---------------------------------------------------
 
 INSTRUCTION_PROMPT = """\
-Given the following AI skill definition, write an **instruction.md** file.
+Given the scenario brief and skill definition below, write an \
+**instruction.md** file.
 
 The instruction must:
 - Describe a concrete task an AI agent will receive
-- Include requirements, constraints, and expected outputs
+- Include the project files from the scenario brief VERBATIM as inline \
+content so the agent has real data to work with
+- Specify the expected output format and all required fields
 - Be achievable by an AI agent in a single session
 - Be objectively verifiable by automated tests
-- FOCUS on the novel aspects that the skill uniquely adds — design a task \
-where having the skill gives a measurable advantage over not having it
+- FOCUS on the novel aspects that the skill uniquely adds
+
+## CRITICAL: Data Rules
+
+1. **You MUST embed every file from the scenario brief's project_files** \
+in the instruction, with its full contents. The agent needs actual data \
+to analyze — never tell it to "guess from file names".
+
+2. **DO NOT add project files that are not in the scenario brief.** The \
+scenario brief is the single source of truth.
+
+3. **DO NOT embed the expected answers** from the scenario brief in the \
+instruction. The agent must derive them from the project files + its own \
+knowledge (or the skill's knowledge, for skilled agents).
 
 ## CRITICAL: Instruction Isolation Rules
 
@@ -130,6 +197,9 @@ understandable to someone who has never seen the skill.
 should come from the knowledge it provides (correct mappings, priority \
 orders, conventions), NOT from the instruction repeating that knowledge.
 
+## Scenario Brief
+{scenario_brief}
+
 ## Skill Name
 {skill_name}
 
@@ -140,11 +210,6 @@ orders, conventions), NOT from the instruction repeating that knowledge.
 {skill_content}
 
 ## Skill Analysis
-The following analysis identifies what this skill uniquely contributes \
-versus what a model already knows. The instruction MUST target the novel \
-aspects and test focus areas — but must do so by designing a scenario \
-that requires that knowledge, NOT by revealing the knowledge itself:
-
 {skill_analysis}
 
 ## Metadata
@@ -157,7 +222,7 @@ Output ONLY the full content of instruction.md — nothing else.
 # --- Step 2: test_outputs.py --------------------------------------------------
 
 TEST_PROMPT = """\
-Given the skill definition and the instruction below, write a \
+Given the scenario brief, skill definition, and instruction below, write a \
 **tests/test_outputs.py** file that verifies the agent completed the task.
 
 Tests must:
@@ -169,33 +234,40 @@ Tests must:
 - MUST cover every test focus area listed below — these are what \
 differentiate a skilled agent from an unskilled one
 
-## CRITICAL: Test Design Rules
+## CRITICAL: Use the Scenario Brief as Ground Truth
 
-1. **Test the WHAT, not the HOW** — verify that the agent produced the \
-correct output values, not that it followed a specific internal process. \
-Tests should check results against ground truth, not parrot skill rules.
+The scenario brief contains **expected_outputs** — these are the ONLY \
+correct values for the scenario. You MUST:
 
-2. **Avoid overfitting to a single scenario** — where possible, include \
-tests that verify the agent's understanding of the underlying concepts, \
-not just rote pattern matching for one hardcoded input. For example, test \
-that the agent correctly identifies a language AND that it handles edge \
-cases like missing version info or ambiguous indicators.
+1. **Assert against expected_outputs values** — every test that checks a \
+specific output value must use the exact value from the scenario brief's \
+expected_outputs. Do NOT invent values.
 
-3. **Tests must be fair to both variants** — remember these tests run \
+2. **Do NOT add assertions for data not in expected_outputs** — if a \
+field is not in expected_outputs, either skip it or test only that it is \
+present and non-empty.
+
+3. **Test the WHAT, not the HOW** — verify that the agent produced the \
+correct output values, not that it followed a specific internal process.
+
+4. **Tests must be fair to both variants** — remember these tests run \
 against both a skilled agent (with SKILL.md) and an unskilled agent \
 (without it). Tests should measure genuine capability differences, not \
 trick questions that only pass if the agent memorized a specific table.
 
-4. **Prefer semantic checks over exact string matching** — when verifying \
+5. **Prefer semantic checks over exact string matching** — when verifying \
 free-form output, check for the presence of key information rather than \
 demanding exact formatting. For structured output (JSON, tables), exact \
 value matching is appropriate.
 
-5. **Keep tests concise and complete** — aim for 15-25 focused test \
+6. **Keep tests concise and complete** — aim for 15-25 focused test \
 functions, not 40+. Every test function MUST have a complete body (no \
 truncated or stub functions). If the file would be too long, reduce the \
 number of tests rather than risk truncation. Initialize all module-level \
 variables inside functions or fixtures, not at import time.
+
+## Scenario Brief (GROUND TRUTH)
+{scenario_brief}
 
 ## Skill Content (SKILL.md)
 {skill_content}
@@ -352,19 +424,63 @@ def _format_analysis(analysis: dict) -> str:
     return "\n".join(lines)
 
 
+def _generate_scenario_brief(
+    skill_content: str,
+    analysis_text: str,
+    system: str,
+) -> tuple[dict, str]:
+    """Step 0.5: Generate a scenario brief — the single source of truth.
+
+    Returns (parsed_brief_dict, brief_as_json_string).
+    """
+    raw = _llm_call(
+        system,
+        SCENARIO_PROMPT.format(
+            skill_content=skill_content,
+            skill_analysis=analysis_text,
+        ),
+        max_tokens=8192,
+    )
+
+    try:
+        brief = json.loads(raw)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if json_match:
+            brief = json.loads(json_match.group())
+        else:
+            raise ValueError(f"Scenario brief is not valid JSON: {raw[:300]}")
+
+    for key in ("project_files", "expected_outputs"):
+        if key not in brief or not isinstance(brief[key], dict):
+            raise ValueError(f"Scenario brief missing or invalid key: {key}")
+        if not brief[key]:
+            raise ValueError(f"Scenario brief has empty '{key}'")
+
+    logger.info(
+        "Step 0.5: scenario brief — %d project files, %d expected outputs",
+        len(brief["project_files"]),
+        len(brief["expected_outputs"]),
+    )
+    return brief, json.dumps(brief, indent=2)
+
+
 def _generate_via_api(
     submission_dir: Path,
     metadata: SubmissionMetadata,
     skill_content: str,
     quality_criteria: str,
     previous_errors: list[str] | None = None,
-) -> list[str]:
-    """Generate files via 4 sequential LLM calls, validating after each step.
+) -> tuple[list[str], dict | None]:
+    """Generate files via 5 sequential LLM calls, validating after each step.
 
-    Step 0: Analyze skill   (novel vs common knowledge breakdown)
-    Step 1: instruction.md  (validated: exists, non-empty)
-    Step 2: test_outputs.py (validated: exists, non-empty, compiles)
-    Step 3: llm_judge.py    (optional; validated: compiles if produced)
+    Step 0:   Analyze skill     (novel vs common knowledge breakdown)
+    Step 0.5: Scenario brief    (single source of truth for project data)
+    Step 1:   instruction.md    (validated: exists, non-empty)
+    Step 2:   test_outputs.py   (validated: exists, non-empty, compiles)
+    Step 3:   llm_judge.py      (optional; validated: compiles if produced)
+
+    Returns (generated_files_list, scenario_brief_dict).
     """
     system = SYSTEM_PROMPT.format(
         quality_criteria=(
@@ -382,10 +498,17 @@ def _generate_via_api(
     analysis = _analyze_skill(skill_content)
     analysis_text = _format_analysis(analysis)
 
+    # --- Step 0.5: scenario brief ---------------------------------------------
+    brief, brief_json = _generate_scenario_brief(
+        skill_content, analysis_text, system,
+    )
+    (submission_dir / "scenario_brief.json").write_text(brief_json)
+
     # --- Step 1: instruction.md -----------------------------------------------
     instruction_text = _llm_call(
         system,
         INSTRUCTION_PROMPT.format(
+            scenario_brief=brief_json,
             skill_name=metadata.name,
             skill_description=metadata.description or "(not provided)",
             skill_content=skill_content,
@@ -408,6 +531,7 @@ def _generate_via_api(
     test_text = _llm_call(
         system,
         TEST_PROMPT.format(
+            scenario_brief=brief_json,
             skill_content=skill_content,
             skill_analysis=analysis_text,
             instruction_content=instruction_text,
@@ -445,7 +569,7 @@ def _generate_via_api(
         else:
             generated.append("tests/llm_judge.py")
 
-    return generated
+    return generated, brief
 
 
 def _generate_via_agent(
@@ -726,9 +850,10 @@ def generate(
         logger.info("Generation attempt %d/%d", attempt, max_retries)
 
         # --- Steps 0-3: generate files -----------------------------------------
+        scenario_brief = None
         try:
             if agent_type == "api":
-                generated = _generate_via_api(
+                generated, scenario_brief = _generate_via_api(
                     submission_dir,
                     metadata,
                     skill_content,
@@ -773,6 +898,21 @@ def generate(
                     f"attempts: {collect_errors}"
                 )
             continue
+
+        # --- Step 5.5: scenario coherence check --------------------------------
+        if scenario_brief is not None:
+            coherence_errors = scenario_coherence_check(submission_dir, scenario_brief)
+            if coherence_errors:
+                last_errors = coherence_errors
+                logger.warning(
+                    "Attempt %d coherence check failed: %s", attempt, coherence_errors,
+                )
+                if attempt == max_retries:
+                    raise ValueError(
+                        f"Generation failed coherence check after {max_retries} "
+                        f"attempts: {coherence_errors}"
+                    )
+                continue
 
         # --- Step 6: multi-reviewer check --------------------------------------
         review = multi_reviewer_check(submission_dir)
