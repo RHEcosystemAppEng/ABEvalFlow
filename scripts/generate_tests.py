@@ -288,12 +288,39 @@ Given the skill, instruction, and tests below, write an \
 LLM-as-judge evaluator in ``tests/llm_judge.py``.
 
 The judge should:
-- Accept the agent's workspace path as input
+- Accept the agent's workspace path as a CLI argument (default: /workspace)
 - Use an LLM call to assess quality beyond what deterministic tests cover
 - Produce a numeric score (0.0–1.0) and a short rationale
-- Be self-contained (import its own LLM client)
+- Write the result to /logs/verifier/reward.json (Harbor convention)
 - Focus on aspects that deterministic tests cannot capture (code quality, \
   adherence to best practices, completeness of approach)
+
+## CRITICAL: PEP 723 inline script metadata
+
+The script MUST start with PEP 723 inline script metadata so that
+``uv run`` can auto-install dependencies. Use this exact format at the
+top of the file (after the shebang if any):
+
+```
+# /// script
+# dependencies = [
+#   "openai>=1.30.0",
+# ]
+# ///
+```
+
+Use the ``openai`` SDK pointed at the LiteLLM proxy. Read these env vars
+(they are injected by Harbor via [verifier.env] in task.toml):
+- ``LLM_API_BASE`` — base URL of the OpenAI-compatible proxy
+- ``LLM_API_KEY`` — API key for the proxy
+- ``MODEL_NAME`` — model to use (e.g. "claude-sonnet")
+
+Example client setup:
+```python
+client = openai.OpenAI(base_url=os.environ["LLM_API_BASE"], api_key=os.environ["LLM_API_KEY"])
+```
+
+Do NOT use the ``anthropic`` SDK — use only ``openai`` via the proxy.
 
 ## Skill Content (SKILL.md)
 {skill_content}

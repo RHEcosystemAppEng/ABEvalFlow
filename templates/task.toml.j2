@@ -10,7 +10,8 @@ timeout_sec = {{ verifier_timeout }}
 {% if has_llm_judge %}
 
 [verifier.env]
-{{ llm_env_key }} = "${{ '{' }}{{ llm_env_key }}{{ '}' }}"
+LLM_API_BASE = "{{ llm_api_base }}"
+LLM_API_KEY = "${ANTHROPIC_API_KEY}"
 MODEL_NAME = "{{ model_name | default('') }}"
 {% endif %}
 

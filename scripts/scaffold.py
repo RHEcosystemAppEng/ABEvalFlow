@@ -60,8 +60,9 @@ def _build_template_context(
         # These were formerly ad-hoc dict reads from raw metadata; they are
         # not SubmissionMetadata fields (extra="forbid" rejects them), so the
         # hardcoded defaults are the only values they ever had in practice.
-        "llm_env_key": "LLM_API_KEY",
-        "model_name": "",
+        "llm_api_base": "http://litellm.ab-eval-flow.svc:4000",
+        "llm_api_key_env": "LLM_API_KEY",
+        "model_name": "claude-sonnet",
         "agent_timeout": metadata.agent_timeout_sec,
         "agent_setup_timeout": metadata.agent_setup_timeout_sec,
         "verifier_timeout": metadata.verifier_timeout_sec,
