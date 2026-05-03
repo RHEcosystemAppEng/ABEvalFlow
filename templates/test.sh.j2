@@ -6,9 +6,9 @@
 uvx \
   --with pytest==8.4.1 \
   --with pytest-json-ctrf==0.3.5 \
-  pytest --ctrf /logs/verifier/ctrf.json /tests/test_outputs.py -rA || true
+  pytest --ctrf /logs/verifier/ctrf.json /tests/test_outputs.py -rA
 
-TEST_EXIT=${PIPESTATUS[0]:-$?}
+TEST_EXIT=$?
 
 {% if has_llm_judge %}
 # LLM judge is informational only — its output is captured in /logs but does
