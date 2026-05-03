@@ -123,6 +123,8 @@ def upload_debug_artifacts(
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
 
+    _TRIAL_ROOT_FILES = {"exception.txt", "result.json", "trial.log", "config.json"}
+
     uploaded = 0
     for variant in ("treatment", "control"):
         variant_dir = results_dir / variant
@@ -133,7 +135,9 @@ def upload_debug_artifacts(
                 continue
             rel = fpath.relative_to(results_dir)
             parts = rel.parts
-            if not any(p in ("agent", "verifier") for p in parts):
+            is_debug_subdir = any(p in ("agent", "verifier", "artifacts") for p in parts)
+            is_trial_root_file = fpath.name in _TRIAL_ROOT_FILES
+            if not (is_debug_subdir or is_trial_root_file):
                 continue
             object_name = f"{prefix}/debug/{rel}"
             try:
