@@ -65,7 +65,7 @@ class AnalysisSummary(BaseModel):
 
     treatment: VariantSummary
     control: VariantSummary
-    uplift: float = Field(description="treatment pass_rate - control pass_rate")
+    uplift: float = Field(description="treatment pass_rate - control pass_rate (secondary; see mean_reward_gap)")
     mean_reward_gap: float | None = Field(
         default=None,
         description="treatment mean_reward - control mean_reward",

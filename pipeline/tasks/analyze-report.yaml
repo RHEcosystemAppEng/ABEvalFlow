@@ -43,7 +43,7 @@ spec:
       type: string
       default: "0.0"
       description: >-
-        Minimum pass-rate uplift (treatment - control) for a 'pass'
+        Minimum mean-reward gap (treatment - control) for a 'pass'
         recommendation. Set to 0.0 to pass whenever treatment >= control.
     - name: pipeline-repo-url
       type: string
@@ -61,10 +61,10 @@ spec:
   results:
     - name: recommendation
       description: "'pass' or 'fail' based on uplift threshold"
-    - name: treatment-pass-rate
-      description: Treatment variant pass rate as a decimal string (e.g. "0.8500")
-    - name: control-pass-rate
-      description: Control variant pass rate as a decimal string (e.g. "0.6000")
+    - name: treatment-mean-reward
+      description: Treatment variant mean reward as a decimal string (e.g. "0.8500")
+    - name: control-mean-reward
+      description: Control variant mean reward as a decimal string (e.g. "0.6000")
     - name: uplift
       description: "Pass-rate uplift (treatment - control) as a signed string (e.g. \"+0.1500\")"
     - name: ttest-p-value
@@ -128,8 +128,8 @@ spec:
 
         python - "$REPORT_DIR/report.json" \
           "$(results.recommendation.path)" \
-          "$(results.treatment-pass-rate.path)" \
-          "$(results.control-pass-rate.path)" \
+          "$(results.treatment-mean-reward.path)" \
+          "$(results.control-mean-reward.path)" \
           "$(results.uplift.path)" \
           "$(results.ttest-p-value.path)" \
           "$(results.fisher-p-value.path)" <<'EXTRACT'
@@ -138,8 +138,10 @@ spec:
             report = json.loads(open(sys.argv[1]).read())
             s = report["summary"]
             open(sys.argv[2], "w").write(s["recommendation"])
-            open(sys.argv[3], "w").write(f"{s['treatment']['pass_rate']:.4f}")
-            open(sys.argv[4], "w").write(f"{s['control']['pass_rate']:.4f}")
+            t_mr = s["treatment"].get("mean_reward")
+            c_mr = s["control"].get("mean_reward")
+            open(sys.argv[3], "w").write(f"{t_mr:.4f}" if t_mr is not None else "N/A")
+            open(sys.argv[4], "w").write(f"{c_mr:.4f}" if c_mr is not None else "N/A")
             open(sys.argv[5], "w").write(f"{s['uplift']:+.4f}")
             ttest = s.get("ttest_p_value")
             open(sys.argv[6], "w").write(f"{ttest:.4f}" if ttest is not None else "N/A")
