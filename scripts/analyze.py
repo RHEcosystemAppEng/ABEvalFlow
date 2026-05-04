@@ -193,6 +193,8 @@ def build_analysis(
     ttest_p = compute_ttest(treatment_trials, control_trials)
     fisher_p = compute_fisher(t_summary, c_summary)
 
+    primary_gap = mean_gap if mean_gap is not None else uplift
+
     if t_summary.n_trials == 0 or c_summary.n_trials == 0:
         logger.warning("No trial data for one or both variants — defaulting to FAIL")
         recommendation = Recommendation.FAIL
@@ -200,7 +202,7 @@ def build_analysis(
         logger.warning("Zero passes in both variants — defaulting to FAIL")
         recommendation = Recommendation.FAIL
     else:
-        recommendation = Recommendation.PASS if uplift >= threshold else Recommendation.FAIL
+        recommendation = Recommendation.PASS if primary_gap >= threshold else Recommendation.FAIL
 
     return AnalysisResult(
         submission_name=submission_name,
@@ -370,10 +372,11 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Wrote Markdown report to %s", md_path)
 
     s = result.summary
-    print(f"Treatment pass rate: {s.treatment.pass_rate:.4f}")
-    print(f"Control pass rate:   {s.control.pass_rate:.4f}")
-    print(f"Uplift:              {s.uplift:+.4f}")
-    print(f"Recommendation:      {s.recommendation.value.upper()}")
+    print(f"Treatment mean reward: {_fmt(s.treatment.mean_reward)}")
+    print(f"Control mean reward:   {_fmt(s.control.mean_reward)}")
+    print(f"Mean reward gap:       {_fmt(s.mean_reward_gap, '+.4f')}")
+    print(f"Uplift (pass rate):    {s.uplift:+.4f}")
+    print(f"Recommendation:        {s.recommendation.value.upper()}")
 
     return 0
 

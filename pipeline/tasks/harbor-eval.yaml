@@ -75,10 +75,10 @@ spec:
     - name: source
       description: Workspace containing the cloned submissions and scaffolded task directories
   results:
-    - name: treatment-pass-rate
-      description: Treatment variant pass rate as a decimal string (e.g. "0.85")
-    - name: control-pass-rate
-      description: Control variant pass rate as a decimal string (e.g. "0.60")
+    - name: treatment-mean-reward
+      description: Treatment variant mean reward as a decimal string (e.g. "0.85")
+    - name: control-mean-reward
+      description: Control variant mean reward as a decimal string (e.g. "0.60")
     - name: results-dir
       description: Path to the base results directory containing treatment/ and control/ subdirs
   steps:
@@ -201,8 +201,8 @@ spec:
         echo -n "$RESULTS_DIR" > "$(results.results-dir.path)"
 
         python - "$RESULTS_DIR" \
-          "$(results.treatment-pass-rate.path)" \
-          "$(results.control-pass-rate.path)" <<'PARSE_SCRIPT'
+          "$(results.treatment-mean-reward.path)" \
+          "$(results.control-mean-reward.path)" <<'PARSE_SCRIPT'
         import json
         import sys
         from pathlib import Path
@@ -211,37 +211,37 @@ spec:
         treatment_result_path = sys.argv[2]
         control_result_path = sys.argv[3]
 
-        def compute_pass_rate(variant_dir: Path) -> str:
-            """Scan all trial result.json files under a variant's jobs directory."""
+        def compute_mean_reward(variant_dir: Path) -> str:
+            """Compute mean reward across all trial result.json files."""
             if not variant_dir.is_dir():
                 return "0.0"
-            total = 0
-            passed = 0
+            rewards = []
             for result_file in sorted(variant_dir.rglob("result.json")):
                 try:
                     data = json.loads(result_file.read_text())
                     if "verifier_result" not in data:
                         continue
                     vr = data.get("verifier_result") or {}
-                    rewards = vr.get("rewards") or {}
-                    reward = rewards.get("reward")
-                    total += 1
-                    if reward is not None and float(reward) > 0.0:
-                        passed += 1
+                    rw = vr.get("rewards") or {}
+                    reward = rw.get("reward")
+                    if reward is None:
+                        reward = vr.get("reward")
+                    if reward is not None:
+                        rewards.append(float(reward))
                 except (json.JSONDecodeError, ValueError, TypeError):
-                    total += 1
-            if total == 0:
+                    pass
+            if not rewards:
                 return "0.0"
-            return f"{passed / total:.4f}"
+            return f"{sum(rewards) / len(rewards):.4f}"
 
-        t_rate = compute_pass_rate(results_dir / "treatment")
-        c_rate = compute_pass_rate(results_dir / "control")
+        t_mean = compute_mean_reward(results_dir / "treatment")
+        c_mean = compute_mean_reward(results_dir / "control")
 
         with open(treatment_result_path, "w") as f:
-            f.write(t_rate)
+            f.write(t_mean)
         with open(control_result_path, "w") as f:
-            f.write(c_rate)
+            f.write(c_mean)
 
-        print(f"Treatment pass rate: {t_rate}")
-        print(f"Control pass rate:   {c_rate}")
+        print(f"Treatment mean reward: {t_mean}")
+        print(f"Control mean reward:   {c_mean}")
         PARSE_SCRIPT
