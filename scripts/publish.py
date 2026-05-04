@@ -227,6 +227,8 @@ def upload_scaffolded_configs(
     Uploads task.toml, test.sh, Dockerfile for each variant, plus harbor
     eval configs and AI review output when available.
     """
+    from minio import Minio
+
     parsed = urlparse(endpoint)
     host = parsed.netloc or parsed.path
     if secure is None:
