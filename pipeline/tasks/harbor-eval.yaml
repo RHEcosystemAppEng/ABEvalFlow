@@ -144,7 +144,7 @@ spec:
           ARGS+=(--llm-agent-wrapper "$(params.llm-agent-wrapper)")
         fi
 
-        python scripts/generate_eval_config.py "${ARGS[@]}"
+        OVERRIDE_N_TRIALS=1 python scripts/generate_eval_config.py "${ARGS[@]}"
 
         echo "=== Treatment config (credentials masked) ==="
         sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/treatment-config.yaml"
