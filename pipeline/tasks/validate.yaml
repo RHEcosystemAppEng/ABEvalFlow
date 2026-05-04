@@ -57,6 +57,10 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR/.git" ]; then
+          echo "Pipeline repo already cloned, skipping"
+          exit 0
+        fi
         git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
           "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
         echo "Cloned pipeline repo at $(params.pipeline-repo-revision)"

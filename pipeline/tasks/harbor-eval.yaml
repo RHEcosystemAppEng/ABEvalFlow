@@ -144,7 +144,7 @@ spec:
           ARGS+=(--llm-agent-wrapper "$(params.llm-agent-wrapper)")
         fi
 
-        python scripts/generate_eval_config.py "${ARGS[@]}"
+        OVERRIDE_N_TRIALS=1 python scripts/generate_eval_config.py "${ARGS[@]}"
 
         echo "=== Treatment config (credentials masked) ==="
         sed 's/\(API_KEY:\s*\).*/\1***/' "$CONFIG_DIR/treatment-config.yaml"
@@ -174,6 +174,10 @@ spec:
         if [ -n "$MODEL_NAME" ]; then
           AGENT_FLAGS="$AGENT_FLAGS -m '$MODEL_NAME'"
         fi
+
+        # Ensure ANTHROPIC_API_KEY is available for the verifier's llm_judge.py.
+        # The agent env extract above usually sets it; this is a safety fallback.
+        export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-mock}}"
 
         # --- 4. Run treatment evaluation ---
         TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y $AGENT_FLAGS"

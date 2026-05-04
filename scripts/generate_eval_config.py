@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -125,7 +126,10 @@ def build_variant_config(
         "override_storage_mb": metadata.storage_mb,
     }
 
-    kwargs: dict[str, Any] = {"cpu_request": "100m"}
+    kwargs: dict[str, Any] = {
+        "cpu_request": "100m",
+        "memory_limit_multiplier": 1.5,
+    }
 
     if eval_mode == "prebuilt":
         kwargs["image_ref"] = image_ref
@@ -168,7 +172,7 @@ def build_variant_config(
     config: dict[str, Any] = {
         "job_name": f"{metadata.name}-{variant}",
         "jobs_dir": jobs_dir,
-        "n_attempts": metadata.experiment.n_trials,
+        "n_attempts": int(os.environ.get("OVERRIDE_N_TRIALS", metadata.experiment.n_trials)),
         "timeout_multiplier": 1.0,
         "agent_timeout_multiplier": agent_mult,
         "verifier_timeout_multiplier": verifier_mult,

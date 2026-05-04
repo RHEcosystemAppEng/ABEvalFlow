@@ -488,6 +488,27 @@ class TestValidateSubmission:
         errors = validate_submission(valid_submission)
         assert len(errors) >= 2
 
+    def test_ai_mode_still_validates_files(self, valid_submission: Path) -> None:
+        """AI-mode submissions must pass the same file checks as manual ones."""
+        ai_meta = {**VALID_METADATA, "generation_mode": "ai"}
+        (valid_submission / "metadata.yaml").write_text(yaml.dump(ai_meta))
+        errors = validate_submission(valid_submission)
+        assert errors == []
+
+    def test_ai_mode_missing_instruction_detected(self, valid_submission: Path) -> None:
+        ai_meta = {**VALID_METADATA, "generation_mode": "ai"}
+        (valid_submission / "metadata.yaml").write_text(yaml.dump(ai_meta))
+        (valid_submission / "instruction.md").unlink()
+        errors = validate_submission(valid_submission)
+        assert any("instruction.md is missing" in e for e in errors)
+
+    def test_ai_mode_bad_test_syntax_detected(self, valid_submission: Path) -> None:
+        ai_meta = {**VALID_METADATA, "generation_mode": "ai"}
+        (valid_submission / "metadata.yaml").write_text(yaml.dump(ai_meta))
+        (valid_submission / "tests" / "test_outputs.py").write_text("def bad(\n")
+        errors = validate_submission(valid_submission)
+        assert any("test_outputs.py does not compile" in e for e in errors)
+
 
 # ──────────────────────────────────────────────
 # CLI (main) tests

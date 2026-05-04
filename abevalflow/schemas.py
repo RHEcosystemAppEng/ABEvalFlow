@@ -183,9 +183,15 @@ class SubmissionMetadata(BaseModel):
     generation_mode: GenerationMode = Field(
         default=GenerationMode.MANUAL,
         description=(
-            "Whether the submission includes hand-written tests (manual) or "
-            "expects the pipeline to generate instruction/tests from the skill (ai). "
-            "AI mode is not yet implemented; defaults to manual."
+            "'manual' requires submitter-provided instruction.md and tests. "
+            "'ai' generates those files from skills/SKILL.md using an LLM."
+        ),
+    )
+    skip_llm_judge: bool = Field(
+        default=False,
+        description=(
+            "Set to true to skip LLM judge generation in AI mode. "
+            "By default the pipeline generates tests/llm_judge.py."
         ),
     )
 

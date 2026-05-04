@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import subprocess
 import sys
 import urllib.request
@@ -123,6 +124,8 @@ def upload_debug_artifacts(
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
 
+    _TRIAL_ROOT_FILES = {"exception.txt", "result.json", "trial.log", "config.json"}
+
     uploaded = 0
     for variant in ("treatment", "control"):
         variant_dir = results_dir / variant
@@ -133,7 +136,9 @@ def upload_debug_artifacts(
                 continue
             rel = fpath.relative_to(results_dir)
             parts = rel.parts
-            if not any(p in ("agent", "verifier") for p in parts):
+            is_debug_subdir = any(p in ("agent", "verifier", "artifacts") for p in parts)
+            is_trial_root_file = fpath.name in _TRIAL_ROOT_FILES
+            if not (is_debug_subdir or is_trial_root_file):
                 continue
             object_name = f"{prefix}/debug/{rel}"
             try:
@@ -143,6 +148,97 @@ def upload_debug_artifacts(
                 logger.warning("Failed to upload %s: %s", fpath, exc)
 
     logger.info("Uploaded %d debug artifact files to s3://%s/%s/debug/", uploaded, bucket, prefix)
+    return uploaded
+
+
+def upload_scaffolded_configs(
+    workspace_root: Path,
+    submission_name: str,
+    prefix: str,
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str = "ab-eval-reports",
+    secure: bool | None = None,
+) -> int:
+    """Upload scaffolded configs and review artifacts to MinIO under scaffolded/.
+
+    Uploads task.toml, test.sh, Dockerfile for each variant, plus harbor
+    eval configs and AI review output when available.
+    """
+    from minio import Minio
+
+    parsed = urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    if secure is None:
+        secure = parsed.scheme == "https"
+
+    client = Minio(host, access_key=access_key, secret_key=secret_key, secure=secure)
+
+    uploaded = 0
+    variant_files = ("task.toml", "tests/test.sh", "environment/Dockerfile")
+
+    for variant in ("treatment", "control"):
+        variant_dir = workspace_root / f"tasks-{variant}" / submission_name
+        if not variant_dir.is_dir():
+            logger.warning("Scaffolded dir not found: %s", variant_dir)
+            continue
+        for rel_path in variant_files:
+            fpath = variant_dir / rel_path
+            if not fpath.is_file():
+                continue
+            object_name = f"{prefix}/scaffolded/{variant}/{Path(rel_path).name}"
+            try:
+                client.fput_object(bucket, object_name, str(fpath))
+                uploaded += 1
+            except Exception as exc:
+                logger.warning("Failed to upload %s: %s", fpath, exc)
+
+    eval_configs_dir = workspace_root / "_eval-configs"
+    if eval_configs_dir.is_dir():
+        for fpath in sorted(eval_configs_dir.glob("*.yaml")):
+            masked = re.sub(
+                r"(API_KEY:\s*)(\S+)", r"\1***", fpath.read_text()
+            )
+            masked_path = fpath.parent / f".masked_{fpath.name}"
+            masked_path.write_text(masked)
+            object_name = f"{prefix}/scaffolded/{fpath.name}"
+            try:
+                client.fput_object(bucket, object_name, str(masked_path))
+                uploaded += 1
+            except Exception as exc:
+                logger.warning("Failed to upload %s: %s", fpath, exc)
+            finally:
+                masked_path.unlink(missing_ok=True)
+
+    ai_review_path = workspace_root / "_ai_review.json"
+    if ai_review_path.is_file():
+        object_name = f"{prefix}/scaffolded/ai_review.json"
+        try:
+            client.fput_object(bucket, object_name, str(ai_review_path))
+            uploaded += 1
+        except Exception as exc:
+            logger.warning("Failed to upload AI review: %s", exc)
+
+    submission_dir = workspace_root / "submissions" / submission_name
+    generated_candidates = [
+        (submission_dir / "instruction.md", "instruction.md"),
+        (submission_dir / "tests" / "test_outputs.py", "test_outputs.py"),
+        (submission_dir / "tests" / "llm_judge.py", "llm_judge.py"),
+        (submission_dir / "scenario_brief.json", "scenario_brief.json"),
+    ]
+    for filepath, name in generated_candidates:
+        if not filepath.is_file():
+            continue
+        object_name = f"{prefix}/generated/{name}"
+        try:
+            client.fput_object(bucket, object_name, str(filepath))
+            uploaded += 1
+        except Exception as exc:
+            logger.warning("Failed to upload generated file %s: %s", filepath, exc)
+
+    logger.info("Uploaded %d config/generated files to s3://%s/%s/",
+                uploaded, bucket, prefix)
     return uploaded
 
 
@@ -331,6 +427,8 @@ def main() -> int:
                         help="PR number for GitHub comment")
     parser.add_argument("--results-dir", type=Path, default=None,
                         help="Path to Harbor results dir (uploads agent/verifier debug artifacts)")
+    parser.add_argument("--workspace-root", type=Path, default=None,
+                        help="Workspace root for uploading scaffolded configs")
     parser.add_argument("--minio-endpoint", type=str, default=None,
                         help="MinIO endpoint (default: MINIO_ENDPOINT env var)")
     parser.add_argument("--minio-bucket", type=str, default="ab-eval-reports")
@@ -364,6 +462,16 @@ def main() -> int:
         if prefix and args.results_dir:
             upload_debug_artifacts(
                 results_dir=args.results_dir,
+                prefix=prefix,
+                endpoint=minio_endpoint,
+                access_key=minio_access_key,
+                secret_key=minio_secret_key,
+                bucket=args.minio_bucket,
+            )
+        if prefix and args.workspace_root:
+            upload_scaffolded_configs(
+                workspace_root=args.workspace_root,
+                submission_name=args.submission_name,
                 prefix=prefix,
                 endpoint=minio_endpoint,
                 access_key=minio_access_key,

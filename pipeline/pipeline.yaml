@@ -107,6 +107,41 @@ spec:
       description: >-
         Pre-built base image ref (with uv, claude-code, etc.).
         Build it with scripts/build_base_image.sh and push to the registry.
+    # AI-assisted evaluation feature flags
+    - name: enable-ai-generation
+      type: string
+      default: "true"
+      description: >-
+        Run the AI-assisted test generation step. The step self-skips
+        for submissions with generation_mode: manual.
+    - name: enable-ai-review
+      type: string
+      default: "true"
+      description: >-
+        Run independent AI quality review before scaffolding.
+        Automatically disabled in oracle mode.
+    - name: llm-base-url
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000/v1"
+      description: LLM API base URL (OpenAI-compatible endpoint)
+    - name: llm-generation-model
+      type: string
+      default: "claude-sonnet"
+      description: Model identifier for AI generation and review
+    - name: agent-type
+      type: string
+      default: "api"
+      description: >-
+        How the AI generation step invokes the LLM: 'api' for direct API
+        calls, or 'claude', 'cursor', 'opencode' to use a native agent CLI
+        with skill loading.
+    - name: max-generation-retries
+      type: string
+      default: "3"
+      description: >-
+        Maximum number of generate-validate retry attempts per generation
+        step. Each failed attempt feeds validation errors back into the
+        generation prompt.
 
   results:
     - name: recommendation
@@ -140,7 +175,7 @@ spec:
 
   tasks:
     # ------------------------------------------------------------------
-    # Step 1: Clone submissions repo and validate the submission
+    # Step 1a: Clone submissions repo
     # ------------------------------------------------------------------
     - name: clone-repo
       taskRef:
@@ -154,8 +189,38 @@ spec:
         - name: output
           workspace: shared-workspace
 
-    - name: validate
+    # ------------------------------------------------------------------
+    # Step 1b: AI-assisted test generation (optional, before validation)
+    # ------------------------------------------------------------------
+    - name: generate-tests
+      when:
+        - input: $(params.enable-ai-generation)
+          operator: in
+          values: ["true"]
       runAfter: ["clone-repo"]
+      taskRef:
+        name: generate-tests
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: llm-base-url
+          value: $(params.llm-base-url)
+        - name: llm-model
+          value: $(params.llm-generation-model)
+        - name: agent-type
+          value: $(params.agent-type)
+        - name: max-retries
+          value: $(params.max-generation-retries)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: validate
+      runAfter: ["clone-repo", "generate-tests"]
       taskRef:
         name: validate-submission
       params:
@@ -170,10 +235,39 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
+    # Step 1c: AI quality review (optional, after validation)
+    # ------------------------------------------------------------------
+    - name: ai-review
+      when:
+        - input: $(params.agent-type)
+          operator: notin
+          values: ["oracle"]
+        - input: $(params.enable-ai-review)
+          operator: in
+          values: ["true"]
+      runAfter: ["validate"]
+      taskRef:
+        name: ai-review
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: llm-base-url
+          value: $(params.llm-base-url)
+        - name: llm-model
+          value: $(params.llm-generation-model)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
     # Step 2: Scaffold treatment and control task directories
     # ------------------------------------------------------------------
     - name: scaffold
-      runAfter: ["validate"]
+      runAfter: ["validate", "ai-review"]
       taskRef:
         name: scaffold-submission
       params:
@@ -259,6 +353,8 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 5: Analyze results and produce statistical report
+    # NOTE: analyze-report Task defined in APPENG-4985 — must be deployed
+    #       to the cluster before this pipeline runs end-to-end.
     # ------------------------------------------------------------------
     - name: analyze
       runAfter: ["harbor-eval"]
@@ -291,6 +387,8 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 6: Persist results to PostgreSQL
+    # NOTE: store-results Task defined in APPENG-4985 — must be deployed
+    #       to the cluster before this pipeline runs end-to-end.
     # ------------------------------------------------------------------
     - name: store-results
       runAfter: ["analyze"]

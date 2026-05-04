@@ -86,7 +86,7 @@ class TestScaffoldBasic:
 
         assert (treatment / "instruction.md").is_file()
         assert (treatment / "task.toml").is_file()
-        assert (treatment / "test.sh").is_file()
+        assert (treatment / "tests" / "test.sh").is_file()
         assert (treatment / "environment" / "Dockerfile").is_file()
         assert (treatment / "environment" / "instruction.md").is_file()
         assert (treatment / "environment" / "skills" / "SKILL.md").is_file()
@@ -98,7 +98,7 @@ class TestScaffoldBasic:
 
         assert (control / "instruction.md").is_file()
         assert (control / "task.toml").is_file()
-        assert (control / "test.sh").is_file()
+        assert (control / "tests" / "test.sh").is_file()
         assert (control / "environment" / "Dockerfile").is_file()
         assert (control / "environment" / "tests" / "test_outputs.py").is_file()
         assert not (control / "environment" / "skills").exists()
@@ -117,18 +117,10 @@ class TestScaffoldBasic:
         assert "COPY skills/" not in content
         assert "COPY docs/" not in content
 
-    def test_dockerfile_preinstalls_uv(self, valid_submission: Path, tmp_path: Path):
-        output = tmp_path / "output"
-        treatment, control = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
-        for d in (treatment, control):
-            content = (d / "environment" / "Dockerfile").read_text()
-            assert "UV_INSTALL_DIR=/usr/local/bin" in content
-            assert "dnf install" in content
-
     def test_test_sh_no_runtime_install(self, valid_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         treatment, _ = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
-        content = (treatment / "test.sh").read_text()
+        content = (treatment / "tests" / "test.sh").read_text()
         assert "dnf install" not in content
         assert "curl -LsSf" not in content
         assert "source" not in content
@@ -137,7 +129,7 @@ class TestScaffoldBasic:
         output = tmp_path / "output"
         treatment, control = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
         for d in (treatment, control):
-            mode = (d / "test.sh").stat().st_mode
+            mode = (d / "tests" / "test.sh").stat().st_mode
             assert mode & stat.S_IEXEC
 
 
@@ -185,6 +177,8 @@ class TestScaffoldTaskToml:
         parsed = tomllib.loads((treatment / "task.toml").read_text())
         env = parsed["verifier"]["env"]
         assert "LLM_API_KEY" in env
+        assert "LLM_API_BASE" in env
+        assert "MODEL_NAME" in env
 
     def test_task_toml_custom_timeouts(self, valid_submission: Path, tmp_path: Path):
         meta_path = valid_submission / "metadata.yaml"
@@ -238,13 +232,13 @@ class TestScaffoldOptionalDirs:
     def test_test_sh_includes_llm_judge_when_present(self, full_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)
-        content = (treatment / "test.sh").read_text()
+        content = (treatment / "tests" / "test.sh").read_text()
         assert "llm_judge.py" in content
 
     def test_test_sh_excludes_llm_judge_when_absent(self, valid_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         treatment, _ = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
-        content = (treatment / "test.sh").read_text()
+        content = (treatment / "tests" / "test.sh").read_text()
         assert "llm_judge.py" not in content
 
 

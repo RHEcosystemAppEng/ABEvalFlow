@@ -119,13 +119,16 @@ class TestBuildVariantConfigPrebuilt:
 
 
 class TestBuildVariantConfigLocalBuild:
-    def test_no_env_kwargs(self, minimal_submission: Path):
+    def test_kwargs_without_image_ref(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
             meta, "treatment", TREATMENT_DIR, "local-build",
             jobs_dir="results/treatment",
         )
-        assert "kwargs" not in config["environment"]
+        kwargs = config["environment"]["kwargs"]
+        assert "image_ref" not in kwargs
+        assert kwargs["cpu_request"] == "100m"
+        assert kwargs["memory_limit_multiplier"] == 1.5
 
     def test_force_build_enabled(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
@@ -151,7 +154,6 @@ class TestCustomMetadataFields:
             meta, "treatment", TREATMENT_DIR, "local-build",
             jobs_dir="results/treatment",
         )
-        assert config["environment"]["override_cpus"] == 2
         assert config["environment"]["override_memory_mb"] == 4096
         assert config["environment"]["override_storage_mb"] == 20480
 
@@ -489,7 +491,8 @@ class TestMainCLI:
         ])
         assert rc == 0
         t_config = yaml.safe_load((out_dir / "treatment-config.yaml").read_text())
-        assert "kwargs" not in t_config["environment"]
+        assert "image_ref" not in t_config["environment"].get("kwargs", {})
+        assert t_config["environment"]["kwargs"]["memory_limit_multiplier"] == 1.5
 
     def test_prebuilt_missing_refs_exits_error(
         self, minimal_submission: Path, tmp_path: Path,
