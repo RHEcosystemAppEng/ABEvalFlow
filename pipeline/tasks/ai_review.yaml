@@ -81,6 +81,8 @@ spec:
         cat /tmp/review-output.json | tr -d '\n' \
           > "$(results.review-result.path)"
 
+        cp /tmp/review-output.json "$(workspaces.source.path)/_ai_review.json"
+
         python -c "
         import json
         data = json.load(open('/tmp/review-output.json'))

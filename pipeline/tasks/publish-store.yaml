@@ -156,6 +156,8 @@ spec:
           ARGS+=(--results-dir "$(params.results-dir)")
         fi
 
+        ARGS+=(--workspace-root "$(workspaces.source.path)")
+
         python scripts/publish.py "${ARGS[@]}"
 
         echo "Publish step completed successfully"
