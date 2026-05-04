@@ -14,7 +14,7 @@ TEST_EXIT=$?
 # LLM judge is informational only — its output is captured in /logs but does
 # not affect the reward signal or the verifier exit code.
 # Uses uv run to auto-install inline script dependencies (PEP 723).
-uv run /tests/llm_judge.py /workspace || echo "WARNING: llm_judge.py failed (non-fatal)"
+uv run /tests/llm_judge.py || echo "WARNING: llm_judge.py failed (non-fatal)"
 {% endif %}
 
 if [ $TEST_EXIT -eq 0 ]; then

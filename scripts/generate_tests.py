@@ -154,6 +154,27 @@ content so the agent has real data to work with
 - Be objectively verifiable by automated tests
 - FOCUS on the novel aspects that the skill uniquely adds
 
+## CRITICAL: Output Format Contract
+
+The instruction MUST tell the agent to write its solution to a single \
+file at ``/workspace/solution.md``. The file must contain:
+
+1. A **narrative section** with the agent's reasoning and analysis
+2. A **Variables Table** at the end — a markdown table with columns \
+``| Variable | Value |`` listing every required output field and its value
+
+Example (do NOT use these values — derive from the scenario brief):
+```
+| Variable | Value |
+|----------|-------|
+| APP_NAME | my-app |
+| LANGUAGE | python |
+```
+
+This format is the contract between instruction, tests, and judge. \
+Both ``test_outputs.py`` and ``llm_judge.py`` will read from \
+``/workspace/solution.md`` and parse the Variables Table.
+
 ## CRITICAL: Data Rules
 
 1. **You MUST embed every file from the scenario brief's project_files** \
@@ -226,13 +247,24 @@ Given the scenario brief, skill definition, and instruction below, write a \
 **tests/test_outputs.py** file that verifies the agent completed the task.
 
 Tests must:
-- Import from ``/workspace`` (the agent's working directory)
 - Be self-contained (no external fixtures)
-- Cover both success and edge cases
 - Use plain asserts (no custom frameworks)
 - Be deterministic and pass when the instruction is followed correctly
 - MUST cover every test focus area listed below — these are what \
 differentiate a skilled agent from an unskilled one
+
+## CRITICAL: Reading the Agent's Output
+
+The agent writes its solution to ``/workspace/solution.md``. This file \
+contains a narrative section and a **Variables Table** (a markdown table \
+with ``| Variable | Value |`` columns).
+
+Your tests MUST:
+1. Read from ``/workspace/solution.md`` — this is the ONLY file to check
+2. Parse the Variables Table to extract output values (write a helper \
+function ``parse_variables_table(content: str) -> dict`` that extracts \
+the Variable→Value mapping from the markdown table)
+3. Also check the narrative/free-form content for qualitative aspects
 
 ## CRITICAL: Use the Scenario Brief as Ground Truth
 
@@ -250,17 +282,26 @@ present and non-empty.
 3. **Test the WHAT, not the HOW** — verify that the agent produced the \
 correct output values, not that it followed a specific internal process.
 
+## CRITICAL: Fair Testing — No Overfitting
+
 4. **Tests must be fair to both variants** — remember these tests run \
 against both a skilled agent (with SKILL.md) and an unskilled agent \
 (without it). Tests should measure genuine capability differences, not \
 trick questions that only pass if the agent memorized a specific table.
 
-5. **Prefer semantic checks over exact string matching** — when verifying \
-free-form output, check for the presence of key information rather than \
-demanding exact formatting. For structured output (JSON, tables), exact \
-value matching is appropriate.
+5. **Do NOT overfit tests** — avoid testing for:
+   - Exact formatting, punctuation, or whitespace
+   - Specific phrasing in the narrative section
+   - Implementation details the agent wasn't asked for
+   - Hardcoded strings that only appear in the skill document
+   Tests should validate that the agent correctly analyzed the input and \
+   produced the right answers, NOT that it formatted them a specific way.
 
-6. **Keep tests concise and complete** — aim for 15-25 focused test \
+6. **Use case-insensitive comparisons** for string values (e.g. \
+``value.lower() == "python"``). Accept reasonable synonyms where \
+appropriate (e.g. "fastapi" and "FastAPI" are both correct).
+
+7. **Keep tests concise and complete** — aim for 15-25 focused test \
 functions, not 40+. Every test function MUST have a complete body (no \
 truncated or stub functions). If the file would be too long, reduce the \
 number of tests rather than risk truncation. Initialize all module-level \
@@ -288,12 +329,14 @@ Given the skill, instruction, and tests below, write an \
 LLM-as-judge evaluator in ``tests/llm_judge.py``.
 
 The judge should:
-- Accept the agent's workspace path as a CLI argument (default: /workspace)
+- Read the agent's output from ``/workspace/solution.md`` (same file the \
+  tests use — contains a narrative section and a Variables Table)
+- Do NOT use argparse or CLI args — hardcode all paths
 - Use an LLM call to assess quality beyond what deterministic tests cover
 - Produce a numeric score (0.0–1.0) and a short rationale
-- Write the result to /logs/verifier/reward.json (Harbor convention)
-- Focus on aspects that deterministic tests cannot capture (code quality, \
-  adherence to best practices, completeness of approach)
+- Write the result as JSON to /logs/verifier/reward.json (Harbor convention)
+- Focus on aspects that deterministic tests cannot capture (reasoning \
+  quality, completeness of analysis, correctness of approach)
 
 ## CRITICAL: PEP 723 inline script metadata
 
