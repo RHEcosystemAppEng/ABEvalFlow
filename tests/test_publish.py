@@ -14,8 +14,8 @@ from scripts.publish import (
     post_pr_comment,
     promote_to_quay,
     upload_debug_artifacts,
-    upload_generated_files,
     upload_reports,
+    upload_scaffolded_configs,
 )
 
 
@@ -129,96 +129,58 @@ class TestUploadReports:
         assert result is None
 
 
-class TestUploadGeneratedFiles:
+class TestUploadScaffoldedGeneratedFiles:
+    """Test that upload_scaffolded_configs also uploads generated files."""
+
     @pytest.fixture
-    def gen_dir(self, tmp_path: Path) -> Path:
-        """Submission dir with all three generated files."""
-        (tmp_path / "instruction.md").write_text("# Task\nDo something.\n")
-        tests = tmp_path / "tests"
+    def workspace_with_generated(self, tmp_path: Path) -> Path:
+        """Workspace with generated files under submissions/<name>/."""
+        sub_dir = tmp_path / "submissions" / "ai-skill"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "instruction.md").write_text("# Task\nDo something.\n")
+        tests = sub_dir / "tests"
         tests.mkdir()
         (tests / "test_outputs.py").write_text("def test_ok(): assert True\n")
         (tests / "llm_judge.py").write_text("score = 0.9\n")
+        (sub_dir / "scenario_brief.json").write_text("{}")
         return tmp_path
 
     @patch("minio.Minio")
-    def test_uploads_all_three_files(self, mock_minio_cls, gen_dir):
+    def test_uploads_generated_files(self, mock_minio_cls, workspace_with_generated):
         mock_client = MagicMock()
         mock_minio_cls.return_value = mock_client
-        mock_client.bucket_exists.return_value = True
 
-        prefix = upload_generated_files(
-            submission_dir=gen_dir,
+        count = upload_scaffolded_configs(
+            workspace_root=workspace_with_generated,
             submission_name="ai-skill",
-            pipeline_run_id="run-42",
+            prefix="20260504_ai-skill_run-42",
             endpoint="http://minio:9000",
             access_key="key",
             secret_key="secret",
         )
 
-        assert prefix is not None
-        assert "ai-skill" in prefix
-        assert mock_client.fput_object.call_count == 3
         object_names = [c.args[1] for c in mock_client.fput_object.call_args_list]
         assert any("generated/instruction.md" in n for n in object_names)
         assert any("generated/test_outputs.py" in n for n in object_names)
         assert any("generated/llm_judge.py" in n for n in object_names)
+        assert any("generated/scenario_brief.json" in n for n in object_names)
+        assert count >= 4
 
     @patch("minio.Minio")
-    def test_handles_missing_judge(self, mock_minio_cls, tmp_path):
-        (tmp_path / "instruction.md").write_text("# Task\n")
-        tests = tmp_path / "tests"
-        tests.mkdir()
-        (tests / "test_outputs.py").write_text("def test_ok(): assert True\n")
-
+    def test_handles_missing_generated_files(self, mock_minio_cls, tmp_path):
         mock_client = MagicMock()
         mock_minio_cls.return_value = mock_client
-        mock_client.bucket_exists.return_value = True
 
-        prefix = upload_generated_files(
-            submission_dir=tmp_path,
+        count = upload_scaffolded_configs(
+            workspace_root=tmp_path,
             submission_name="test",
-            pipeline_run_id="run-1",
+            prefix="20260504_test_run-1",
             endpoint="http://minio:9000",
             access_key="key",
             secret_key="secret",
         )
 
-        assert prefix is not None
-        assert mock_client.fput_object.call_count == 2
-
-    @patch("minio.Minio")
-    def test_returns_none_on_empty_dir(self, mock_minio_cls, tmp_path):
-        mock_client = MagicMock()
-        mock_minio_cls.return_value = mock_client
-        mock_client.bucket_exists.return_value = True
-
-        result = upload_generated_files(
-            submission_dir=tmp_path,
-            submission_name="test",
-            pipeline_run_id="run-1",
-            endpoint="http://minio:9000",
-            access_key="key",
-            secret_key="secret",
-        )
-
-        assert result is None
-
-    @patch("minio.Minio")
-    def test_creates_bucket_if_missing(self, mock_minio_cls, gen_dir):
-        mock_client = MagicMock()
-        mock_minio_cls.return_value = mock_client
-        mock_client.bucket_exists.return_value = False
-
-        upload_generated_files(
-            submission_dir=gen_dir,
-            submission_name="test",
-            pipeline_run_id="run-1",
-            endpoint="http://minio:9000",
-            access_key="key",
-            secret_key="secret",
-        )
-
-        mock_client.make_bucket.assert_called_once_with("ab-eval-reports")
+        assert count == 0
 
 
 class TestPromoteToQuay:
@@ -395,7 +357,7 @@ class TestUploadDebugArtifacts:
             secret_key="secret",
         )
 
-        assert count == 6  # 3 files x 2 variants (agent.log, solution.py, verifier.log)
+        assert count == 8  # 4 files x 2 variants (agent.log, solution.py, verifier.log, result.json)
         uploaded_names = [
             call[0][1] for call in mock_client.fput_object.call_args_list
         ]
@@ -404,7 +366,11 @@ class TestUploadDebugArtifacts:
         assert all(n.startswith("20260428_test_run1/debug/") for n in uploaded_names)
 
     @patch("minio.Minio")
-    def test_skips_non_agent_verifier_files(self, mock_minio_cls, results_dir):
+    def test_skips_unrelated_files_but_uploads_trial_root_files(self, mock_minio_cls, results_dir):
+        for variant in ("treatment", "control"):
+            trial = results_dir / variant / "job-name" / "trial_001__uuid1"
+            (trial / "random_file.txt").write_text("should be skipped")
+
         mock_client = MagicMock()
         mock_minio_cls.return_value = mock_client
         mock_client.bucket_exists.return_value = True
@@ -420,7 +386,8 @@ class TestUploadDebugArtifacts:
         uploaded_names = [
             call[0][1] for call in mock_client.fput_object.call_args_list
         ]
-        assert not any("result.json" in n for n in uploaded_names)
+        assert not any("random_file.txt" in n for n in uploaded_names)
+        assert any("result.json" in n for n in uploaded_names)
 
     def test_nonexistent_results_dir(self, tmp_path):
         count = upload_debug_artifacts(

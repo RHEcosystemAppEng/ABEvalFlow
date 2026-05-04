@@ -45,8 +45,6 @@ from abevalflow.generation_validator import (
     structural_check,
 )
 from abevalflow.schemas import SubmissionMetadata
-from scripts.publish import upload_generated_files
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RETRIES = 5
@@ -840,32 +838,6 @@ def _correction_pass(
             logger.info("Correction pass: rewrote test_outputs.py (%d chars)", len(corrected))
 
 
-def _upload_to_minio(submission_dir: Path, submission_name: str) -> None:
-    """Upload approved generated files to MinIO if credentials are configured."""
-    endpoint = os.environ.get("MINIO_ENDPOINT", "")
-    access_key = os.environ.get("MINIO_ACCESS_KEY", "")
-    secret_key = os.environ.get("MINIO_SECRET_KEY", "")
-    pipeline_run_id = os.environ.get("PIPELINE_RUN_ID", "unknown")
-
-    if not all([endpoint, access_key, secret_key]):
-        logger.info("MinIO credentials not set, skipping generated-file upload")
-        return
-
-    try:
-        prefix = upload_generated_files(
-            submission_dir=submission_dir,
-            submission_name=submission_name,
-            pipeline_run_id=pipeline_run_id,
-            endpoint=endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-        )
-        if prefix:
-            logger.info("Generated files stored in MinIO: %s/generated/", prefix)
-    except Exception as exc:
-        logger.warning("MinIO upload failed (non-fatal): %s", exc)
-
-
 def generate(
     submission_dir: Path,
     workspace_dir: Path,
@@ -902,7 +874,6 @@ def generate(
         if collect_errors:
             raise ValueError(f"Oracle pytest collect failed: {collect_errors}")
         logger.info("Oracle mode: %d files validated", len(generated))
-        _upload_to_minio(submission_dir, metadata.name)
         return generated
 
     skill_cache = workspace_dir / "_skill_cache"
@@ -1013,7 +984,6 @@ def generate(
             logger.info("Attempt %d: reviewers passed, no corrections needed", attempt)
 
         logger.info("Generation accepted on attempt %d", attempt)
-        _upload_to_minio(submission_dir, metadata.name)
         return generated
 
     raise ValueError(f"Generation failed after {max_retries} attempts")

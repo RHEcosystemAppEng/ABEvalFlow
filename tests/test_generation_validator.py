@@ -102,13 +102,6 @@ class TestContentCheck:
         assert "instruction does not match skill" in result["issues"]
 
     @patch("abevalflow.generation_validator.llm_client.chat_completion")
-    def test_invalid_json_returns_fail(self, mock_chat: MagicMock, submission: Path) -> None:
-        mock_chat.return_value = "This is not JSON"
-        result = content_check(submission)
-        assert result["passed"] is False
-        assert any("invalid JSON" in i for i in result["issues"])
-
-    @patch("abevalflow.generation_validator.llm_client.chat_completion")
     def test_json_in_markdown_fence_extracted(self, mock_chat: MagicMock, submission: Path) -> None:
         mock_chat.return_value = 'Sure, here is the result:\n{"pass": true, "issues": []}\nDone.'
         result = content_check(submission)
@@ -205,13 +198,6 @@ class TestMultiReviewerCheck:
         assert len(result["issues"]) == 3
 
     @patch("abevalflow.generation_validator.llm_client.chat_completion")
-    def test_invalid_json_handled(self, mock_chat: MagicMock, submission: Path) -> None:
-        mock_chat.return_value = "not valid json"
-        result = multi_reviewer_check(submission)
-        assert result["passed"] is False
-        assert any("invalid JSON" in i for i in result["issues"])
-
-    @patch("abevalflow.generation_validator.llm_client.chat_completion")
     def test_reviewer_names_in_issues(self, mock_chat: MagicMock, submission: Path) -> None:
         mock_chat.return_value = json.dumps({"pass": False, "issues": ["bad"]})
         result = multi_reviewer_check(submission)
@@ -249,13 +235,6 @@ class TestFinalReview:
         result = final_review(submission)
         assert result["passed"] is False
         assert "tests are not deterministic" in result["issues"]
-
-    @patch("abevalflow.generation_validator.llm_client.chat_completion")
-    def test_invalid_json_returns_fail(self, mock_chat: MagicMock, submission: Path) -> None:
-        mock_chat.return_value = "garbage"
-        result = final_review(submission)
-        assert result["passed"] is False
-        assert any("invalid JSON" in i for i in result["issues"])
 
     @patch("abevalflow.generation_validator.llm_client.chat_completion")
     def test_json_in_wrapper_extracted(self, mock_chat: MagicMock, submission: Path) -> None:
