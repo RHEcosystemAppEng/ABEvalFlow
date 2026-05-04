@@ -157,7 +157,7 @@ content so the agent has real data to work with
 ## CRITICAL: Output Format Contract
 
 The instruction MUST tell the agent to write its solution to a single \
-file at ``/workspace/solution.md``. The file must contain:
+file at ``/solution/solution.md``. The file must contain:
 
 1. A **narrative section** with the agent's reasoning and analysis
 2. A **Variables Table** at the end — a markdown table with columns \
@@ -173,7 +173,7 @@ Example (do NOT use these values — derive from the scenario brief):
 
 This format is the contract between instruction, tests, and judge. \
 Both ``test_outputs.py`` and ``llm_judge.py`` will read from \
-``/workspace/solution.md`` and parse the Variables Table.
+``/solution/solution.md`` and parse the Variables Table.
 
 ## CRITICAL: Data Rules
 
@@ -255,12 +255,12 @@ differentiate a skilled agent from an unskilled one
 
 ## CRITICAL: Reading the Agent's Output
 
-The agent writes its solution to ``/workspace/solution.md``. This file \
+The agent writes its solution to ``/solution/solution.md``. This file \
 contains a narrative section and a **Variables Table** (a markdown table \
 with ``| Variable | Value |`` columns).
 
 Your tests MUST:
-1. Read from ``/workspace/solution.md`` — this is the ONLY file to check
+1. Read from ``/solution/solution.md`` — this is the ONLY file to check
 2. Parse the Variables Table to extract output values (write a helper \
 function ``parse_variables_table(content: str) -> dict`` that extracts \
 the Variable→Value mapping from the markdown table)
@@ -329,7 +329,7 @@ Given the skill, instruction, and tests below, write an \
 LLM-as-judge evaluator in ``tests/llm_judge.py``.
 
 The judge should:
-- Read the agent's output from ``/workspace/solution.md`` (same file the \
+- Read the agent's output from ``/solution/solution.md`` (same file the \
   tests use — contains a narrative section and a Variables Table)
 - Do NOT use argparse or CLI args — hardcode all paths
 - Use an LLM call to assess quality beyond what deterministic tests cover
