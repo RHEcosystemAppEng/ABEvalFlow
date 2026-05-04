@@ -17,10 +17,22 @@ TEST_EXIT=$?
 uv run /tests/llm_judge.py || echo "WARNING: llm_judge.py failed (non-fatal)"
 {% endif %}
 
-if [ $TEST_EXIT -eq 0 ]; then
-  echo 1 > /logs/verifier/reward.txt
+CTRF_FILE="/logs/verifier/ctrf.json"
+if [ -f "$CTRF_FILE" ]; then
+  REWARD=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('$CTRF_FILE'))
+    s = data['results']['summary']
+    total = s.get('tests', 0)
+    passed = s.get('passed', 0)
+    print(f'{passed / total:.4f}' if total > 0 else '0')
+except Exception:
+    print('1' if $TEST_EXIT == 0 else '0')
+")
 else
-  echo 0 > /logs/verifier/reward.txt
+  REWARD=$([ $TEST_EXIT -eq 0 ] && echo "1" || echo "0")
 fi
 
+echo "$REWARD" > /logs/verifier/reward.txt
 exit $TEST_EXIT

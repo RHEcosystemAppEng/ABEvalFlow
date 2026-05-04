@@ -282,6 +282,11 @@ correct output values, not that it followed a specific internal process.
 
 ## CRITICAL: Fair Testing — No Overfitting
 
+**IMPORTANT: The reward is proportional (passed_tests / total_tests), \
+NOT binary.** Each test that passes independently contributes to the \
+score. This means every test must be self-contained and test ONE thing. \
+A single over-strict assertion should not zero out the entire reward.
+
 4. **Tests must be fair to both variants** — remember these tests run \
 against both a skilled agent (with SKILL.md) and an unskilled agent \
 (without it). Tests should measure genuine capability differences, not \
@@ -295,9 +300,13 @@ trick questions that only pass if the agent memorized a specific table.
    Tests should validate that the agent correctly analyzed the input and \
    produced the right answers, NOT that it formatted them a specific way.
 
-6. **Use case-insensitive comparisons** for string values (e.g. \
-``value.lower() == "python"``). Accept reasonable synonyms where \
-appropriate (e.g. "fastapi" and "FastAPI" are both correct).
+6. **Use flexible comparisons** — for string values:
+   - Use case-insensitive comparisons (e.g. ``value.lower() == "python"``)
+   - Accept reasonable synonyms (e.g. "fastapi" and "FastAPI")
+   - For file paths, normalize before comparing (strip leading ``./``, \
+     trailing ``/``, and compare with ``os.path.normpath``)
+   - Never assert exact string equality when semantic equivalence is \
+     what matters (e.g. ``"chart/"`` and ``"./chart"`` are the same path)
 
 7. **Keep tests concise and complete** — aim for 15-25 focused test \
 functions, not 40+. Every test function MUST have a complete body (no \
