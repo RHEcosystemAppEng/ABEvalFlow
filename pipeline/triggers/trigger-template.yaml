@@ -36,6 +36,9 @@ spec:
             value: $(tt.params.repo-name)
           - name: pr-number
             value: $(tt.params.pr-number)
+        timeouts:
+          pipeline: "4h"
+          tasks: "3h"
         taskRunTemplate:
           serviceAccountName: pipeline
         workspaces:
