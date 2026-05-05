@@ -314,6 +314,7 @@ spec:
     # ------------------------------------------------------------------
     - name: harbor-eval
       runAfter: ["build-push"]
+      timeout: "3h"
       taskRef:
         name: harbor-eval
       params:
