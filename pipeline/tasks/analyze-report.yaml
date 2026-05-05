@@ -65,8 +65,8 @@ spec:
       description: Treatment variant mean reward as a decimal string (e.g. "0.8500")
     - name: control-mean-reward
       description: Control variant mean reward as a decimal string (e.g. "0.6000")
-    - name: uplift
-      description: "Pass-rate uplift (treatment - control) as a signed string (e.g. \"+0.1500\")"
+    - name: mean-reward-gap
+      description: "Mean reward gap (treatment - control) as a signed string (e.g. \"+0.1500\")"
     - name: ttest-p-value
       description: "Welch's t-test p-value (e.g. \"0.0342\"), or \"N/A\" if not computable"
     - name: fisher-p-value
@@ -130,7 +130,7 @@ spec:
           "$(results.recommendation.path)" \
           "$(results.treatment-mean-reward.path)" \
           "$(results.control-mean-reward.path)" \
-          "$(results.uplift.path)" \
+          "$(results.mean-reward-gap.path)" \
           "$(results.ttest-p-value.path)" \
           "$(results.fisher-p-value.path)" <<'EXTRACT'
         import json, sys
@@ -142,7 +142,8 @@ spec:
             c_mr = s["control"].get("mean_reward")
             open(sys.argv[3], "w").write(f"{t_mr:.4f}" if t_mr is not None else "N/A")
             open(sys.argv[4], "w").write(f"{c_mr:.4f}" if c_mr is not None else "N/A")
-            open(sys.argv[5], "w").write(f"{s['uplift']:+.4f}")
+            mrg = s.get("mean_reward_gap")
+            open(sys.argv[5], "w").write(f"{mrg:+.4f}" if mrg is not None else "N/A")
             ttest = s.get("ttest_p_value")
             open(sys.argv[6], "w").write(f"{ttest:.4f}" if ttest is not None else "N/A")
             fisher = s.get("fisher_p_value")

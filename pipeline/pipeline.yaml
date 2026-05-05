@@ -153,9 +153,9 @@ spec:
     - name: control-mean-reward
       description: "Control variant mean reward (e.g. 0.6000)"
       value: $(tasks.analyze.results.control-mean-reward)
-    - name: uplift
-      description: "Pass-rate uplift, treatment - control (e.g. +0.1500)"
-      value: $(tasks.analyze.results.uplift)
+    - name: mean-reward-gap
+      description: "Mean reward gap, treatment - control (e.g. +0.1500)"
+      value: $(tasks.analyze.results.mean-reward-gap)
     - name: ttest-p-value
       description: "Welch's t-test p-value (e.g. 0.0342)"
       value: $(tasks.analyze.results.ttest-p-value)
