@@ -10,9 +10,9 @@ timeout_sec = {{ verifier_timeout }}
 {% if has_llm_judge %}
 
 [verifier.env]
-LLM_API_BASE = "{{ llm_api_base }}"
-LLM_API_KEY = "${ANTHROPIC_API_KEY}"
-MODEL_NAME = "{{ model_name | default('') }}"
+ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
+ANTHROPIC_BASE_URL = "{{ llm_api_base }}"
+LLM_JUDGE_MODEL = "claude-sonnet"
 {% endif %}
 
 [agent]
