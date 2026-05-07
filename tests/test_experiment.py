@@ -260,7 +260,7 @@ class TestConfigDrivenStrategy:
         config = ExperimentConfig(
             type="custom",
             treatment=VariantSpec(
-                copy=[CopySpec(src="docs", dest="/workspace/docs")],
+                copy=[CopySpec(src="docs", dest="/docs")],
             ),
         )
         strategy = ConfigDrivenStrategy(config)
@@ -275,7 +275,7 @@ class TestConfigDrivenStrategy:
             treatment=VariantSpec(
                 copy=[
                     CopySpec(src="skills", dest="/skills"),
-                    CopySpec(src="docs", dest="/workspace/docs"),
+                    CopySpec(src="docs", dest="/docs"),
                 ],
             ),
             control=VariantSpec(),

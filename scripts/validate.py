@@ -2,7 +2,7 @@
 
 Checks:
   1. instruction.md exists and is non-empty
-  2. skills/ directory contains SKILL.md (canonical name for agent recognition)
+  2. skills/ contains at least one SKILL.md (flat or nested layout)
   3. tests/test_outputs.py compiles
   4. tests/llm_judge.py compiles if present
   5. metadata.yaml passes Pydantic schema validation
@@ -38,16 +38,41 @@ def _check_instruction_md(submission_dir: Path) -> list[str]:
 
 
 def _check_skills_dir(submission_dir: Path) -> list[str]:
-    """Validate skills/ contains SKILL.md — the canonical filename agents auto-recognize."""
+    """Validate skills/ contains at least one SKILL.md.
+
+    Supports two layouts:
+      - Flat:   skills/SKILL.md  (single skill at top level)
+      - Nested: skills/<name>/SKILL.md  (Claude discovers each subdirectory as a skill)
+
+    Both are valid — Claude Code scans the skills_dir for subdirectories
+    containing SKILL.md and registers each as a /skill-name command.
+    """
     skills_dir = submission_dir / "skills"
     if not skills_dir.is_dir():
         return ["skills/ directory is missing"]
-    skill_file = skills_dir / "SKILL.md"
-    if not skill_file.is_file():
-        return ["skills/SKILL.md is missing (must be exactly 'SKILL.md')"]
-    if not skill_file.read_text().strip():
-        return ["skills/SKILL.md is empty"]
-    return []
+
+    skill_files: list[Path] = []
+    # Flat layout: skills/SKILL.md
+    top_level = skills_dir / "SKILL.md"
+    if top_level.is_file():
+        skill_files.append(top_level)
+    # Nested layout: skills/<name>/SKILL.md
+    for child in sorted(skills_dir.iterdir()):
+        if child.is_dir():
+            nested = child / "SKILL.md"
+            if nested.is_file():
+                skill_files.append(nested)
+
+    if not skill_files:
+        return ["skills/ must contain at least one SKILL.md (either skills/SKILL.md or skills/<name>/SKILL.md)"]
+
+    errors: list[str] = []
+    for sf in skill_files:
+        rel = sf.relative_to(submission_dir)
+        if not sf.read_text().strip():
+            errors.append(f"{rel} is empty")
+
+    return errors
 
 
 def _check_py_compiles(file_path: Path) -> list[str]:

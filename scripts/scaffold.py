@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-COMMON_COPY_DIRS = ("tests", "supportive", "scripts")
+COMMON_COPY_DIRS = ("tests",)
+
+# Inside supportive/, only MCP infrastructure is shared with both variants.
+# Documentation (supportive/docs/) is treatment-only — it mirrors real
+# production where agents have MCP tool access but not the skill docs.
+_SUPPORTIVE_SHARED = (".mcp.json", "mcp-servers")
 
 
 def _load_metadata(submission_dir: Path) -> SubmissionMetadata:
@@ -56,6 +61,7 @@ def _build_template_context(
         "tags": tags,
         "has_supportive": (submission_dir / "supportive").is_dir(),
         "has_scripts": (submission_dir / "scripts").is_dir(),
+        "has_claude_md": (submission_dir / "CLAUDE.md").is_file(),
         "has_llm_judge": has_llm_judge,
         # These were formerly ad-hoc dict reads from raw metadata; they are
         # not SubmissionMetadata fields (extra="forbid" rejects them), so the
@@ -87,10 +93,41 @@ def _render_templates(
     }
 
 
+def _copy_supportive(
+    submission_dir: Path,
+    build_context_dir: Path,
+    variant: str,
+) -> None:
+    """Copy supportive/ with variant-aware filtering.
+
+    Treatment gets the full supportive/ directory.
+    Control gets only MCP infrastructure (mcp-servers/, .mcp.json) —
+    not docs, matching real production where agents have MCP access
+    but not the skill documentation.
+    """
+    supportive_src = submission_dir / "supportive"
+    if not supportive_src.is_dir():
+        return
+
+    supportive_dst = build_context_dir / "supportive"
+
+    if variant == "treatment":
+        shutil.copytree(supportive_src, supportive_dst, dirs_exist_ok=True)
+    else:
+        supportive_dst.mkdir(parents=True, exist_ok=True)
+        for item_name in _SUPPORTIVE_SHARED:
+            src = supportive_src / item_name
+            if src.is_file():
+                shutil.copy2(src, supportive_dst / item_name)
+            elif src.is_dir():
+                shutil.copytree(src, supportive_dst / item_name, dirs_exist_ok=True)
+
+
 def _copy_submission_files(
     submission_dir: Path,
     build_context_dir: Path,
     strategy_copy_srcs: list[str],
+    variant: str,
 ) -> None:
     """Copy instruction.md and relevant directories into the build context.
 
@@ -105,6 +142,46 @@ def _copy_submission_files(
         src = submission_dir / dirname
         if src.is_dir():
             shutil.copytree(src, build_context_dir / dirname, dirs_exist_ok=True)
+
+    _copy_supportive(submission_dir, build_context_dir, variant)
+
+    # Treatment-only assets: CLAUDE.md, scripts/, docs, and skills are
+    # skill knowledge that only the treatment variant should receive.
+    if variant == "treatment":
+        claude_md = submission_dir / "CLAUDE.md"
+        if claude_md.is_file():
+            shutil.copy2(claude_md, build_context_dir / "CLAUDE.md")
+
+        scripts_src = submission_dir / "scripts"
+        if scripts_src.is_dir():
+            shutil.copytree(
+                scripts_src, build_context_dir / "scripts", dirs_exist_ok=True,
+            )
+
+
+def _warn_non_claude_skills_dir(
+    metadata: SubmissionMetadata,
+    strategy: ExperimentStrategy,
+    submission_dir: Path,
+) -> None:
+    """Emit a loud warning when skills_dir is used with a non-Claude agent.
+
+    Claude Code auto-discovers SKILL.md files under skills_dir.  Other
+    agent wrappers (opencode, qwen-coder, etc.) may not — the submitter
+    must verify skill discovery works for their agent.
+    """
+    treatment_ctx = strategy.customize_context({}, "treatment", submission_dir)
+    has_skills = bool(treatment_ctx.get("skills_dir"))
+    agent_wrapper = (metadata.llm.agent_wrapper if metadata.llm else None) or ""
+
+    if has_skills and agent_wrapper:
+        logger.warning(
+            "WARNING: NON-CLAUDE AGENT WRAPPER '%s' DETECTED WITH skills_dir SET. "
+            "SKILL DISCOVERY VIA skills_dir IS ONLY VERIFIED FOR CLAUDE CODE. "
+            "PLEASE VERIFY THAT YOUR AGENT CORRECTLY DISCOVERS SKILL.MD FILES "
+            "UNDER THE SKILLS DIRECTORY.",
+            agent_wrapper.upper(),
+        )
 
 
 def scaffold_submission(
@@ -128,6 +205,8 @@ def scaffold_submission(
     treatment_dir = output_dir / "tasks-treatment" / metadata.name
     control_dir = output_dir / "tasks-control" / metadata.name
 
+    _warn_non_claude_skills_dir(metadata, strategy, submission_dir)
+
     for variant, target_dir in (
         ("treatment", treatment_dir),
         ("control", control_dir),
@@ -135,6 +214,12 @@ def scaffold_submission(
         context = _build_template_context(
             metadata, submission_dir, variant, strategy,
         )
+        # scripts/ and supportive/docs/ are treatment-only; control only gets
+        # MCP infrastructure from supportive/. Override Dockerfile flags here
+        # so the rendered Dockerfile matches what's actually in the build context.
+        if variant == "control":
+            context["has_scripts"] = False
+            context["has_claude_md"] = False
         rendered = _render_templates(jinja_env, context)
 
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -156,7 +241,7 @@ def scaffold_submission(
                 dest.chmod(dest.stat().st_mode | stat.S_IEXEC)
 
         strategy_srcs = [src for src, _ in context.get("copy_pairs", [])]
-        _copy_submission_files(submission_dir, environment_dir, strategy_srcs)
+        _copy_submission_files(submission_dir, environment_dir, strategy_srcs, variant)
 
         # Second copy at task root: Harbor reads instruction.md from the task
         # directory (outside the build context) for display/metadata purposes.
