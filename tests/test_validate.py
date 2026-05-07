@@ -201,7 +201,7 @@ class TestVariantSpec:
         vs = VariantSpec(
             copy=[
                 CopySpec(src="skills", dest="/skills"),
-                CopySpec(src="docs", dest="/workspace/docs"),
+                CopySpec(src="docs", dest="/docs"),
             ]
         )
         assert len(vs.copy_dirs) == 2
@@ -400,13 +400,13 @@ class TestValidateSubmission:
     def test_skills_dir_missing_skill_md(self, valid_submission: Path) -> None:
         (valid_submission / "skills" / "SKILL.md").unlink()
         errors = validate_submission(valid_submission)
-        assert any("SKILL.md is missing" in e for e in errors)
+        assert any("SKILL.md" in e for e in errors)
 
     def test_skills_dir_wrong_name_rejected(self, valid_submission: Path) -> None:
         (valid_submission / "skills" / "SKILL.md").unlink()
         (valid_submission / "skills" / "my-custom-skill.md").write_text("# Skill\n")
         errors = validate_submission(valid_submission)
-        assert any("SKILL.md is missing" in e for e in errors)
+        assert any("SKILL.md" in e for e in errors)
 
     def test_skills_dir_empty_skill_md(self, valid_submission: Path) -> None:
         (valid_submission / "skills" / "SKILL.md").write_text("")
@@ -415,6 +415,33 @@ class TestValidateSubmission:
 
     def test_skills_dir_whitespace_only_skill_md(self, valid_submission: Path) -> None:
         (valid_submission / "skills" / "SKILL.md").write_text("  \n\n  ")
+        errors = validate_submission(valid_submission)
+        assert any("SKILL.md is empty" in e for e in errors)
+
+    def test_nested_skill_md_valid(self, valid_submission: Path) -> None:
+        """Nested layout: skills/<name>/SKILL.md is valid."""
+        (valid_submission / "skills" / "SKILL.md").unlink()
+        nested = valid_submission / "skills" / "my-skill"
+        nested.mkdir()
+        (nested / "SKILL.md").write_text("# My Skill\nDo something.\n")
+        errors = validate_submission(valid_submission)
+        assert errors == []
+
+    def test_nested_skill_md_with_sibling(self, valid_submission: Path) -> None:
+        """Multiple nested skills are all validated."""
+        (valid_submission / "skills" / "SKILL.md").unlink()
+        for name in ("cve-impact", "mcp-validator"):
+            d = valid_submission / "skills" / name
+            d.mkdir()
+            (d / "SKILL.md").write_text(f"# {name}\nInstructions.\n")
+        errors = validate_submission(valid_submission)
+        assert errors == []
+
+    def test_nested_skill_md_empty_rejected(self, valid_submission: Path) -> None:
+        (valid_submission / "skills" / "SKILL.md").unlink()
+        nested = valid_submission / "skills" / "my-skill"
+        nested.mkdir()
+        (nested / "SKILL.md").write_text("")
         errors = validate_submission(valid_submission)
         assert any("SKILL.md is empty" in e for e in errors)
 

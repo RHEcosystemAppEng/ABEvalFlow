@@ -54,10 +54,20 @@ def full_submission(valid_submission: Path) -> Path:
 
     supportive = valid_submission / "supportive"
     supportive.mkdir()
-    (supportive / "data.json").write_text('{"key": "value"}\n')
+    (supportive / ".mcp.json").write_text('{"servers": []}\n')
+    mcp_servers = supportive / "mcp-servers"
+    mcp_servers.mkdir()
+    (mcp_servers / "mock-server.py").write_text("# mock\n")
+    supportive_docs = supportive / "docs"
+    supportive_docs.mkdir()
+    (supportive_docs / "guide.md").write_text("# Guide\nOperational knowledge.\n")
 
     (valid_submission / "tests" / "llm_judge.py").write_text(
         "def judge(): return {'score': 1.0, 'rationale': 'ok'}\n"
+    )
+
+    (valid_submission / "CLAUDE.md").write_text(
+        "# System Prompt\nYou are an SRE assistant.\n"
     )
 
     return valid_submission
@@ -197,11 +207,41 @@ class TestScaffoldTaskToml:
 class TestScaffoldOptionalDirs:
     """Test scaffolding with optional directories (docs, supportive, llm_judge)."""
 
-    def test_supportive_copied_when_present(self, full_submission: Path, tmp_path: Path):
+    def test_supportive_treatment_gets_full_copy(self, full_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
-        treatment, control = scaffold_submission(full_submission, output, TEMPLATES_DIR)
-        for d in (treatment, control):
-            assert (d / "environment" / "supportive" / "data.json").is_file()
+        treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)
+        assert (treatment / "environment" / "supportive" / ".mcp.json").is_file()
+        assert (treatment / "environment" / "supportive" / "mcp-servers" / "mock-server.py").is_file()
+        assert (treatment / "environment" / "supportive" / "docs" / "guide.md").is_file()
+
+    def test_supportive_control_gets_mcp_only(self, full_submission: Path, tmp_path: Path):
+        """Control gets MCP infrastructure but NOT docs from supportive/."""
+        output = tmp_path / "output"
+        _, control = scaffold_submission(full_submission, output, TEMPLATES_DIR)
+        assert (control / "environment" / "supportive" / ".mcp.json").is_file()
+        assert (control / "environment" / "supportive" / "mcp-servers" / "mock-server.py").is_file()
+        assert not (control / "environment" / "supportive" / "docs").exists()
+
+    def test_scripts_copied_only_for_treatment(self, tmp_path: Path):
+        """scripts/ is treatment-only — skill knowledge, not shared infra."""
+        sub = tmp_path / "scripted-skill"
+        sub.mkdir()
+        (sub / "instruction.md").write_text("Do it.\n")
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text("# Skill\n")
+        (sub / "tests").mkdir()
+        (sub / "tests" / "test_outputs.py").write_text("def test(): pass\n")
+        scripts = sub / "scripts"
+        scripts.mkdir()
+        (scripts / "helper.py").write_text("# helper\n")
+        (sub / "metadata.yaml").write_text(yaml.dump({"name": "scripted-skill"}))
+
+        output = tmp_path / "output"
+        treatment, control = scaffold_submission(sub, output, TEMPLATES_DIR)
+        assert (treatment / "environment" / "scripts" / "helper.py").is_file()
+        assert not (control / "environment" / "scripts").exists()
+        ctrl_df = (control / "environment" / "Dockerfile").read_text()
+        assert "COPY scripts/" not in ctrl_df
 
     def test_docs_copied_only_for_treatment(self, full_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
@@ -222,6 +262,30 @@ class TestScaffoldOptionalDirs:
         treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)
         content = (treatment / "environment" / "Dockerfile").read_text()
         assert "COPY docs/" in content
+
+    def test_claude_md_copied_only_for_treatment(self, full_submission: Path, tmp_path: Path):
+        output = tmp_path / "output"
+        treatment, control = scaffold_submission(full_submission, output, TEMPLATES_DIR)
+        assert (treatment / "environment" / "CLAUDE.md").is_file()
+        assert not (control / "environment" / "CLAUDE.md").exists()
+
+    def test_dockerfile_includes_claude_md_for_treatment(self, full_submission: Path, tmp_path: Path):
+        output = tmp_path / "output"
+        treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)
+        content = (treatment / "environment" / "Dockerfile").read_text()
+        assert "COPY CLAUDE.md" in content
+
+    def test_dockerfile_excludes_claude_md_for_control(self, full_submission: Path, tmp_path: Path):
+        output = tmp_path / "output"
+        _, control = scaffold_submission(full_submission, output, TEMPLATES_DIR)
+        content = (control / "environment" / "Dockerfile").read_text()
+        assert "COPY CLAUDE.md" not in content
+
+    def test_no_claude_md_in_dockerfile_when_absent(self, valid_submission: Path, tmp_path: Path):
+        output = tmp_path / "output"
+        treatment, _ = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+        content = (treatment / "environment" / "Dockerfile").read_text()
+        assert "COPY CLAUDE.md" not in content
 
     def test_no_supportive_in_dockerfile_when_absent(self, valid_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
@@ -448,3 +512,54 @@ class TestScaffoldExperimentConfig:
 
         assert (control / "environment" / "skills" / "SKILL.md").is_file()
         assert 'skills_dir = "/skills"' in (control / "task.toml").read_text()
+
+
+class TestNonClaudeSkillWarning:
+    """Verify the loud warning when skills_dir is used with a non-Claude agent."""
+
+    def test_non_claude_agent_with_skills_warns(
+        self, valid_submission: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ):
+        meta_path = valid_submission / "metadata.yaml"
+        meta = yaml.safe_load(meta_path.read_text())
+        meta["llm"] = {"agent_wrapper": "opencode"}
+        meta_path.write_text(yaml.dump(meta))
+
+        output = tmp_path / "output"
+        import logging
+        with caplog.at_level(logging.WARNING):
+            scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+
+        assert any("NON-CLAUDE AGENT WRAPPER" in msg for msg in caplog.messages)
+        assert any("OPENCODE" in msg for msg in caplog.messages)
+
+    def test_claude_agent_no_warning(
+        self, valid_submission: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ):
+        output = tmp_path / "output"
+        import logging
+        with caplog.at_level(logging.WARNING):
+            scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+
+        assert not any("NON-CLAUDE AGENT WRAPPER" in msg for msg in caplog.messages)
+
+    def test_non_claude_without_skills_no_warning(
+        self, valid_submission: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ):
+        """Non-Claude agent with no skills_dir should not warn."""
+        meta_path = valid_submission / "metadata.yaml"
+        meta = yaml.safe_load(meta_path.read_text())
+        meta["llm"] = {"agent_wrapper": "opencode"}
+        meta["experiment"] = {
+            "type": "model",
+            "treatment": {"env_from_secrets": {"MODEL": "models/gpt-4o"}},
+            "control": {"env_from_secrets": {"MODEL": "models/gpt-3.5"}},
+        }
+        meta_path.write_text(yaml.dump(meta))
+
+        output = tmp_path / "output"
+        import logging
+        with caplog.at_level(logging.WARNING):
+            scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+
+        assert not any("NON-CLAUDE AGENT WRAPPER" in msg for msg in caplog.messages)

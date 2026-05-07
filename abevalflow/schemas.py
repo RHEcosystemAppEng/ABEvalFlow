@@ -126,7 +126,7 @@ class ExperimentConfig(BaseModel):
         default_factory=lambda: VariantSpec(
             copy=[
                 CopySpec(src="skills", dest="/skills"),
-                CopySpec(src="docs", dest="/workspace/docs"),
+                CopySpec(src="docs", dest="/docs"),
             ]
         ),
     )
