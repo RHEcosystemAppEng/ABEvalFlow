@@ -214,13 +214,11 @@ class TestScaffoldOptionalDirs:
         assert (treatment / "environment" / "supportive" / "mcp-servers" / "mock-server.py").is_file()
         assert (treatment / "environment" / "supportive" / "docs" / "guide.md").is_file()
 
-    def test_supportive_control_gets_mcp_only(self, full_submission: Path, tmp_path: Path):
-        """Control gets MCP infrastructure but NOT docs from supportive/."""
+    def test_supportive_control_gets_nothing(self, full_submission: Path, tmp_path: Path):
+        """Control gets no supportive files — MCP source contains answers."""
         output = tmp_path / "output"
         _, control = scaffold_submission(full_submission, output, TEMPLATES_DIR)
-        assert (control / "environment" / "supportive" / ".mcp.json").is_file()
-        assert (control / "environment" / "supportive" / "mcp-servers" / "mock-server.py").is_file()
-        assert not (control / "environment" / "supportive" / "docs").exists()
+        assert not (control / "environment" / "supportive").exists()
 
     def test_scripts_copied_only_for_treatment(self, tmp_path: Path):
         """scripts/ is treatment-only — skill knowledge, not shared infra."""

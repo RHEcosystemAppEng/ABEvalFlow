@@ -29,10 +29,10 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 COMMON_COPY_DIRS = ("tests",)
 
-# Inside supportive/, only MCP infrastructure is shared with both variants.
-# Documentation (supportive/docs/) is treatment-only — it mirrors real
-# production where agents have MCP tool access but not the skill docs.
-_SUPPORTIVE_SHARED = (".mcp.json", "mcp-servers")
+# Nothing from supportive/ is shared with control. MCP server source files
+# contain hardcoded data the control agent can read directly from disk,
+# bypassing MCP tools entirely and defeating skill differentiation.
+_SUPPORTIVE_SHARED: tuple[str, ...] = ()
 
 
 def _load_metadata(submission_dir: Path) -> SubmissionMetadata:
@@ -100,27 +100,17 @@ def _copy_supportive(
 ) -> None:
     """Copy supportive/ with variant-aware filtering.
 
-    Treatment gets the full supportive/ directory.
-    Control gets only MCP infrastructure (mcp-servers/, .mcp.json) —
-    not docs, matching real production where agents have MCP access
-    but not the skill documentation.
+    Treatment gets the full supportive/ directory (MCP servers, docs, etc.).
+    Control gets nothing — MCP server source files contain hardcoded data
+    that the agent could read directly, bypassing the need for MCP tools.
     """
     supportive_src = submission_dir / "supportive"
     if not supportive_src.is_dir():
         return
 
-    supportive_dst = build_context_dir / "supportive"
-
     if variant == "treatment":
+        supportive_dst = build_context_dir / "supportive"
         shutil.copytree(supportive_src, supportive_dst, dirs_exist_ok=True)
-    else:
-        supportive_dst.mkdir(parents=True, exist_ok=True)
-        for item_name in _SUPPORTIVE_SHARED:
-            src = supportive_src / item_name
-            if src.is_file():
-                shutil.copy2(src, supportive_dst / item_name)
-            elif src.is_dir():
-                shutil.copytree(src, supportive_dst / item_name, dirs_exist_ok=True)
 
 
 def _copy_submission_files(
@@ -214,10 +204,10 @@ def scaffold_submission(
         context = _build_template_context(
             metadata, submission_dir, variant, strategy,
         )
-        # scripts/ and supportive/docs/ are treatment-only; control only gets
-        # MCP infrastructure from supportive/. Override Dockerfile flags here
-        # so the rendered Dockerfile matches what's actually in the build context.
+        # Control is a vanilla agent: no supportive files, no scripts,
+        # no CLAUDE.md. Only instruction.md and tests are shared.
         if variant == "control":
+            context["has_supportive"] = False
             context["has_scripts"] = False
             context["has_claude_md"] = False
         rendered = _render_templates(jinja_env, context)
