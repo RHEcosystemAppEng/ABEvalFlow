@@ -120,6 +120,12 @@ spec:
       description: >-
         Run independent AI quality review before scaffolding.
         Automatically disabled in oracle mode.
+    - name: enable-security-scan
+      type: string
+      default: "true"
+      description: >-
+        Run security scanning on SKILL.md files before scaffolding.
+        Blocks on prompt injection or credential access findings.
     - name: llm-base-url
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000/v1"
@@ -235,7 +241,29 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
-    # Step 1c: AI quality review (optional, after validation)
+    # Step 1c: Security scan (optional, after validation)
+    # ------------------------------------------------------------------
+    - name: security-scan
+      when:
+        - input: $(params.enable-security-scan)
+          operator: in
+          values: ["true"]
+      runAfter: ["validate"]
+      taskRef:
+        name: security-scan
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
+    # Step 1d: AI quality review (optional, after validation)
     # ------------------------------------------------------------------
     - name: ai-review
       when:
@@ -267,7 +295,7 @@ spec:
     # Step 2: Scaffold treatment and control task directories
     # ------------------------------------------------------------------
     - name: scaffold
-      runAfter: ["validate", "ai-review"]
+      runAfter: ["validate", "ai-review", "security-scan"]
       taskRef:
         name: scaffold-submission
       params:

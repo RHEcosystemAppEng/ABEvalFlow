@@ -1,0 +1,73 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: security-scan
+  namespace: ab-eval-flow
+spec:
+  description: >-
+    Scans SKILL.md files in a submission for prompt injection patterns,
+    credential access references, and dangerous commands.  Blocks the
+    pipeline on ERROR-severity findings.  No LLM calls required.
+  params:
+    - name: submission-dir
+      type: string
+      description: Submission directory name under submissions/
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
+      description: URL of the ABEvalFlow pipeline repository
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+      description: Branch or SHA of the pipeline repo
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned submissions repository
+  results:
+    - name: scan-result
+      description: JSON object with passed, findings, and summary
+    - name: scan-passed
+      description: Whether the scan passed (true or false)
+  steps:
+    - name: clone-pipeline-repo
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR/.git" ]; then
+          echo "Pipeline repo already cloned, skipping"
+          exit 0
+        fi
+        git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+          "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
+        echo "Cloned pipeline repo at $(params.pipeline-repo-revision)"
+
+    - name: scan
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+
+        cd "$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pydantic pyyaml
+        export PYTHONPATH="$PIPELINE_DIR"
+
+        SCAN_EXIT=0
+        python scripts/security_scan.py "$SUBMISSION_PATH" \
+          | tee /tmp/scan-output.json || SCAN_EXIT=$?
+
+        cat /tmp/scan-output.json | tr -d '\n' \
+          > "$(results.scan-result.path)"
+
+        cp /tmp/scan-output.json "$(workspaces.source.path)/_security_scan.json"
+
+        python -c "
+        import json
+        data = json.load(open('/tmp/scan-output.json'))
+        print(str(data.get('passed', False)).lower(), end='')
+        " > "$(results.scan-passed.path)"
+
+        exit $SCAN_EXIT
