@@ -15,6 +15,9 @@ spec:
       description: The submission directory path under submissions/
     - name: pr-number
       description: The pull request number that triggered this run
+    - name: eval-engine
+      description: Evaluation engine (harbor, ase, both)
+      default: "harbor"
   resourcetemplates:
     - apiVersion: tekton.dev/v1
       kind: PipelineRun
@@ -36,6 +39,8 @@ spec:
             value: $(tt.params.repo-name)
           - name: pr-number
             value: $(tt.params.pr-number)
+          - name: eval-engine
+            value: $(tt.params.eval-engine)
         timeouts:
           pipeline: "4h"
           tasks: "3h"

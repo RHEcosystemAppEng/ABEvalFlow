@@ -52,6 +52,7 @@ def map_result_to_run(result: AnalysisResult, run_id: str) -> EvaluationRun:
         treatment_image_ref=p.treatment_image_ref,
         control_image_ref=p.control_image_ref,
         harbor_fork_revision=p.harbor_fork_revision,
+        eval_engine=p.eval_engine,
         recommendation=s.recommendation.value,
         uplift=s.uplift,
         mean_reward_gap=s.mean_reward_gap,
