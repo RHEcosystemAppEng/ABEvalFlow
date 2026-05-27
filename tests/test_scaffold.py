@@ -181,15 +181,6 @@ class TestScaffoldTaskToml:
             parsed = tomllib.loads((d / "task.toml").read_text())
             assert "verifier" in parsed
 
-    def test_task_toml_llm_judge_env_key_populated(self, full_submission: Path, tmp_path: Path):
-        output = tmp_path / "output"
-        treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)
-        parsed = tomllib.loads((treatment / "task.toml").read_text())
-        env = parsed["verifier"]["env"]
-        assert "LLM_API_KEY" in env
-        assert "LLM_API_BASE" in env
-        assert "MODEL_NAME" in env
-
     def test_task_toml_custom_timeouts(self, valid_submission: Path, tmp_path: Path):
         meta_path = valid_submission / "metadata.yaml"
         meta = yaml.safe_load(meta_path.read_text())

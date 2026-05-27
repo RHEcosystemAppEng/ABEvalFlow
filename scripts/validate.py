@@ -1,12 +1,21 @@
 """Validate a submission directory against the submission contract.
 
-Checks:
+Checks vary by eval-engine mode:
+
+Harbor (default):
   1. instruction.md exists and is non-empty
   2. skills/ contains at least one SKILL.md (flat or nested layout)
   3. tests/test_outputs.py compiles
   4. tests/llm_judge.py compiles if present
   5. metadata.yaml passes Pydantic schema validation
   6. supportive/ total size < 50 MB
+
+ASE (agent-skills-eval):
+  1. SKILL.md exists with valid YAML frontmatter containing 'name'
+  2. evals/evals.json exists and is valid
+  3. metadata.yaml passes Pydantic schema validation
+
+Both: all checks from both engines apply.
 
 Exit codes: 0 = pass, 1 = validation failure (structured JSON on stdout).
 """
@@ -15,17 +24,20 @@ import argparse
 import ast
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
-from abevalflow.schemas import SubmissionMetadata
+from abevalflow.schemas import EvalEngine, SubmissionMetadata
 
 logger = logging.getLogger(__name__)
 
 MAX_SUPPORTIVE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+_YAML_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 
 
 def _check_instruction_md(submission_dir: Path) -> list[str]:
@@ -118,22 +130,112 @@ def _check_supportive_size(submission_dir: Path) -> list[str]:
     return []
 
 
-def validate_submission(submission_dir: Path) -> list[str]:
-    """Run all validation checks and return a list of error strings (empty = valid)."""
-    logger.info("Validating submission: %s", submission_dir)
+# ---------------------------------------------------------------------------
+# ASE-specific checks
+# ---------------------------------------------------------------------------
+
+def _check_skill_md_frontmatter(submission_dir: Path) -> list[str]:
+    """Validate that at least one SKILL.md has YAML frontmatter with 'name'."""
+    skill_files: list[Path] = []
+
+    skills_dir = submission_dir / "skills"
+    if skills_dir.is_dir():
+        top_level = skills_dir / "SKILL.md"
+        if top_level.is_file():
+            skill_files.append(top_level)
+        for child in sorted(skills_dir.iterdir()):
+            if child.is_dir():
+                nested = child / "SKILL.md"
+                if nested.is_file():
+                    skill_files.append(nested)
+
+    if not skill_files:
+        return ["No SKILL.md found under skills/ for ASE validation"]
+
+    errors: list[str] = []
+    for sf in skill_files:
+        rel = sf.relative_to(submission_dir)
+        content = sf.read_text()
+        match = _YAML_FRONTMATTER_RE.match(content)
+        if not match:
+            errors.append(f"{rel} is missing YAML frontmatter (---...--- block)")
+            continue
+        try:
+            fm = yaml.safe_load(match.group(1))
+        except yaml.YAMLError as exc:
+            errors.append(f"{rel} has invalid YAML frontmatter: {exc}")
+            continue
+        if not isinstance(fm, dict):
+            errors.append(f"{rel} frontmatter must be a YAML mapping")
+            continue
+        if not fm.get("name"):
+            errors.append(f"{rel} frontmatter is missing required 'name' field")
+
+    return errors
+
+
+def _check_evals_json(submission_dir: Path) -> list[str]:
+    """Validate evals/evals.json for agent-skills-eval format."""
+    evals_path = submission_dir / "evals" / "evals.json"
+    if not evals_path.is_file():
+        return ["evals/evals.json is missing (required for ASE evaluation)"]
+
+    try:
+        data = json.loads(evals_path.read_text())
+    except (json.JSONDecodeError, ValueError) as exc:
+        return [f"evals/evals.json is not valid JSON: {exc}"]
+
+    if not isinstance(data, dict):
+        return ["evals/evals.json must be a JSON object"]
+
+    evals = data.get("evals")
+    if not isinstance(evals, list) or len(evals) == 0:
+        return ["evals/evals.json must contain a non-empty 'evals' array"]
+
+    errors: list[str] = []
+    for i, ev in enumerate(evals):
+        prefix = f"evals/evals.json evals[{i}]"
+        if not isinstance(ev, dict):
+            errors.append(f"{prefix}: must be a JSON object")
+            continue
+        if not ev.get("prompt"):
+            errors.append(f"{prefix}: missing required 'prompt' field")
+        if not ev.get("assertions") and not ev.get("expected_output"):
+            errors.append(f"{prefix}: must have 'assertions' or 'expected_output'")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Main validation
+# ---------------------------------------------------------------------------
+
+def validate_submission(
+    submission_dir: Path,
+    eval_engine: EvalEngine = EvalEngine.HARBOR,
+) -> list[str]:
+    """Run validation checks based on the eval engine and return error strings."""
+    logger.info("Validating submission: %s (eval_engine=%s)", submission_dir, eval_engine)
     errors: list[str] = []
 
-    # Parse metadata first — generation_mode determines which files are required.
+    run_harbor = eval_engine in (EvalEngine.HARBOR, EvalEngine.BOTH)
+    run_ase = eval_engine in (EvalEngine.ASE, EvalEngine.BOTH)
+
     metadata_errors, metadata = _check_metadata_yaml(submission_dir)
     errors.extend(metadata_errors)
 
     errors.extend(_check_skills_dir(submission_dir))
-    errors.extend(_check_instruction_md(submission_dir))
-    errors.extend(_check_py_compiles(submission_dir / "tests" / "test_outputs.py"))
 
-    llm_judge = submission_dir / "tests" / "llm_judge.py"
-    if llm_judge.is_file():
-        errors.extend(_check_py_compiles(llm_judge))
+    if run_harbor:
+        errors.extend(_check_instruction_md(submission_dir))
+        errors.extend(_check_py_compiles(submission_dir / "tests" / "test_outputs.py"))
+        llm_judge = submission_dir / "tests" / "llm_judge.py"
+        if llm_judge.is_file():
+            errors.extend(_check_py_compiles(llm_judge))
+
+    if run_ase:
+        errors.extend(_check_skill_md_frontmatter(submission_dir))
+        errors.extend(_check_evals_json(submission_dir))
 
     errors.extend(_check_supportive_size(submission_dir))
 
@@ -147,6 +249,13 @@ def validate_submission(submission_dir: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate a submission directory")
     parser.add_argument("submission_dir", type=Path, help="Path to the submission directory")
+    parser.add_argument(
+        "--eval-engine",
+        type=str,
+        choices=["harbor", "ase", "both"],
+        default="harbor",
+        help="Evaluation engine (controls which checks run)",
+    )
     args = parser.parse_args(argv)
 
     submission_dir: Path = args.submission_dir
@@ -155,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
         return 1
 
-    errors = validate_submission(submission_dir)
+    engine = EvalEngine(args.eval_engine)
+    errors = validate_submission(submission_dir, eval_engine=engine)
     result = {"valid": len(errors) == 0, "errors": errors}
     print(json.dumps(result, indent=2))
     return 0 if result["valid"] else 1

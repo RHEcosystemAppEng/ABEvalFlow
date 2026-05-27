@@ -24,6 +24,12 @@ class GenerationMode(StrEnum):
     AI = "ai"
 
 
+class EvalEngine(StrEnum):
+    HARBOR = "harbor"
+    ASE = "ase"
+    BOTH = "both"
+
+
 class LlmConfig(BaseModel):
     """Optional per-submission LLM overrides.
 
@@ -211,6 +217,15 @@ class SubmissionMetadata(BaseModel):
     cpus: int = Field(default=1, gt=0, description="CPU cores for trial container")
     memory_mb: int = Field(default=2048, gt=0, description="Memory in MB for trial container")
     storage_mb: int = Field(default=10240, gt=0, description="Storage in MB for trial container")
+
+    eval_engine: EvalEngine = Field(
+        default=EvalEngine.HARBOR,
+        description=(
+            "Evaluation engine: 'harbor' for full containerized A/B evaluation, "
+            "'ase' for lightweight LLM-as-a-judge via agent-skills-eval, "
+            "'both' to run both engines. Pipeline param takes precedence."
+        ),
+    )
 
     llm: LlmConfig | None = Field(
         default=None,
