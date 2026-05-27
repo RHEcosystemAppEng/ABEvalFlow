@@ -1,28 +1,18 @@
-"""Analyze Harbor A/B evaluation results and produce JSON + Markdown reports.
+"""Aggregate agent-skills-eval benchmark results into AnalysisResult format.
 
-Walks the result directory tree produced by ``harbor-eval`` (two separate
-Harbor jobs, one per variant), computes per-variant statistics, runs
-statistical significance tests, and writes a structured report.
-
-Expected input layout::
-
-    <results-dir>/
-        treatment/
-            <job-name>/
-                <task>__<uuid>/result.json
-                ...
-        control/
-            <job-name>/
-                <task>__<uuid>/result.json
-                ...
+Reads benchmark.json and grading.json files produced by agent-skills-eval
+across N iterations, maps with_skill -> treatment and without_skill -> control,
+and writes a report.json + report.md compatible with the Harbor analysis
+pipeline (same AnalysisResult Pydantic model).
 
 Usage::
 
-    python scripts/analyze.py \\
-        --results-dir /workspace/eval-results/my-submission \\
-        --output-dir /workspace/reports/my-submission \\
-        --submission-name my-submission \\
-        --threshold 0.0
+    python scripts/aggregate_ase.py \
+        --results-dir /workspace/ase-results/my-submission \
+        --output-dir /workspace/reports/my-submission \
+        --submission-name my-submission \
+        --threshold 0.0 \
+        --iterations 5
 """
 
 from __future__ import annotations
@@ -48,64 +38,72 @@ from abevalflow.report import (
 
 logger = logging.getLogger(__name__)
 
-VARIANTS = ("treatment", "control")
+
+def _find_grading_files(results_dir: Path, mode: str) -> list[Path]:
+    """Find all grading.json files for a given mode across iterations."""
+    files: list[Path] = []
+    for grading in sorted(results_dir.rglob("grading.json")):
+        if mode in grading.parts:
+            files.append(grading)
+    return files
 
 
-# ---------------------------------------------------------------------------
-# Result parsing
-# ---------------------------------------------------------------------------
-
-def _extract_reward(result: dict) -> float | None:
-    """Extract reward from a Harbor result.json.
-
-    Handles two known formats:
-    - Nested: ``verifier_result.rewards.reward`` (actual Harbor output)
-    - Flat:   ``verifier_result.reward`` (used in harbor-eval inline parser)
-    """
-    vr = result.get("verifier_result")
-    if not isinstance(vr, dict):
-        return None
-    rewards = vr.get("rewards")
-    if isinstance(rewards, dict):
-        r = rewards.get("reward")
-        if r is not None:
-            return float(r)
-    r = vr.get("reward")
-    if r is not None:
-        return float(r)
-    return None
+def _parse_grading(grading_path: Path) -> tuple[float, int, int]:
+    """Parse a grading.json and return (pass_rate, n_passed, n_total)."""
+    data = json.loads(grading_path.read_text())
+    summary = data.get("summary", {})
+    passed = summary.get("passed", 0)
+    total = summary.get("total", 0)
+    pass_rate = summary.get("pass_rate", 0.0)
+    return pass_rate, passed, total
 
 
-def parse_variant_trials(variant_dir: Path) -> list[TrialResult]:
-    """Scan all trial directories under a variant's results directory.
+def _parse_benchmarks(results_dir: Path, n_iterations: int) -> list[dict]:
+    """Find and parse all benchmark.json files across iterations."""
+    benchmarks = []
+    for i in range(1, n_iterations + 1):
+        bench_path = results_dir / f"iteration-{i}" / "benchmark.json"
+        if bench_path.is_file():
+            benchmarks.append(json.loads(bench_path.read_text()))
+    if not benchmarks:
+        for bench_path in sorted(results_dir.rglob("benchmark.json")):
+            benchmarks.append(json.loads(bench_path.read_text()))
+    return benchmarks
 
-    Skips job-level ``result.json`` files (which lack ``verifier_result``)
-    so only actual trial results are counted.
-    """
-    trials: list[TrialResult] = []
-    if not variant_dir.is_dir():
-        return trials
 
-    for result_file in sorted(variant_dir.rglob("result.json")):
-        trial_name = result_file.parent.name
-        try:
-            data = json.loads(result_file.read_text())
-            if "verifier_result" not in data:
+def _collect_trials(
+    results_dir: Path, n_iterations: int
+) -> tuple[list[TrialResult], list[TrialResult]]:
+    """Collect per-iteration trial results for treatment (with_skill) and control (without_skill)."""
+    treatment_trials: list[TrialResult] = []
+    control_trials: list[TrialResult] = []
+
+    for i in range(1, n_iterations + 1):
+        iter_dir = results_dir / f"iteration-{i}"
+        if not iter_dir.is_dir():
+            continue
+
+        for grading_path in sorted(iter_dir.rglob("grading.json")):
+            parts = grading_path.parts
+            if "with_skill" in parts:
+                variant = "treatment"
+                trials_list = treatment_trials
+            elif "without_skill" in parts:
+                variant = "control"
+                trials_list = control_trials
+            else:
                 continue
-            reward = _extract_reward(data)
-            trials.append(TrialResult(trial_name=trial_name, reward=reward))
-        except (json.JSONDecodeError, ValueError, TypeError):
-            trials.append(TrialResult(trial_name=trial_name))
 
-    return trials
+            pass_rate, n_passed, n_total = _parse_grading(grading_path)
+            trial_name = f"iteration-{i}-{variant}"
+            reward = pass_rate
+            trials_list.append(TrialResult(trial_name=trial_name, reward=reward))
 
+    return treatment_trials, control_trials
 
-# ---------------------------------------------------------------------------
-# Statistics
-# ---------------------------------------------------------------------------
 
 def compute_variant_summary(trials: list[TrialResult]) -> VariantSummary:
-    """Compute aggregate stats from a list of trial results."""
+    """Compute aggregate stats from trial results."""
     rewards = [t.reward for t in trials if t.reward is not None]
     n_errors = sum(1 for t in trials if t.reward is None)
     n_passed = sum(1 for t in trials if t.passed)
@@ -129,8 +127,10 @@ def compute_variant_summary(trials: list[TrialResult]) -> VariantSummary:
     )
 
 
-def compute_ttest(treatment_trials: list[TrialResult],
-                  control_trials: list[TrialResult]) -> float | None:
+def compute_ttest(
+    treatment_trials: list[TrialResult],
+    control_trials: list[TrialResult],
+) -> float | None:
     """Welch's t-test on continuous reward scores between variants."""
     t_rewards = [t.reward for t in treatment_trials if t.reward is not None]
     c_rewards = [t.reward for t in control_trials if t.reward is not None]
@@ -142,13 +142,11 @@ def compute_ttest(treatment_trials: list[TrialResult],
     return float(p)
 
 
-def compute_fisher(treatment_summary: VariantSummary,
-                   control_summary: VariantSummary) -> float | None:
-    """Fisher's exact test on the 2x2 pass/fail contingency table.
-
-    Error trials (missing/corrupt results) are excluded from the table so
-    infrastructure failures don't skew significance.
-    """
+def compute_fisher(
+    treatment_summary: VariantSummary,
+    control_summary: VariantSummary,
+) -> float | None:
+    """Fisher's exact test on the 2x2 pass/fail contingency table."""
     t_pass = treatment_summary.n_passed
     t_fail = treatment_summary.n_failed
     c_pass = control_summary.n_passed
@@ -160,30 +158,23 @@ def compute_fisher(treatment_summary: VariantSummary,
     return float(p)
 
 
-# ---------------------------------------------------------------------------
-# Report generation
-# ---------------------------------------------------------------------------
-
-def build_analysis(
+def build_ase_analysis(
     results_dir: Path,
     submission_name: str,
+    n_iterations: int = 5,
     threshold: float = 0.0,
     provenance: Provenance | None = None,
 ) -> AnalysisResult:
-    """Parse results, compute stats, and assemble the full analysis model."""
-    treatment_trials = parse_variant_trials(results_dir / "treatment")
-    control_trials = parse_variant_trials(results_dir / "control")
+    """Parse ASE results across iterations and build an AnalysisResult."""
+    treatment_trials, control_trials = _collect_trials(results_dir, n_iterations)
+
+    if not treatment_trials:
+        logger.warning("No with_skill (treatment) results found")
+    if not control_trials:
+        logger.warning("No without_skill (control) results found")
 
     t_summary = compute_variant_summary(treatment_trials)
     c_summary = compute_variant_summary(control_trials)
-
-    _MIN_TRIALS_FOR_RELIABLE_STATS = 15
-    for label, vs in [("treatment", t_summary), ("control", c_summary)]:
-        if 0 < vs.n_trials < _MIN_TRIALS_FOR_RELIABLE_STATS:
-            logger.warning(
-                "%s has only %d trials (< %d) — statistical tests may be unreliable",
-                label, vs.n_trials, _MIN_TRIALS_FOR_RELIABLE_STATS,
-            )
 
     uplift = t_summary.pass_rate - c_summary.pass_rate
     mean_gap = None
@@ -202,11 +193,16 @@ def build_analysis(
         logger.warning("Zero passes in both variants — defaulting to FAIL")
         recommendation = Recommendation.FAIL
     else:
-        recommendation = Recommendation.PASS if primary_gap >= threshold else Recommendation.FAIL
+        recommendation = (
+            Recommendation.PASS if primary_gap >= threshold else Recommendation.FAIL
+        )
+
+    prov = provenance or Provenance()
+    prov.eval_engine = "ase"
 
     return AnalysisResult(
         submission_name=submission_name,
-        provenance=provenance or Provenance(),
+        provenance=prov,
         summary=AnalysisSummary(
             treatment=t_summary,
             control=c_summary,
@@ -240,20 +236,19 @@ def _sig_marker(p: float | None) -> str:
 
 
 def render_markdown(result: AnalysisResult) -> str:
-    """Render a human-readable Markdown report from analysis results."""
+    """Render a human-readable Markdown report from ASE analysis results."""
     s = result.summary
     t = s.treatment
     c = s.control
     prov = result.provenance
 
     lines: list[str] = []
-    lines.append(f"# A/B Evaluation Report: {result.submission_name}\n")
+    lines.append(f"# A/B Evaluation Report (agent-skills-eval): {result.submission_name}\n")
 
-    # --- Summary table ---
     lines.append("## Summary\n")
-    lines.append("| Metric | Treatment | Control |")
-    lines.append("|--------|-----------|---------|")
-    lines.append(f"| Trials | {t.n_trials} | {c.n_trials} |")
+    lines.append("| Metric | With Skill (Treatment) | Without Skill (Control) |")
+    lines.append("|--------|------------------------|-------------------------|")
+    lines.append(f"| Iterations | {t.n_trials} | {c.n_trials} |")
     lines.append(f"| Passed | {t.n_passed} | {c.n_passed} |")
     lines.append(f"| Failed | {t.n_failed} | {c.n_failed} |")
     lines.append(f"| Errors | {t.n_errors} | {c.n_errors} |")
@@ -263,7 +258,6 @@ def render_markdown(result: AnalysisResult) -> str:
     lines.append(f"| Std Reward | {_fmt(t.std_reward)} | {_fmt(c.std_reward)} |")
     lines.append("")
 
-    # --- Comparison ---
     lines.append("## Comparison\n")
     lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
     if s.mean_reward_gap is not None:
@@ -275,9 +269,9 @@ def render_markdown(result: AnalysisResult) -> str:
         f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}"
     )
     lines.append(f"- **Recommendation:** **{s.recommendation.value.upper()}**")
+    lines.append(f"- **Evaluation engine:** {prov.eval_engine}")
     lines.append("")
 
-    # --- Provenance ---
     lines.append("## Provenance\n")
     lines.append(f"- Generated at: {prov.generated_at.isoformat()}")
     lines.append(f"- Evaluation engine: {prov.eval_engine}")
@@ -285,21 +279,14 @@ def render_markdown(result: AnalysisResult) -> str:
         lines.append(f"- Commit SHA: `{prov.commit_sha}`")
     if prov.pipeline_run_id:
         lines.append(f"- Pipeline run: `{prov.pipeline_run_id}`")
-    if prov.treatment_image_ref:
-        lines.append(f"- Treatment image: `{prov.treatment_image_ref}`")
-    if prov.control_image_ref:
-        lines.append(f"- Control image: `{prov.control_image_ref}`")
-    if prov.harbor_fork_revision:
-        lines.append(f"- Harbor fork revision: `{prov.harbor_fork_revision}`")
     lines.append("")
 
-    # --- Per-trial details ---
-    lines.append("## Trial Details\n")
-    for variant in VARIANTS:
-        trials = result.trials.get(variant, [])
-        lines.append(f"<details>\n<summary>{variant.capitalize()} ({len(trials)} trials)</summary>\n")
-        lines.append("| # | Trial | Reward | Passed |")
-        lines.append("|---|-------|--------|--------|")
+    lines.append("## Iteration Details\n")
+    for variant_key, variant_label in [("treatment", "With Skill"), ("control", "Without Skill")]:
+        trials = result.trials.get(variant_key, [])
+        lines.append(f"<details>\n<summary>{variant_label} ({len(trials)} iterations)</summary>\n")
+        lines.append("| # | Iteration | Reward (Pass Rate) | Passed |")
+        lines.append("|---|-----------|-------------------|--------|")
         for i, tr in enumerate(trials, 1):
             r_str = _fmt(tr.reward) if tr.reward is not None else "ERROR"
             p_str = "PASS" if tr.passed else "FAIL"
@@ -309,19 +296,15 @@ def render_markdown(result: AnalysisResult) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     parser = argparse.ArgumentParser(
-        description="Analyze A/B evaluation results and produce JSON + Markdown reports",
+        description="Aggregate agent-skills-eval results into AnalysisResult format",
     )
     parser.add_argument(
         "--results-dir", type=Path, required=True,
-        help="Path to the results directory containing treatment/ and control/ subdirs",
+        help="Path to ASE results directory containing iteration-N/ subdirs",
     )
     parser.add_argument(
         "--output-dir", type=Path, required=True,
@@ -332,21 +315,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Name of the submission being analyzed",
     )
     parser.add_argument(
+        "--iterations", type=int, default=5,
+        help="Number of iterations to aggregate (default: 5)",
+    )
+    parser.add_argument(
         "--threshold", type=float, default=0.0,
         help="Minimum uplift for a 'pass' recommendation (default: 0.0)",
     )
     parser.add_argument("--commit-sha", default=None)
     parser.add_argument("--pipeline-run-id", default=None)
-    parser.add_argument("--treatment-image-ref", default=None)
-    parser.add_argument("--control-image-ref", default=None)
-    parser.add_argument("--harbor-fork-revision", default=None)
-    parser.add_argument(
-        "--eval-engine",
-        type=str,
-        choices=["harbor", "ase", "both"],
-        default="harbor",
-        help="Evaluation engine used (for provenance tagging)",
-    )
 
     args = parser.parse_args(argv)
 
@@ -357,15 +334,13 @@ def main(argv: list[str] | None = None) -> int:
     provenance = Provenance(
         commit_sha=args.commit_sha,
         pipeline_run_id=args.pipeline_run_id,
-        treatment_image_ref=args.treatment_image_ref,
-        control_image_ref=args.control_image_ref,
-        harbor_fork_revision=args.harbor_fork_revision,
-        eval_engine=args.eval_engine,
+        eval_engine="ase",
     )
 
-    result = build_analysis(
+    result = build_ase_analysis(
         results_dir=args.results_dir,
         submission_name=args.submission_name,
+        n_iterations=args.iterations,
         threshold=args.threshold,
         provenance=provenance,
     )
