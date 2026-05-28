@@ -81,26 +81,13 @@ spec:
         INSTALL_END=$(date +%s)
         echo "agent-skills-eval installed in $((INSTALL_END - INSTALL_START))s"
 
-        # --- 2. Clone pipeline repo for aggregation script ---
-        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
-        if [ -d "$PIPELINE_DIR" ]; then
-          echo "Pipeline repo exists, updating to requested revision"
-          git -C "$PIPELINE_DIR" fetch origin "$(params.pipeline-repo-revision)" --depth 1
-          git -C "$PIPELINE_DIR" -c advice.detachedHead=false checkout FETCH_HEAD
-        else
-          git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
-            "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
-        fi
-
-        # --- 3. Locate skill directory ---
+        # --- 2. Locate skill directory ---
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
         SKILL_DIR=""
 
-        # ASE expects SKILL.md at the root of the skill dir; check skills/ subdirectory
         if [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
           SKILL_DIR="$SUBMISSION_PATH/skills"
         else
-          # Try nested layout: skills/<name>/SKILL.md
           for dir in "$SUBMISSION_PATH"/skills/*/; do
             if [ -f "${dir}SKILL.md" ]; then
               SKILL_DIR="$dir"
@@ -114,14 +101,13 @@ spec:
           exit 1
         fi
 
-        # Ensure evals/ is accessible from the skill directory
         if [ ! -f "$SKILL_DIR/evals/evals.json" ] && [ -f "$SUBMISSION_PATH/evals/evals.json" ]; then
           ln -s "$SUBMISSION_PATH/evals" "$SKILL_DIR/evals"
         fi
 
         echo "Using skill directory: $SKILL_DIR"
 
-        # --- 4. Configure models ---
+        # --- 3. Configure models ---
         TARGET_MODEL="$(params.llm-model)"
         JUDGE_MODEL="$(params.judge-model)"
         if [ -z "$JUDGE_MODEL" ]; then
@@ -129,7 +115,6 @@ spec:
         fi
 
         BASE_URL="$(params.llm-api-base)"
-        # agent-skills-eval expects OpenAI-compatible /v1 endpoint
         if [[ "$BASE_URL" != */v1 ]]; then
           BASE_URL="${BASE_URL}/v1"
         fi
@@ -147,7 +132,7 @@ spec:
         echo "  Concurrency:   $CONCURRENCY"
         echo "  Results dir:   $RESULTS_DIR"
 
-        # --- 5. Run N iterations ---
+        # --- 4. Run N iterations ---
         echo "=== Running $ITERATIONS iterations ==="
         EVAL_START=$(date +%s)
 
@@ -175,18 +160,34 @@ spec:
         EVAL_END=$(date +%s)
         echo "Total evaluation time: $((EVAL_END - EVAL_START))s"
 
-        # --- 6. Aggregate results ---
-        echo "=== Aggregating results ==="
+    - name: aggregate-results
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
 
-        # Install Python deps for aggregation
-        dnf install -y --quiet python3 python3-pip 2>/dev/null || true
-        pip3 install --quiet --no-cache-dir pydantic pyyaml scipy 2>/dev/null || true
+        # --- 1. Clone / update pipeline repo ---
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR/.git" ]; then
+          git -C "$PIPELINE_DIR" fetch origin "$(params.pipeline-repo-revision)" --depth 1
+          git -C "$PIPELINE_DIR" -c advice.detachedHead=false checkout FETCH_HEAD
+        else
+          git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+            "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
+        fi
+
+        # --- 2. Install Python deps ---
+        pip install --quiet --no-cache-dir pydantic pyyaml scipy
 
         cd "$PIPELINE_DIR"
         export PYTHONPATH="$PIPELINE_DIR"
 
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
         REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        ITERATIONS=$(params.iterations)
 
+        # --- 3. Aggregate ---
+        echo "=== Aggregating results ==="
         python3 scripts/aggregate_ase.py \
           --results-dir "$RESULTS_DIR" \
           --output-dir "$REPORT_DIR" \
@@ -195,7 +196,7 @@ spec:
           --threshold "$(params.uplift-threshold)" \
           --pipeline-run-id "${PIPELINE_RUN_ID:-unknown}"
 
-        # --- 7. Emit Tekton results ---
+        # --- 4. Emit Tekton results ---
         echo -n "$RESULTS_DIR" > "$(results.results-dir.path)"
 
         python3 - "$REPORT_DIR/report.json" \
