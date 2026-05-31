@@ -142,6 +142,27 @@ spec:
         Maximum number of generate-validate retry attempts per generation
         step. Each failed attempt feeds validation errors back into the
         generation prompt.
+    # Evaluation engine selection
+    - name: eval-engine
+      type: string
+      default: "harbor"
+      description: >-
+        Evaluation engine: 'harbor' for full containerized A/B evaluation,
+        'ase' for lightweight agent-skills-eval LLM-as-a-judge,
+        'both' to run both engines.
+    - name: ase-iterations
+      type: string
+      default: "5"
+      description: Number of evaluation iterations for agent-skills-eval
+    - name: ase-concurrency
+      type: string
+      default: "1"
+      description: Parallel eval cases within a single agent-skills-eval run
+    - name: ase-judge-model
+      type: string
+      default: ""
+      description: >-
+        Judge model for agent-skills-eval (defaults to llm-model if empty)
 
   results:
     - name: recommendation
@@ -226,6 +247,8 @@ spec:
       params:
         - name: submission-dir
           value: $(params.submission-dir)
+        - name: eval-engine
+          value: $(params.eval-engine)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
@@ -265,8 +288,13 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 2: Scaffold treatment and control task directories
+    #         (Harbor path only — skipped for ASE-only evaluation)
     # ------------------------------------------------------------------
     - name: scaffold
+      when:
+        - input: $(params.eval-engine)
+          operator: in
+          values: ["harbor", "both"]
       runAfter: ["validate", "ai-review"]
       taskRef:
         name: scaffold-submission
@@ -285,8 +313,13 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 3: Build and push treatment/control container images
+    #         (Harbor path only — skipped for ASE-only evaluation)
     # ------------------------------------------------------------------
     - name: build-push
+      when:
+        - input: $(params.eval-engine)
+          operator: in
+          values: ["harbor", "both"]
       runAfter: ["scaffold"]
       taskRef:
         name: build-push-images
@@ -310,9 +343,14 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
-    # Step 4: Run Harbor A/B evaluation (N trials per variant)
+    # Step 4a: Run Harbor A/B evaluation (N trials per variant)
+    #          (Harbor path only — skipped for ASE-only evaluation)
     # ------------------------------------------------------------------
     - name: harbor-eval
+      when:
+        - input: $(params.eval-engine)
+          operator: in
+          values: ["harbor", "both"]
       runAfter: ["build-push"]
       timeout: "3h"
       taskRef:
@@ -353,27 +391,67 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
+    # Step 4b: Run agent-skills-eval lightweight evaluation
+    #          (ASE path only — skipped for Harbor-only evaluation)
+    # ------------------------------------------------------------------
+    - name: ase-eval
+      when:
+        - input: $(params.eval-engine)
+          operator: in
+          values: ["ase", "both"]
+      runAfter: ["validate"]
+      timeout: "2h"
+      taskRef:
+        name: ase-eval
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: judge-model
+          value: $(params.ase-judge-model)
+        - name: llm-api-base
+          value: $(params.llm-api-base)
+        - name: llm-api-key
+          value: $(params.llm-api-key)
+        - name: iterations
+          value: $(params.ase-iterations)
+        - name: concurrency
+          value: $(params.ase-concurrency)
+        - name: uplift-threshold
+          value: $(params.uplift-threshold)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
     # Step 5: Analyze results and produce statistical report
     # NOTE: analyze-report Task defined in APPENG-4985 — must be deployed
     #       to the cluster before this pipeline runs end-to-end.
+    # Runs after both harbor-eval and ase-eval (Tekton proceeds when
+    # skipped tasks are in runAfter). Uses filesystem conventions for
+    # results-dir instead of task result references to avoid skip
+    # propagation issues.
     # ------------------------------------------------------------------
     - name: analyze
-      runAfter: ["harbor-eval"]
+      runAfter: ["harbor-eval", "ase-eval"]
       taskRef:
         name: analyze-report
       params:
-        - name: results-dir
-          value: $(tasks.harbor-eval.results.results-dir)
         - name: submission-name
           value: $(tasks.validate.results.submission-name)
+        - name: eval-engine
+          value: $(params.eval-engine)
         - name: commit-sha
           value: $(params.revision)
         - name: pipeline-run-id
           value: $(context.pipelineRun.name)
-        - name: treatment-image-ref
-          value: $(tasks.build-push.results.treatment-image-ref)
-        - name: control-image-ref
-          value: $(tasks.build-push.results.control-image-ref)
         - name: harbor-fork-revision
           value: $(params.harbor-fork-revision)
         - name: uplift-threshold
@@ -412,6 +490,8 @@ spec:
 
     # ------------------------------------------------------------------
     # Step 7: Publish artifacts, PR comment, optional Quay promotion
+    # Uses analyze results and pipeline params (not skippable task results)
+    # to avoid Tekton skip propagation issues with conditional paths.
     # ------------------------------------------------------------------
     - name: publish
       runAfter: ["store-results"]
@@ -426,10 +506,8 @@ spec:
           value: $(context.pipelineRun.name)
         - name: recommendation
           value: $(tasks.analyze.results.recommendation)
-        - name: treatment-image-ref
-          value: $(tasks.build-push.results.treatment-image-ref)
-        - name: control-image-ref
-          value: $(tasks.build-push.results.control-image-ref)
+        - name: eval-engine
+          value: $(params.eval-engine)
         - name: commit-sha
           value: $(params.revision)
         - name: uplift-threshold
@@ -442,8 +520,6 @@ spec:
           value: $(params.repo-name)
         - name: pr-number
           value: $(params.pr-number)
-        - name: results-dir
-          value: $(tasks.harbor-eval.results.results-dir)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision

@@ -151,6 +151,53 @@ def upload_debug_artifacts(
     return uploaded
 
 
+def upload_ase_debug_artifacts(
+    results_dir: Path,
+    prefix: str,
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str = "ab-eval-reports",
+    secure: bool | None = None,
+) -> int:
+    """Upload ASE iteration artifacts (grading, prompts, outputs, timing) to MinIO.
+
+    Walks the agent-skills-eval results directory tree (iteration-N/eval-*/
+    with_skill|without_skill/) and uploads all files, preserving the relative
+    path structure under ``debug/``.
+    """
+    from minio import Minio
+
+    if not results_dir.is_dir():
+        logger.warning("ASE results dir does not exist, skipping debug upload: %s", results_dir)
+        return 0
+
+    parsed = urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    if secure is None:
+        secure = parsed.scheme == "https"
+
+    client = Minio(host, access_key=access_key, secret_key=secret_key, secure=secure)
+
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+    uploaded = 0
+    for fpath in sorted(results_dir.rglob("*")):
+        if not fpath.is_file():
+            continue
+        rel = fpath.relative_to(results_dir)
+        object_name = f"{prefix}/debug/{rel}"
+        try:
+            client.fput_object(bucket, object_name, str(fpath))
+            uploaded += 1
+        except Exception as exc:
+            logger.warning("Failed to upload %s: %s", fpath, exc)
+
+    logger.info("Uploaded %d ASE debug artifact files to s3://%s/%s/debug/", uploaded, bucket, prefix)
+    return uploaded
+
+
 def upload_scaffolded_configs(
     workspace_root: Path,
     submission_name: str,
@@ -426,7 +473,10 @@ def main() -> int:
     parser.add_argument("--pr-number", type=str, default="",
                         help="PR number for GitHub comment")
     parser.add_argument("--results-dir", type=Path, default=None,
-                        help="Path to Harbor results dir (uploads agent/verifier debug artifacts)")
+                        help="Path to results dir (Harbor or ASE) for debug artifact upload")
+    parser.add_argument("--eval-engine", type=str, default="harbor",
+                        choices=["harbor", "ase", "both"],
+                        help="Evaluation engine used — determines debug artifact layout")
     parser.add_argument("--workspace-root", type=Path, default=None,
                         help="Workspace root for uploading scaffolded configs")
     parser.add_argument("--minio-endpoint", type=str, default=None,
@@ -460,7 +510,12 @@ def main() -> int:
             upload_ok = False
             success = False
         if prefix and args.results_dir:
-            upload_debug_artifacts(
+            _upload_fn = (
+                upload_ase_debug_artifacts
+                if args.eval_engine in ("ase", "both")
+                else upload_debug_artifacts
+            )
+            _upload_fn(
                 results_dir=args.results_dir,
                 prefix=prefix,
                 endpoint=minio_endpoint,

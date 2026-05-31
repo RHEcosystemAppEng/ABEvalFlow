@@ -57,7 +57,13 @@ spec:
     - name: results-dir
       type: string
       default: ""
-      description: Path to Harbor results dir for debug artifact upload (agent/verifier logs)
+      description: Path to results dir for debug artifact upload (Harbor or ASE)
+    - name: eval-engine
+      type: string
+      default: "harbor"
+      description: >-
+        Evaluation engine ('harbor', 'ase', 'both'). Controls debug artifact
+        upload layout and which cleanup steps run.
     - name: minio-bucket
       type: string
       default: "ab-eval-reports"
@@ -152,10 +158,15 @@ spec:
         if [ -n "$(params.pr-number)" ]; then
           ARGS+=(--pr-number "$(params.pr-number)")
         fi
-        if [ -n "$(params.results-dir)" ]; then
-          ARGS+=(--results-dir "$(params.results-dir)")
+        RESULTS_DIR="$(params.results-dir)"
+        if [ -z "$RESULTS_DIR" ] && [ "$(params.eval-engine)" != "harbor" ]; then
+          RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        fi
+        if [ -n "$RESULTS_DIR" ]; then
+          ARGS+=(--results-dir "$RESULTS_DIR")
         fi
 
+        ARGS+=(--eval-engine "$(params.eval-engine)")
         ARGS+=(--workspace-root "$(workspaces.source.path)")
 
         python scripts/publish.py "${ARGS[@]}"

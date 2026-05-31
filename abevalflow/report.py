@@ -58,6 +58,10 @@ class Provenance(BaseModel):
     treatment_image_ref: str | None = None
     control_image_ref: str | None = None
     harbor_fork_revision: str | None = None
+    eval_engine: str = Field(
+        default="harbor",
+        description="Evaluation engine used: 'harbor', 'ase', or 'both'",
+    )
 
 
 class AnalysisSummary(BaseModel):

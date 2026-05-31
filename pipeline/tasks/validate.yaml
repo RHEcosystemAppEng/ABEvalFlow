@@ -24,6 +24,13 @@ spec:
       type: string
       default: "main"
       description: Branch or SHA of the pipeline repo to use for scripts
+    - name: eval-engine
+      type: string
+      default: "harbor"
+      description: >-
+        Evaluation engine (harbor, ase, both). Controls which validation
+        checks are run — Harbor checks require instruction.md and tests/,
+        ASE checks require evals/evals.json and SKILL.md frontmatter.
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions repository
@@ -78,6 +85,7 @@ spec:
         pip install --quiet --no-cache-dir pydantic pyyaml
 
         python scripts/validate.py "$SUBMISSION_PATH" \
+          --eval-engine "$(params.eval-engine)" \
           | tee /tmp/validation-output.json
 
         cat /tmp/validation-output.json | tr -d '\n' \
