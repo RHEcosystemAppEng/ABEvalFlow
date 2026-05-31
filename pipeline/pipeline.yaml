@@ -163,6 +163,14 @@ spec:
       default: ""
       description: >-
         Judge model for agent-skills-eval (defaults to llm-model if empty)
+    # Security scanning
+    - name: cisco-scan
+      type: string
+      default: ""
+      description: >-
+        Cisco skill-scanner mode override. Empty string uses submission's
+        metadata.yaml preference. 'disabled' skips scan, 'warn' reports
+        findings but continues, 'block' fails on HIGH/CRITICAL findings.
 
   results:
     - name: recommendation
@@ -287,6 +295,34 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
+    # Step 1d: Security scan (optional, after validation)
+    # Runs Cisco skill-scanner to detect prompt injection, data
+    # exfiltration, and malicious code patterns. Skipped when disabled.
+    # ------------------------------------------------------------------
+    - name: cisco-scan
+      runAfter: ["validate"]
+      taskRef:
+        name: cisco-scan
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: pipeline-scan-mode
+          value: $(params.cisco-scan)
+        - name: submission-scan-mode
+          value: $(tasks.validate.results.security-scan)
+        - name: use-llm
+          value: $(tasks.validate.results.security-scan-use-llm)
+        - name: llm-api-base
+          value: $(params.llm-base-url)
+        - name: llm-api-key
+          value: $(params.llm-api-key)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
     # Step 2: Scaffold treatment and control task directories
     #         (Harbor path only — skipped for ASE-only evaluation)
     # ------------------------------------------------------------------
@@ -295,7 +331,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["harbor", "both"]
-      runAfter: ["validate", "ai-review"]
+      runAfter: ["validate", "ai-review", "cisco-scan"]
       taskRef:
         name: scaffold-submission
       params:
@@ -399,7 +435,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["ase", "both"]
-      runAfter: ["validate"]
+      runAfter: ["validate", "cisco-scan"]
       timeout: "2h"
       taskRef:
         name: ase-eval
@@ -456,6 +492,8 @@ spec:
           value: $(params.harbor-fork-revision)
         - name: uplift-threshold
           value: $(params.uplift-threshold)
+        - name: cisco-scan-mode
+          value: $(tasks.cisco-scan.results.effective-mode)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision

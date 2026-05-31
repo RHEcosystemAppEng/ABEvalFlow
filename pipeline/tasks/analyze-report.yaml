@@ -48,6 +48,12 @@ spec:
       type: string
       default: "main"
       description: Branch or SHA of the pipeline repo to use for scripts
+    - name: cisco-scan-mode
+      type: string
+      default: "disabled"
+      description: >-
+        Cisco security scan mode: 'disabled', 'warn', or 'block'.
+        When not disabled, includes security scan results in the report.
   workspaces:
     - name: source
       description: Workspace containing the evaluation results and report output
@@ -111,6 +117,7 @@ spec:
             --submission-name "$(params.submission-name)"
             --threshold "$(params.uplift-threshold)"
             --eval-engine harbor
+            --cisco-scan-mode "$(params.cisco-scan-mode)"
           )
           if [ -n "$(params.commit-sha)" ]; then
             ARGS+=(--commit-sha "$(params.commit-sha)")
@@ -133,6 +140,7 @@ spec:
             --submission-name "$(params.submission-name)"
             --threshold "$(params.uplift-threshold)"
             --eval-engine harbor
+            --cisco-scan-mode "$(params.cisco-scan-mode)"
           )
           if [ -n "$(params.commit-sha)" ]; then
             ARGS+=(--commit-sha "$(params.commit-sha)")
@@ -143,6 +151,83 @@ spec:
           python scripts/analyze.py "${ARGS[@]}"
 
           echo "=== Both mode: ASE report already at $REPORT_DIR ==="
+        fi
+
+        # --- 2b. Enrich report with security scan results (ASE/both only) ---
+        # Harbor mode already includes security_scans via scripts/analyze.py.
+        # This step enriches pre-generated ASE reports that bypass analyze.py.
+        CISCO_SCAN_MODE="$(params.cisco-scan-mode)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$CISCO_SCAN_MODE" != "disabled" ] && [ -f "$REPORT_DIR/cisco-scan.json" ]; then
+          echo "=== Enriching report with security scan results ==="
+          python3 - "$REPORT_DIR" "$CISCO_SCAN_MODE" <<'ENRICH_SCRIPT'
+        import json
+        import sys
+        from pathlib import Path
+
+        report_dir = Path(sys.argv[1])
+        scan_mode = sys.argv[2]
+
+        report_path = report_dir / 'report.json'
+        scan_path = report_dir / 'cisco-scan.json'
+
+        if not report_path.exists() or not scan_path.exists():
+            sys.exit(0)
+
+        try:
+            report = json.loads(report_path.read_text())
+            scan_data = json.loads(scan_path.read_text())
+        except json.JSONDecodeError as e:
+            print(f'WARNING: Failed to parse scan JSON: {e}', file=sys.stderr)
+            sys.exit(0)  # Continue pipeline, just skip enrichment
+
+        # Build SecurityScanResult structure
+        findings = []
+        for f in scan_data.get('findings', []):
+            findings.append({
+                'rule_id': f.get('rule_id', f.get('id', 'unknown')),
+                'severity': f.get('severity', 'info').lower(),
+                'message': f.get('message', f.get('description', '')),
+                'file_path': f.get('file_path', f.get('location', {}).get('file')),
+                'line_number': f.get('line_number', f.get('location', {}).get('line')),
+                'scanner': 'cisco',
+            })
+
+        high_or_critical = sum(1 for f in findings if f['severity'] in ('critical', 'high'))
+        passed = scan_mode != 'block' or high_or_critical == 0
+
+        scan_result = {
+            'scanner': 'cisco',
+            'scan_mode': scan_mode,
+            'findings': findings,
+            'passed': passed,
+            'sarif_path': str(report_dir / 'cisco-scan.sarif'),
+            'json_path': str(scan_path),
+            'scan_duration_seconds': None,
+        }
+
+        # Append to security_scans
+        if 'security_scans' not in report:
+            report['security_scans'] = []
+        report['security_scans'].append(scan_result)
+
+        report_path.write_text(json.dumps(report, indent=2))
+        print(f'Added security scan: {len(findings)} findings, passed={passed}')
+        ENRICH_SCRIPT
+
+          # Regenerate report.md to include security section
+          echo "Regenerating report.md with security section..."
+          python3 -c "
+        import sys
+        sys.path.insert(0, '$PIPELINE_DIR')
+        from abevalflow.report import AnalysisResult
+        from scripts.analyze import render_markdown
+        from pathlib import Path
+
+        report_dir = Path('$REPORT_DIR')
+        report = AnalysisResult.model_validate_json((report_dir / 'report.json').read_text())
+        (report_dir / 'report.md').write_text(render_markdown(report))
+        print('Regenerated report.md')
+        "
         fi
 
         # --- 3. Extract results for Tekton ---

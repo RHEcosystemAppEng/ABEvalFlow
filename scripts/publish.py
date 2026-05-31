@@ -75,6 +75,7 @@ def upload_reports(
         logger.info("Created bucket: %s", bucket)
 
     uploaded = 0
+    # Core report files (required)
     for filename in ("report.json", "report.md"):
         filepath = report_dir / filename
         if not filepath.exists():
@@ -85,6 +86,14 @@ def upload_reports(
         client.fput_object(bucket, object_name, str(filepath))
         logger.info("Uploaded %s -> s3://%s/%s", filepath, bucket, object_name)
         uploaded += 1
+
+    # Security scan files (optional) — stored in security_scans/ subfolder
+    for filename in ("cisco-scan.json", "cisco-scan.sarif"):
+        filepath = report_dir / filename
+        if filepath.exists():
+            object_name = f"{prefix}/security_scans/{filename}"
+            client.fput_object(bucket, object_name, str(filepath))
+            logger.info("Uploaded %s -> s3://%s/%s", filepath, bucket, object_name)
 
     if uploaded == 0:
         logger.error("No report files found in %s", report_dir)

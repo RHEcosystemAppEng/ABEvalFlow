@@ -11,6 +11,10 @@ from abevalflow.report import (
     AnalysisResult,
     Provenance,
     Recommendation,
+    ScanMode,
+    SecurityFinding,
+    SecurityScanResult,
+    SecuritySeverity,
     TrialResult,
     VariantSummary,
 )
@@ -501,3 +505,128 @@ class TestMainCLI:
         ])
         md = (out_dir / "report.md").read_text()
         assert "# A/B Evaluation Report" in md
+
+
+# ---------------------------------------------------------------------------
+# TestSecurityModels
+# ---------------------------------------------------------------------------
+
+class TestSecurityModels:
+    """Tests for SecurityFinding and SecurityScanResult Pydantic models."""
+
+    def test_security_finding_basic(self):
+        finding = SecurityFinding(
+            rule_id="SKILL-001",
+            severity=SecuritySeverity.HIGH,
+            message="Potential prompt injection",
+            file_path="skills/SKILL.md",
+            line_number=42,
+            scanner="cisco",
+        )
+        assert finding.rule_id == "SKILL-001"
+        assert finding.severity == SecuritySeverity.HIGH
+        assert finding.scanner == "cisco"
+
+    def test_security_finding_optional_fields(self):
+        finding = SecurityFinding(
+            rule_id="SKILL-002",
+            severity=SecuritySeverity.MEDIUM,
+            message="Suspicious pattern",
+            scanner="cisco",
+        )
+        assert finding.file_path is None
+        assert finding.line_number is None
+
+    def test_security_scan_result_empty(self):
+        result = SecurityScanResult(
+            scanner="cisco",
+            scan_mode=ScanMode.WARN,
+        )
+        assert result.scanner == "cisco"
+        assert result.scan_mode == ScanMode.WARN
+        assert result.findings == []
+        assert result.passed is True
+
+    def test_severity_counts_computed_from_findings(self):
+        findings = [
+            SecurityFinding(rule_id="R1", severity=SecuritySeverity.CRITICAL, message="m1", scanner="cisco"),
+            SecurityFinding(rule_id="R2", severity=SecuritySeverity.HIGH, message="m2", scanner="cisco"),
+            SecurityFinding(rule_id="R3", severity=SecuritySeverity.HIGH, message="m3", scanner="cisco"),
+            SecurityFinding(rule_id="R4", severity=SecuritySeverity.MEDIUM, message="m4", scanner="cisco"),
+            SecurityFinding(rule_id="R5", severity=SecuritySeverity.LOW, message="m5", scanner="cisco"),
+            SecurityFinding(rule_id="R6", severity=SecuritySeverity.LOW, message="m6", scanner="cisco"),
+            SecurityFinding(rule_id="R7", severity=SecuritySeverity.INFO, message="m7", scanner="cisco"),
+        ]
+        result = SecurityScanResult(
+            scanner="cisco",
+            scan_mode=ScanMode.BLOCK,
+            findings=findings,
+            passed=False,
+        )
+        counts = result.severity_counts
+        assert counts["critical"] == 1
+        assert counts["high"] == 2
+        assert counts["medium"] == 1
+        assert counts["low"] == 2
+        assert counts["info"] == 1
+
+    def test_severity_counts_empty_findings(self):
+        result = SecurityScanResult(
+            scanner="cisco",
+            scan_mode=ScanMode.WARN,
+            findings=[],
+        )
+        counts = result.severity_counts
+        assert counts == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+
+    def test_security_scan_json_roundtrip(self):
+        findings = [
+            SecurityFinding(
+                rule_id="SKILL-001",
+                severity=SecuritySeverity.HIGH,
+                message="Test finding",
+                file_path="test.md",
+                line_number=10,
+                scanner="cisco",
+            ),
+        ]
+        result = SecurityScanResult(
+            scanner="cisco",
+            scan_mode=ScanMode.BLOCK,
+            findings=findings,
+            passed=False,
+            sarif_path="/tmp/scan.sarif",
+            json_path="/tmp/scan.json",
+            scan_duration_seconds=5.2,
+        )
+        json_str = result.model_dump_json()
+        loaded = SecurityScanResult.model_validate_json(json_str)
+        assert loaded.scanner == "cisco"
+        assert loaded.scan_mode == ScanMode.BLOCK
+        assert len(loaded.findings) == 1
+        assert loaded.findings[0].severity == SecuritySeverity.HIGH
+        assert loaded.severity_counts["high"] == 1
+        assert loaded.passed is False
+        assert loaded.scan_duration_seconds == 5.2
+
+    def test_analysis_result_with_security_scans(self, results_dir: Path):
+        result = build_analysis(results_dir, "my-submission")
+        security_scan = SecurityScanResult(
+            scanner="cisco",
+            scan_mode=ScanMode.WARN,
+            findings=[
+                SecurityFinding(
+                    rule_id="R1",
+                    severity=SecuritySeverity.MEDIUM,
+                    message="Warning",
+                    scanner="cisco",
+                ),
+            ],
+            passed=True,
+        )
+        result.security_scans = [security_scan]
+        json_str = result.model_dump_json(indent=2)
+        loaded = AnalysisResult.model_validate_json(json_str)
+        assert len(loaded.security_scans) == 1
+        assert loaded.security_scans[0].scanner == "cisco"
+        assert loaded.security_scans[0].severity_counts["medium"] == 1

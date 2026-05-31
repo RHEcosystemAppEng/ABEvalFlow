@@ -1,0 +1,203 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: cisco-scan
+  namespace: ab-eval-flow
+spec:
+  description: >-
+    Runs Cisco AI Defense skill-scanner as part of the security scanning phase.
+    Triggered when security_scan mode is not 'disabled'. Checks for prompt
+    injection, data exfiltration, and malicious code patterns. Future scanners
+    (Snyk, etc.) follow the same pattern.
+  params:
+    - name: submission-dir
+      type: string
+      description: Path to the submission directory within the workspace
+    - name: submission-name
+      type: string
+      description: Validated submission name (from metadata.yaml) for report path
+    - name: pipeline-scan-mode
+      type: string
+      default: ""
+      description: >-
+        Pipeline-level scan mode override. Empty uses submission preference.
+    - name: submission-scan-mode
+      type: string
+      default: "warn"
+      description: >-
+        Submission's preferred scan mode from metadata.yaml.
+    - name: use-llm
+      type: string
+      default: "false"
+      description: >-
+        Enable LLM-based semantic analysis (true/false).
+    - name: llm-api-base
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000/v1"
+      description: LLM API base URL for semantic analysis.
+    - name: llm-api-key
+      type: string
+      default: ""
+      description: LLM API key (required when use-llm is true).
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned submissions repository
+  results:
+    - name: findings-count
+      description: Total number of security findings
+    - name: critical-findings
+      description: Number of CRITICAL severity findings
+    - name: high-findings
+      description: Number of HIGH severity findings
+    - name: passed
+      description: Whether scan passed (true if no HIGH/CRITICAL in block mode, or warn mode)
+    - name: effective-mode
+      description: The actual scan mode used (disabled, warn, block)
+  steps:
+    - name: run-cisco-scan
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Compute effective scan mode: pipeline param takes precedence if set
+        PIPELINE_MODE="$(params.pipeline-scan-mode)"
+        SUBMISSION_MODE="$(params.submission-scan-mode)"
+
+        if [ -n "$PIPELINE_MODE" ]; then
+          SCAN_MODE="$PIPELINE_MODE"
+          echo "Using pipeline-level scan mode: $SCAN_MODE"
+        else
+          SCAN_MODE="$SUBMISSION_MODE"
+          echo "Using submission scan mode from metadata.yaml: $SCAN_MODE"
+        fi
+
+        # Write effective mode for downstream tasks
+        echo -n "$SCAN_MODE" > "$(results.effective-mode.path)"
+
+        # Skip if disabled
+        if [ "$SCAN_MODE" = "disabled" ]; then
+          echo "Security scanning is disabled, skipping"
+          echo -n "0" > "$(results.findings-count.path)"
+          echo -n "0" > "$(results.critical-findings.path)"
+          echo -n "0" > "$(results.high-findings.path)"
+          echo -n "true" > "$(results.passed.path)"
+          exit 0
+        fi
+
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        # Use submission-name (from metadata.yaml) for report path to match analyze.py
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        SARIF_PATH="$REPORT_DIR/cisco-scan.sarif"
+        JSON_PATH="$REPORT_DIR/cisco-scan.json"
+
+        mkdir -p "$REPORT_DIR"
+
+        echo "=== Installing Cisco skill-scanner ==="
+        pip install --quiet --no-cache-dir 'cisco-ai-skill-scanner==2.0.11' 2>&1 | tail -3
+
+        echo "=== Running Cisco skill-scanner ==="
+        echo "Submission: $SUBMISSION_PATH"
+        echo "Mode: $SCAN_MODE"
+
+        START_TIME=$(date +%s)
+
+        # Build scanner command with native --fail-on-severity for block mode
+        SCANNER_CMD=(
+          skill-scanner scan "$SUBMISSION_PATH"
+          --format json
+          --output-json "$JSON_PATH"
+          --output-sarif "$SARIF_PATH"
+          --lenient
+        )
+
+        # In block mode, use scanner's native fail-on-severity flag
+        if [ "$SCAN_MODE" = "block" ]; then
+          SCANNER_CMD+=(--fail-on-severity high)
+        fi
+
+        # Add LLM-based semantic analysis if enabled
+        USE_LLM="$(params.use-llm)"
+        if [ "$USE_LLM" = "true" ]; then
+          echo "LLM semantic analysis enabled"
+          SCANNER_CMD+=(
+            --use-llm
+            --llm-provider openai-compatible
+          )
+          # Standard OpenAI SDK env vars for openai-compatible provider
+          export OPENAI_API_KEY="$(params.llm-api-key)"
+          export OPENAI_BASE_URL="$(params.llm-api-base)"
+        fi
+
+        # Run the scanner - capture exit code
+        set +e
+        "${SCANNER_CMD[@]}" 2>&1 | tee /tmp/scan-output.txt
+        SCAN_EXIT=$?
+        set -e
+
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo "Scan completed in ${DURATION}s (exit code: $SCAN_EXIT)"
+
+        # Parse JSON results in a single Python call using env var for safe path handling
+        export SCAN_JSON="$JSON_PATH"
+        PARSE_OUTPUT=$(python3 -c "
+        import json
+        import os
+
+        json_path = os.environ.get('SCAN_JSON', '')
+        counts = {'total': 0, 'critical': 0, 'high': 0}
+
+        try:
+            with open(json_path) as f:
+                data = json.load(f)
+            findings = data.get('findings', [])
+            counts['total'] = len(findings)
+            for f in findings:
+                sev = f.get('severity', '').lower()
+                if sev in counts:
+                    counts[sev] += 1
+        except Exception as e:
+            print(f'ERROR: Failed to parse JSON: {e}', file=__import__('sys').stderr)
+
+        for k, v in counts.items():
+            print(f'{k}={v}')
+        ")
+
+        # Parse the output
+        FINDINGS_COUNT=$(echo "$PARSE_OUTPUT" | grep '^total=' | cut -d= -f2 || echo "0")
+        CRITICAL_COUNT=$(echo "$PARSE_OUTPUT" | grep '^critical=' | cut -d= -f2 || echo "0")
+        HIGH_COUNT=$(echo "$PARSE_OUTPUT" | grep '^high=' | cut -d= -f2 || echo "0")
+
+        echo "Findings: $FINDINGS_COUNT total (Critical: $CRITICAL_COUNT, High: $HIGH_COUNT)"
+
+        # Write results
+        echo -n "$FINDINGS_COUNT" > "$(results.findings-count.path)"
+        echo -n "$CRITICAL_COUNT" > "$(results.critical-findings.path)"
+        echo -n "$HIGH_COUNT" > "$(results.high-findings.path)"
+
+        # Determine pass/fail
+        # Scanner crash (no JSON output) fails the task in both modes (fail-closed)
+        # In block mode: also fail on HIGH/CRITICAL findings
+        # In warn mode: findings are informational but scanner must succeed
+        PASSED="true"
+
+        # Check if scanner crashed (no JSON produced)
+        if [ ! -f "$JSON_PATH" ]; then
+          echo "ERROR: Scanner failed to produce output (exit code: $SCAN_EXIT)"
+          PASSED="false"
+        elif [ "$SCAN_MODE" = "block" ] && [ "$SCAN_EXIT" -ne 0 ]; then
+          PASSED="false"
+          echo "BLOCKING: Scanner exited with code $SCAN_EXIT (HIGH/CRITICAL findings)"
+        fi
+
+        echo -n "$PASSED" > "$(results.passed.path)"
+        echo "Mode: $SCAN_MODE, Passed: $PASSED"
+
+        # Fail the task if scanner crashed or (block mode + findings)
+        if [ "$PASSED" = "false" ]; then
+          echo "=== Cisco scan FAILED ==="
+          exit 1
+        fi
+
+        echo "=== Cisco scan complete ==="
