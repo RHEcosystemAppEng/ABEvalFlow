@@ -126,6 +126,14 @@ class Provenance(BaseModel):
 class AnalysisSummary(BaseModel):
     """Comparison statistics between treatment and control."""
 
+    related_pr: str | None = Field(
+        default=None,
+        description="URL of the PR that triggered this evaluation",
+    )
+    llm: str | None = Field(
+        default=None,
+        description="LLM model used for evaluation (e.g. 'Claude Sonnet 4.6 (vertex_ai)')",
+    )
     treatment: VariantSummary
     control: VariantSummary
     uplift: float = Field(description="treatment pass_rate - control pass_rate (secondary; see mean_reward_gap)")

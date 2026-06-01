@@ -223,6 +223,8 @@ def build_analysis(
     submission_name: str,
     threshold: float = 0.0,
     provenance: Provenance | None = None,
+    related_pr: str | None = None,
+    llm_label: str | None = None,
 ) -> AnalysisResult:
     """Parse results, compute stats, and assemble the full analysis model."""
     treatment_trials = parse_variant_trials(results_dir / "treatment")
@@ -262,6 +264,8 @@ def build_analysis(
         submission_name=submission_name,
         provenance=provenance or Provenance(),
         summary=AnalysisSummary(
+            related_pr=related_pr,
+            llm=llm_label,
             treatment=t_summary,
             control=c_summary,
             uplift=uplift,
@@ -305,6 +309,12 @@ def render_markdown(result: AnalysisResult) -> str:
 
     # --- Summary table ---
     lines.append("## Summary\n")
+    if s.related_pr:
+        lines.append(f"* Related PR: {s.related_pr}")
+    if s.llm:
+        lines.append(f"* LLM: {s.llm}")
+    if s.related_pr or s.llm:
+        lines.append("")
     lines.append("| Metric | Treatment | Control |")
     lines.append("|--------|-----------|---------|")
     lines.append(f"| Trials | {t.n_trials} | {c.n_trials} |")
@@ -319,9 +329,10 @@ def render_markdown(result: AnalysisResult) -> str:
 
     # --- Comparison ---
     lines.append("## Comparison\n")
-    lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
     if s.mean_reward_gap is not None:
-        lines.append(f"- **Mean reward gap:** {s.mean_reward_gap:+.4f}")
+        lines.append(f"- **Mean reward gap (Uplift):** {s.mean_reward_gap:+.4f}")
+    else:
+        lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
     lines.append(
         f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}"
     )
@@ -438,6 +449,18 @@ def main(argv: list[str] | None = None) -> int:
         default="disabled",
         help="Cisco security scan mode (disabled, warn, block)",
     )
+    parser.add_argument(
+        "--pr-url",
+        type=str,
+        default=None,
+        help="URL of the PR that triggered this evaluation",
+    )
+    parser.add_argument(
+        "--llm-label",
+        type=str,
+        default=None,
+        help="LLM model label for the report (e.g. 'Claude Sonnet 4.6 (vertex_ai)')",
+    )
 
     args = parser.parse_args(argv)
 
@@ -459,6 +482,8 @@ def main(argv: list[str] | None = None) -> int:
         submission_name=args.submission_name,
         threshold=args.threshold,
         provenance=provenance,
+        related_pr=args.pr_url,
+        llm_label=args.llm_label,
     )
 
     # Include security scan results if available

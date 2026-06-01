@@ -54,6 +54,22 @@ spec:
       description: >-
         Cisco security scan mode: 'disabled', 'warn', or 'block'.
         When not disabled, includes security scan results in the report.
+    - name: llm-model
+      type: string
+      default: ""
+      description: >-
+        LLM model name used for evaluation (e.g. claude-sonnet).
+        Used to generate a human-readable label in the report.
+    - name: repo-name
+      type: string
+      default: ""
+      description: >-
+        GitHub repo (org/name) for constructing PR URL
+    - name: pr-number
+      type: string
+      default: ""
+      description: >-
+        PR number that triggered this pipeline run
   workspaces:
     - name: source
       description: Workspace containing the evaluation results and report output
@@ -108,7 +124,44 @@ spec:
           fi
           echo "Found ASE report at $REPORT_DIR"
 
-        elif [ "$EVAL_ENGINE" = "harbor" ]; then
+          # Enrich ASE report with related_pr and llm fields
+          if [ -n "$PR_URL" ] || [ -n "$LLM_LABEL" ]; then
+            echo "=== Enriching ASE report with PR/LLM metadata ==="
+            python3 - "$REPORT_DIR" "$PR_URL" "$LLM_LABEL" <<'ENRICH_PR_LLM'
+        import json, sys
+        from pathlib import Path
+
+        report_dir, pr_url, llm_label = sys.argv[1], sys.argv[2], sys.argv[3]
+        report_path = Path(report_dir) / 'report.json'
+        report = json.loads(report_path.read_text())
+
+        if 'summary' in report:
+            if pr_url:
+                report['summary']['related_pr'] = pr_url
+            if llm_label:
+                report['summary']['llm'] = llm_label
+            report_path.write_text(json.dumps(report, indent=2))
+            print('Enriched report with PR URL and LLM label')
+        ENRICH_PR_LLM
+          fi
+
+        el        # Construct PR URL and LLM label for report metadata
+        PR_URL=""
+        if [ -n "$(params.repo-name)" ] && [ -n "$(params.pr-number)" ]; then
+          PR_URL="https://github.com/$(params.repo-name)/pull/$(params.pr-number)"
+        fi
+
+        LLM_LABEL=""
+        if [ -n "$(params.llm-model)" ]; then
+          # Map model name to human-readable label
+          case "$(params.llm-model)" in
+            claude-sonnet*) LLM_LABEL="Claude Sonnet 4.6 (vertex_ai)" ;;
+            claude-haiku*) LLM_LABEL="Claude Haiku 3.5 (vertex_ai)" ;;
+            *) LLM_LABEL="$(params.llm-model)" ;;
+          esac
+        fi
+
+        if [ "$EVAL_ENGINE" = "harbor" ]; then
           # Harbor: run full analysis from raw trial results
           echo "=== Harbor mode: running analysis ==="
           ARGS=(
@@ -127,6 +180,12 @@ spec:
           fi
           if [ -n "$(params.harbor-fork-revision)" ]; then
             ARGS+=(--harbor-fork-revision "$(params.harbor-fork-revision)")
+          fi
+          if [ -n "$PR_URL" ]; then
+            ARGS+=(--pr-url "$PR_URL")
+          fi
+          if [ -n "$LLM_LABEL" ]; then
+            ARGS+=(--llm-label "$LLM_LABEL")
           fi
           python scripts/analyze.py "${ARGS[@]}"
 
@@ -147,6 +206,12 @@ spec:
           fi
           if [ -n "$(params.pipeline-run-id)" ]; then
             ARGS+=(--pipeline-run-id "$(params.pipeline-run-id)")
+          fi
+          if [ -n "$PR_URL" ]; then
+            ARGS+=(--pr-url "$PR_URL")
+          fi
+          if [ -n "$LLM_LABEL" ]; then
+            ARGS+=(--llm-label "$LLM_LABEL")
           fi
           python scripts/analyze.py "${ARGS[@]}"
 

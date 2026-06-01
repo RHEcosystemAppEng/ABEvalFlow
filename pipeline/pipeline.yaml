@@ -498,6 +498,12 @@ spec:
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
           value: $(params.pipeline-repo-revision)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: repo-name
+          value: $(params.repo-name)
+        - name: pr-number
+          value: $(params.pr-number)
       workspaces:
         - name: source
           workspace: shared-workspace
