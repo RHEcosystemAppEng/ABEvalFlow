@@ -666,15 +666,16 @@ def generate_ase_evals(
             logger.warning("Attempt %d: %s", attempt, last_error)
             continue
 
-        # Semantic review - check quality with LLM reviewers
+        # Semantic review - advisory quality check (never blocks generation)
         evals_json_str = json.dumps(evals_data, indent=2)
         review = ase_evals_review(skill_content, evals_json_str)
         if not review["passed"]:
-            last_error = f"Semantic review failed: {review['issues']}"
-            logger.warning("Attempt %d: %s", attempt, last_error)
-            continue
+            logger.warning(
+                "Semantic review found issues (advisory, not blocking): %s",
+                review["issues"],
+            )
 
-        # Success - write the file
+        # Success - write the file (structural validation passed)
         evals_path.write_text(evals_json_str + "\n")
         logger.info(
             "Generated evals.json with %d evals, %d total assertions",

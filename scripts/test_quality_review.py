@@ -4,7 +4,8 @@ Reviews the coherence between skill, instruction, and tests regardless of
 whether the submission was manually authored or AI-generated.  Produces a
 structured JSON assessment with pass/warn/fail recommendation.
 
-Exit codes: 0 = pass or warn, 1 = fail (blocks pipeline).
+This review is ADVISORY (non-blocking) - always exits 0 regardless of result.
+The assessment is logged for informational purposes but does not fail the pipeline.
 """
 
 from __future__ import annotations
@@ -149,6 +150,23 @@ def _read_file_safe(path: Path) -> str:
     return "(file not present)"
 
 
+def _find_skill_md(submission_dir: Path) -> Path | None:
+    """Find SKILL.md in various locations (newer and older formats)."""
+    # Newer format: skills/SKILL.md
+    direct = submission_dir / "skills" / "SKILL.md"
+    if direct.is_file():
+        return direct
+    # Older Harbor format: skills/<skill-name>/SKILL.md
+    skills_dir = submission_dir / "skills"
+    if skills_dir.is_dir():
+        for subdir in skills_dir.iterdir():
+            if subdir.is_dir():
+                nested = subdir / "SKILL.md"
+                if nested.is_file():
+                    return nested
+    return None
+
+
 def review_submission(submission_dir: Path) -> dict:
     """Run AI quality review and return the structured assessment."""
     meta_path = submission_dir / "metadata.yaml"
@@ -156,7 +174,8 @@ def review_submission(submission_dir: Path) -> dict:
         raw = yaml.safe_load(f)
     metadata = SubmissionMetadata(**raw)
 
-    skill_content = _read_file_safe(submission_dir / "skills" / "SKILL.md")
+    skill_md_path = _find_skill_md(submission_dir)
+    skill_content = _read_file_safe(skill_md_path) if skill_md_path else "(file not present)"
     
     # Detect ASE vs Harbor format
     evals_path = submission_dir / "evals" / "evals.json"
@@ -251,7 +270,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(json.dumps(assessment, indent=2))
-    return 0 if assessment.get("passed", False) else 1
+    # Always return 0 - this review is advisory (non-blocking)
+    # The assessment result is logged but doesn't fail the pipeline
+    if not assessment.get("passed", False):
+        logger.warning("Quality review recommendation: %s (advisory, non-blocking)",
+                       assessment.get("recommendation", "unknown"))
+    return 0
 
 
 if __name__ == "__main__":

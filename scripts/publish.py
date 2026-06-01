@@ -48,15 +48,17 @@ def upload_reports(
     secret_key: str,
     bucket: str = "ab-eval-reports",
     secure: bool | None = None,
+    report_prefix: str | None = None,
 ) -> str | None:
     """Upload report.json and report.md to MinIO.
 
     Returns the artifact prefix on success, None on failure.
     ``secure`` is auto-detected from the endpoint scheme when not provided.
+    ``report_prefix`` overrides auto-generated prefix if provided.
     """
     from minio import Minio
 
-    prefix = _build_artifact_prefix(submission_name, pipeline_run_id)
+    prefix = report_prefix or _build_artifact_prefix(submission_name, pipeline_run_id)
 
     parsed = urlparse(endpoint)
     host = parsed.netloc or parsed.path
@@ -88,12 +90,15 @@ def upload_reports(
         uploaded += 1
 
     # Security scan files (optional) — stored in security_scans/ subfolder
-    for filename in ("security-scan.json", "security-scan.sarif"):
-        filepath = report_dir / filename
-        if filepath.exists():
-            object_name = f"{prefix}/security_scans/{filename}"
-            client.fput_object(bucket, object_name, str(filepath))
-            logger.info("Uploaded %s -> s3://%s/%s", filepath, bucket, object_name)
+    # NOTE: When report_prefix is provided, security scans are already uploaded
+    # by the security-scan task, so we skip re-uploading them here.
+    if not report_prefix:
+        for filename in ("security-scan.json", "security-scan.sarif"):
+            filepath = report_dir / filename
+            if filepath.exists():
+                object_name = f"{prefix}/security_scans/{filename}"
+                client.fput_object(bucket, object_name, str(filepath))
+                logger.info("Uploaded %s -> s3://%s/%s", filepath, bucket, object_name)
 
     if uploaded == 0:
         logger.error("No report files found in %s", report_dir)
@@ -494,6 +499,8 @@ def main() -> int:
     parser.add_argument("--minio-endpoint", type=str, default=None,
                         help="MinIO endpoint (default: MINIO_ENDPOINT env var)")
     parser.add_argument("--minio-bucket", type=str, default="ab-eval-reports")
+    parser.add_argument("--report-prefix", type=str, default="",
+                        help="Pre-computed MinIO prefix (skips generating new timestamp)")
     args = parser.parse_args()
 
     import os
@@ -514,6 +521,7 @@ def main() -> int:
             access_key=minio_access_key,
             secret_key=minio_secret_key,
             bucket=args.minio_bucket,
+            report_prefix=args.report_prefix or None,
         )
         if prefix:
             logger.info("Reports uploaded to s3://%s/%s/", args.minio_bucket, prefix)

@@ -232,6 +232,8 @@ spec:
       params:
         - name: submission-dir
           value: $(params.submission-dir)
+        - name: eval-engine
+          value: $(params.eval-engine)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
@@ -261,6 +263,8 @@ spec:
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
           value: $(params.pipeline-repo-revision)
+        - name: pipeline-run-name
+          value: $(context.pipelineRun.name)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -320,6 +324,10 @@ spec:
           value: $(params.llm-api-base)
         - name: llm-api-key
           value: $(params.llm-api-key)
+        - name: report-prefix
+          value: $(tasks.validate.results.report-prefix)
+        - name: pipeline-run-name
+          value: $(context.pipelineRun.name)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -550,6 +558,8 @@ spec:
           value: $(tasks.validate.results.submission-name)
         - name: pipeline-run-id
           value: $(context.pipelineRun.name)
+        - name: report-prefix
+          value: $(tasks.validate.results.report-prefix)
         - name: recommendation
           value: $(tasks.analyze.results.recommendation)
         - name: eval-engine

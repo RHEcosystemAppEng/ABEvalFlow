@@ -31,6 +31,9 @@ spec:
         Evaluation engine (harbor, ase, both). Controls which validation
         checks are run — Harbor checks require instruction.md and tests/,
         ASE checks require evals/evals.json and SKILL.md frontmatter.
+    - name: pipeline-run-name
+      type: string
+      description: Name of the PipelineRun (for building report prefix)
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions repository
@@ -43,6 +46,10 @@ spec:
       description: Security scan mode from metadata.yaml (disabled, warn, block)
     - name: security-scan-use-llm
       description: Whether to use LLM analysis in security scanning (true/false)
+    - name: report-prefix
+      description: >-
+        MinIO report prefix (YYYYMMDD_HHMMSS_submissionname_runid) for consistent
+        artifact paths across all pipeline tasks
   steps:
     - name: check-workspace-size
       image: registry.access.redhat.com/ubi9/python-311:latest
@@ -116,9 +123,17 @@ spec:
         meta = yaml.safe_load(open(sys.argv[1]))
         print(str(meta.get('security_scan_use_llm', True)).lower(), end='')
         " "$SUBMISSION_PATH/metadata.yaml" > "$(results.security-scan-use-llm.path)"
+
+          # Generate report prefix: YYYYMMDD_HHMMSS_submissionname_runid
+          SUBMISSION_NAME=$(cat "$(results.submission-name.path)")
+          TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
+          REPORT_PREFIX="${TIMESTAMP}_${SUBMISSION_NAME}_$(params.pipeline-run-name)"
+          echo -n "$REPORT_PREFIX" > "$(results.report-prefix.path)"
+          echo "Report prefix: $REPORT_PREFIX"
         else
           echo "INVALID" > "$(results.submission-name.path)"
           echo "warn" > "$(results.security-scan.path)"
           echo "false" > "$(results.security-scan-use-llm.path)"
+          echo "INVALID" > "$(results.report-prefix.path)"
           exit 1
         fi
