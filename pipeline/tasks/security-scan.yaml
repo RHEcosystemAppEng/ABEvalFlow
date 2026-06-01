@@ -1,7 +1,7 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  name: cisco-scan
+  name: security-scan
   namespace: ab-eval-flow
 spec:
   description: >-
@@ -54,7 +54,7 @@ spec:
     - name: effective-mode
       description: The actual scan mode used (disabled, warn, block)
   steps:
-    - name: run-cisco-scan
+    - name: run-security-scan
       image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
@@ -86,10 +86,17 @@ spec:
         fi
 
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        
+        # ASE submissions have SKILL.md in skills/ subfolder - detect and adjust
+        if [ -d "$SUBMISSION_PATH/skills" ] && [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
+          echo "Detected ASE structure, scanning skills/ subfolder"
+          SUBMISSION_PATH="$SUBMISSION_PATH/skills"
+        fi
+        
         # Use submission-name (from metadata.yaml) for report path to match analyze.py
         REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
-        SARIF_PATH="$REPORT_DIR/cisco-scan.sarif"
-        JSON_PATH="$REPORT_DIR/cisco-scan.json"
+        SARIF_PATH="$REPORT_DIR/security-scan.sarif"
+        JSON_PATH="$REPORT_DIR/security-scan.json"
 
         mkdir -p "$REPORT_DIR"
 

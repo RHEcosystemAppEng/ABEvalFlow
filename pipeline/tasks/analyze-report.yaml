@@ -48,7 +48,7 @@ spec:
       type: string
       default: "main"
       description: Branch or SHA of the pipeline repo to use for scripts
-    - name: cisco-scan-mode
+    - name: security-scan-mode
       type: string
       default: "disabled"
       description: >-
@@ -170,7 +170,7 @@ spec:
             --submission-name "$(params.submission-name)"
             --threshold "$(params.uplift-threshold)"
             --eval-engine harbor
-            --cisco-scan-mode "$(params.cisco-scan-mode)"
+            --security-scan-mode "$(params.security-scan-mode)"
           )
           if [ -n "$(params.commit-sha)" ]; then
             ARGS+=(--commit-sha "$(params.commit-sha)")
@@ -199,7 +199,7 @@ spec:
             --submission-name "$(params.submission-name)"
             --threshold "$(params.uplift-threshold)"
             --eval-engine harbor
-            --cisco-scan-mode "$(params.cisco-scan-mode)"
+            --security-scan-mode "$(params.security-scan-mode)"
           )
           if [ -n "$(params.commit-sha)" ]; then
             ARGS+=(--commit-sha "$(params.commit-sha)")
@@ -221,8 +221,8 @@ spec:
         # --- 2b. Enrich report with security scan results (ASE/both only) ---
         # Harbor mode already includes security_scans via scripts/analyze.py.
         # This step enriches pre-generated ASE reports that bypass analyze.py.
-        CISCO_SCAN_MODE="$(params.cisco-scan-mode)"
-        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$CISCO_SCAN_MODE" != "disabled" ] && [ -f "$REPORT_DIR/cisco-scan.json" ]; then
+        CISCO_SCAN_MODE="$(params.security-scan-mode)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$CISCO_SCAN_MODE" != "disabled" ] && [ -f "$REPORT_DIR/security-scan.json" ]; then
           echo "=== Enriching report with security scan results ==="
           python3 - "$REPORT_DIR" "$CISCO_SCAN_MODE" <<'ENRICH_SCRIPT'
         import json
@@ -233,7 +233,7 @@ spec:
         scan_mode = sys.argv[2]
 
         report_path = report_dir / 'report.json'
-        scan_path = report_dir / 'cisco-scan.json'
+        scan_path = report_dir / 'security-scan.json'
 
         if not report_path.exists() or not scan_path.exists():
             sys.exit(0)
@@ -265,7 +265,7 @@ spec:
             'scan_mode': scan_mode,
             'findings': findings,
             'passed': passed,
-            'sarif_path': str(report_dir / 'cisco-scan.sarif'),
+            'sarif_path': str(report_dir / 'security-scan.sarif'),
             'json_path': str(scan_path),
             'scan_duration_seconds': None,
         }

@@ -164,7 +164,7 @@ spec:
       description: >-
         Judge model for agent-skills-eval (defaults to llm-model if empty)
     # Security scanning
-    - name: cisco-scan
+    - name: security-scan
       type: string
       default: ""
       description: >-
@@ -299,17 +299,17 @@ spec:
     # Runs Cisco skill-scanner to detect prompt injection, data
     # exfiltration, and malicious code patterns. Skipped when disabled.
     # ------------------------------------------------------------------
-    - name: cisco-scan
+    - name: security-scan
       runAfter: ["validate"]
       taskRef:
-        name: cisco-scan
+        name: security-scan
       params:
         - name: submission-dir
           value: $(params.submission-dir)
         - name: submission-name
           value: $(tasks.validate.results.submission-name)
         - name: pipeline-scan-mode
-          value: $(params.cisco-scan)
+          value: $(params.security-scan)
         - name: submission-scan-mode
           value: $(tasks.validate.results.security-scan)
         - name: use-llm
@@ -331,7 +331,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["harbor", "both"]
-      runAfter: ["validate", "ai-review", "cisco-scan"]
+      runAfter: ["validate", "ai-review", "security-scan"]
       taskRef:
         name: scaffold-submission
       params:
@@ -435,7 +435,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["ase", "both"]
-      runAfter: ["validate", "cisco-scan"]
+      runAfter: ["validate", "security-scan"]
       timeout: "2h"
       taskRef:
         name: ase-eval
@@ -492,8 +492,8 @@ spec:
           value: $(params.harbor-fork-revision)
         - name: uplift-threshold
           value: $(params.uplift-threshold)
-        - name: cisco-scan-mode
-          value: $(tasks.cisco-scan.results.effective-mode)
+        - name: security-scan-mode
+          value: $(tasks.security-scan.results.effective-mode)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision

@@ -88,7 +88,7 @@ def upload_reports(
         uploaded += 1
 
     # Security scan files (optional) — stored in security_scans/ subfolder
-    for filename in ("cisco-scan.json", "cisco-scan.sarif"):
+    for filename in ("security-scan.json", "security-scan.sarif"):
         filepath = report_dir / filename
         if filepath.exists():
             object_name = f"{prefix}/security_scans/{filename}"

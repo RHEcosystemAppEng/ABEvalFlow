@@ -60,13 +60,13 @@ VARIANTS = ("treatment", "control")
 # ---------------------------------------------------------------------------
 
 def parse_security_scan(report_dir: Path, scan_mode: str | None) -> SecurityScanResult | None:
-    """Parse cisco-scan.json if it exists in the report directory.
+    """Parse security-scan.json if it exists in the report directory.
 
     Returns None if scanning was disabled or file doesn't exist.
     """
-    scan_json = report_dir / "cisco-scan.json"
+    scan_json = report_dir / "security-scan.json"
     if not scan_json.exists():
-        logger.debug("No cisco-scan.json found, security scanning was disabled")
+        logger.debug("No security-scan.json found, security scanning was disabled")
         return None
 
     if not scan_mode:
@@ -75,7 +75,7 @@ def parse_security_scan(report_dir: Path, scan_mode: str | None) -> SecurityScan
     try:
         data = json.loads(scan_json.read_text())
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to parse cisco-scan.json: %s", e)
+        logger.warning("Failed to parse security-scan.json: %s", e)
         return None
 
     findings: list[SecurityFinding] = []
@@ -443,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Evaluation engine used (for provenance tagging)",
     )
     parser.add_argument(
-        "--cisco-scan-mode",
+        "--security-scan-mode",
         type=str,
         choices=["disabled", "warn", "block"],
         default="disabled",
@@ -487,8 +487,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Include security scan results if available
-    if args.cisco_scan_mode != "disabled":
-        security_result = parse_security_scan(args.output_dir, args.cisco_scan_mode)
+    if args.security_scan_mode != "disabled":
+        security_result = parse_security_scan(args.output_dir, args.security_scan_mode)
         if security_result:
             result.security_scans.append(security_result)
             logger.info(
