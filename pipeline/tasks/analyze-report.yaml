@@ -51,25 +51,19 @@ spec:
     - name: security-scan-mode
       type: string
       default: "disabled"
-      description: >-
-        Cisco security scan mode: 'disabled', 'warn', or 'block'.
-        When not disabled, includes security scan results in the report.
+      description: Security scan mode (disabled/warn/block) for including scan results
     - name: llm-model
       type: string
       default: ""
-      description: >-
-        LLM model name used for evaluation (e.g. claude-sonnet).
-        Used to generate a human-readable label in the report.
+      description: LLM model name for report metadata
     - name: repo-name
       type: string
       default: ""
-      description: >-
-        GitHub repo (org/name) for constructing PR URL
+      description: GitHub repo (org/name) for constructing PR URL
     - name: pr-number
       type: string
       default: ""
-      description: >-
-        PR number that triggered this pipeline run
+      description: PR number that triggered this pipeline run
   workspaces:
     - name: source
       description: Workspace containing the evaluation results and report output
@@ -124,44 +118,7 @@ spec:
           fi
           echo "Found ASE report at $REPORT_DIR"
 
-          # Enrich ASE report with related_pr and llm fields
-          if [ -n "$PR_URL" ] || [ -n "$LLM_LABEL" ]; then
-            echo "=== Enriching ASE report with PR/LLM metadata ==="
-            python3 - "$REPORT_DIR" "$PR_URL" "$LLM_LABEL" <<'ENRICH_PR_LLM'
-        import json, sys
-        from pathlib import Path
-
-        report_dir, pr_url, llm_label = sys.argv[1], sys.argv[2], sys.argv[3]
-        report_path = Path(report_dir) / 'report.json'
-        report = json.loads(report_path.read_text())
-
-        if 'summary' in report:
-            if pr_url:
-                report['summary']['related_pr'] = pr_url
-            if llm_label:
-                report['summary']['llm'] = llm_label
-            report_path.write_text(json.dumps(report, indent=2))
-            print('Enriched report with PR URL and LLM label')
-        ENRICH_PR_LLM
-          fi
-
-        el        # Construct PR URL and LLM label for report metadata
-        PR_URL=""
-        if [ -n "$(params.repo-name)" ] && [ -n "$(params.pr-number)" ]; then
-          PR_URL="https://github.com/$(params.repo-name)/pull/$(params.pr-number)"
-        fi
-
-        LLM_LABEL=""
-        if [ -n "$(params.llm-model)" ]; then
-          # Map model name to human-readable label
-          case "$(params.llm-model)" in
-            claude-sonnet*) LLM_LABEL="Claude Sonnet 4.6 (vertex_ai)" ;;
-            claude-haiku*) LLM_LABEL="Claude Haiku 3.5 (vertex_ai)" ;;
-            *) LLM_LABEL="$(params.llm-model)" ;;
-          esac
-        fi
-
-        if [ "$EVAL_ENGINE" = "harbor" ]; then
+        elif [ "$EVAL_ENGINE" = "harbor" ]; then
           # Harbor: run full analysis from raw trial results
           echo "=== Harbor mode: running analysis ==="
           ARGS=(
@@ -170,7 +127,6 @@ spec:
             --submission-name "$(params.submission-name)"
             --threshold "$(params.uplift-threshold)"
             --eval-engine harbor
-            --security-scan-mode "$(params.security-scan-mode)"
           )
           if [ -n "$(params.commit-sha)" ]; then
             ARGS+=(--commit-sha "$(params.commit-sha)")
@@ -180,12 +136,6 @@ spec:
           fi
           if [ -n "$(params.harbor-fork-revision)" ]; then
             ARGS+=(--harbor-fork-revision "$(params.harbor-fork-revision)")
-          fi
-          if [ -n "$PR_URL" ]; then
-            ARGS+=(--pr-url "$PR_URL")
-          fi
-          if [ -n "$LLM_LABEL" ]; then
-            ARGS+=(--llm-label "$LLM_LABEL")
           fi
           python scripts/analyze.py "${ARGS[@]}"
 
@@ -199,7 +149,6 @@ spec:
             --submission-name "$(params.submission-name)"
             --threshold "$(params.uplift-threshold)"
             --eval-engine harbor
-            --security-scan-mode "$(params.security-scan-mode)"
           )
           if [ -n "$(params.commit-sha)" ]; then
             ARGS+=(--commit-sha "$(params.commit-sha)")
@@ -207,28 +156,35 @@ spec:
           if [ -n "$(params.pipeline-run-id)" ]; then
             ARGS+=(--pipeline-run-id "$(params.pipeline-run-id)")
           fi
-          if [ -n "$PR_URL" ]; then
-            ARGS+=(--pr-url "$PR_URL")
-          fi
-          if [ -n "$LLM_LABEL" ]; then
-            ARGS+=(--llm-label "$LLM_LABEL")
-          fi
           python scripts/analyze.py "${ARGS[@]}"
 
           echo "=== Both mode: ASE report already at $REPORT_DIR ==="
         fi
 
-        # --- 2b. Enrich report with security scan results (ASE/both only) ---
-        # Harbor mode already includes security_scans via scripts/analyze.py.
-        # This step enriches pre-generated ASE reports that bypass analyze.py.
-        CISCO_SCAN_MODE="$(params.security-scan-mode)"
-        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$CISCO_SCAN_MODE" != "disabled" ] && [ -f "$REPORT_DIR/security-scan.json" ]; then
-          echo "=== Enriching report with security scan results ==="
-          python3 -c "import json,sys;from pathlib import Path;d,m=Path(sys.argv[1]),sys.argv[2];rp,sp=d/'report.json',d/'security-scan.json';r,s=json.loads(rp.read_text()),json.loads(sp.read_text()) if rp.exists() and sp.exists() else (sys.exit(0),None);f=[{'rule_id':x.get('rule_id',x.get('id','?')),'severity':x.get('severity','info').lower(),'message':x.get('message',''),'scanner':'cisco'} for x in s.get('findings',[])];p=m!='block' or sum(1 for x in f if x['severity'] in('critical','high'))==0;r.setdefault('security_scans',[]).append({'scanner':'cisco','scan_mode':m,'findings':f,'passed':p});rp.write_text(json.dumps(r,indent=2));print(f'Added {len(f)} findings')" "$REPORT_DIR" "$CISCO_SCAN_MODE"
-          echo "Security scan data added to report.json"
+        # --- 3. Enrich report with PR/LLM metadata (ASE mode) ---
+        PR_URL=""
+        if [ -n "$(params.repo-name)" ] && [ -n "$(params.pr-number)" ]; then
+          PR_URL="https://github.com/$(params.repo-name)/pull/$(params.pr-number)"
+        fi
+        LLM_LABEL=""
+        case "$(params.llm-model)" in
+          claude-sonnet*) LLM_LABEL="Claude Sonnet 4.6 (vertex_ai)" ;;
+          claude-haiku*) LLM_LABEL="Claude Haiku 3.5 (vertex_ai)" ;;
+          ?*) LLM_LABEL="$(params.llm-model)" ;;
+        esac
+
+        if [ "$EVAL_ENGINE" = "ase" ] && { [ -n "$PR_URL" ] || [ -n "$LLM_LABEL" ]; }; then
+          echo "Enriching ASE report with PR/LLM metadata..."
+          python3 -c "import json;from pathlib import Path;import sys;p=Path(sys.argv[1])/'report.json';r=json.loads(p.read_text());r.setdefault('summary',{});sys.argv[2] and r['summary'].update({'related_pr':sys.argv[2]});sys.argv[3] and r['summary'].update({'llm':sys.argv[3]});p.write_text(json.dumps(r,indent=2))" "$REPORT_DIR" "$PR_URL" "$LLM_LABEL"
         fi
 
-        # --- 3. Extract results for Tekton ---
+        # --- 4. Enrich with security scan results (ASE/both only) ---
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$(params.security-scan-mode)" != "disabled" ] && [ -f "$REPORT_DIR/security-scan.json" ]; then
+          echo "Enriching report with security scan results..."
+          python3 -c "import json;from pathlib import Path;import sys;d=Path(sys.argv[1]);m=sys.argv[2];r=json.loads((d/'report.json').read_text());s=json.loads((d/'security-scan.json').read_text());f=[{'rule_id':x.get('rule_id','?'),'severity':x.get('severity','info').lower(),'message':x.get('message',''),'scanner':'cisco'} for x in s.get('findings',[])];p=m!='block' or sum(1 for x in f if x['severity'] in('critical','high'))==0;r.setdefault('security_scans',[]).append({'scanner':'cisco','scan_mode':m,'findings':f,'passed':p});(d/'report.json').write_text(json.dumps(r,indent=2));print(f'Added {len(f)} findings')" "$REPORT_DIR" "$(params.security-scan-mode)"
+        fi
+
+        # --- 5. Extract results for Tekton ---
         echo -n "$REPORT_DIR" > "$(results.report-path.path)"
 
         python3 -c "import json,sys;r=json.loads(open(sys.argv[1]).read());s=r['summary'];open(sys.argv[2],'w').write(s['recommendation']);t,c=s['treatment'].get('mean_reward'),s['control'].get('mean_reward');open(sys.argv[3],'w').write(f'{t:.4f}' if t else 'N/A');open(sys.argv[4],'w').write(f'{c:.4f}' if c else 'N/A');g=s.get('mean_reward_gap');open(sys.argv[5],'w').write(f'{g:+.4f}' if g else 'N/A');tt,fi=s.get('ttest_p_value'),s.get('fisher_p_value');open(sys.argv[6],'w').write(f'{tt:.4f}' if tt else 'N/A');open(sys.argv[7],'w').write(f'{fi:.4f}' if fi else 'N/A')" \

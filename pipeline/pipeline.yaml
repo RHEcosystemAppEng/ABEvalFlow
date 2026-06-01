@@ -314,8 +314,10 @@ spec:
           value: $(tasks.validate.results.security-scan)
         - name: use-llm
           value: $(tasks.validate.results.security-scan-use-llm)
+        - name: llm-model
+          value: $(params.llm-model)
         - name: llm-api-base
-          value: $(params.llm-base-url)
+          value: $(params.llm-api-base)
         - name: llm-api-key
           value: $(params.llm-api-key)
       workspaces:

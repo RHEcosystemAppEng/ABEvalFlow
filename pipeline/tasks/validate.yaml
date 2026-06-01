@@ -110,11 +110,11 @@ spec:
         print(meta.get('security_scan', 'warn'), end='')
         " "$SUBMISSION_PATH/metadata.yaml" > "$(results.security-scan.path)"
 
-          # Extract security_scan_use_llm (defaults to 'false' if not set)
+          # Extract security_scan_use_llm (defaults to 'true' if not set)
           python3 -c "
         import yaml, sys
         meta = yaml.safe_load(open(sys.argv[1]))
-        print(str(meta.get('security_scan_use_llm', False)).lower(), end='')
+        print(str(meta.get('security_scan_use_llm', True)).lower(), end='')
         " "$SUBMISSION_PATH/metadata.yaml" > "$(results.security-scan-use-llm.path)"
         else
           echo "INVALID" > "$(results.submission-name.path)"
