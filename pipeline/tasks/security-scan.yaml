@@ -106,6 +106,13 @@ spec:
         echo "=== Running Cisco skill-scanner ==="
         echo "Submission: $SUBMISSION_PATH"
         echo "Mode: $SCAN_MODE"
+        echo "Output: $JSON_PATH"
+        echo ""
+        echo "Files to scan:"
+        find "$SUBMISSION_PATH" -type f \( -name "*.md" -o -name "*.py" -o -name "*.yaml" -o -name "*.json" \) | head -10 | sed 's/^/  /'
+        FILE_COUNT=$(find "$SUBMISSION_PATH" -type f \( -name "*.md" -o -name "*.py" -o -name "*.yaml" -o -name "*.json" \) | wc -l | tr -d ' ')
+        echo "  ($FILE_COUNT files total)"
+        echo ""
 
         START_TIME=$(date +%s)
 
@@ -176,7 +183,25 @@ spec:
         CRITICAL_COUNT=$(echo "$PARSE_OUTPUT" | grep '^critical=' | cut -d= -f2 || echo "0")
         HIGH_COUNT=$(echo "$PARSE_OUTPUT" | grep '^high=' | cut -d= -f2 || echo "0")
 
-        echo "Findings: $FINDINGS_COUNT total (Critical: $CRITICAL_COUNT, High: $HIGH_COUNT)"
+        echo ""
+        echo "=== Scan Results ==="
+        echo "Findings: $FINDINGS_COUNT total"
+        echo "  Critical: $CRITICAL_COUNT"
+        echo "  High:     $HIGH_COUNT"
+        if [ "$FINDINGS_COUNT" -gt 0 ] && [ -f "$JSON_PATH" ]; then
+          echo ""
+          echo "Top findings:"
+          python3 - "$JSON_PATH" <<'SHOW_FINDINGS' 2>/dev/null || true
+        import json, sys
+        with open(sys.argv[1]) as f:
+            data = json.load(f)
+        for finding in data.get('findings', [])[:5]:
+            sev = finding.get('severity', 'unknown').upper()
+            rule = finding.get('rule_id', finding.get('id', 'unknown'))
+            msg = finding.get('message', '')[:60]
+            print(f'  [{sev}] {rule}: {msg}')
+        SHOW_FINDINGS
+        fi
 
         # Write results
         echo -n "$FINDINGS_COUNT" > "$(results.findings-count.path)"

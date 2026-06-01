@@ -224,106 +224,21 @@ spec:
         CISCO_SCAN_MODE="$(params.security-scan-mode)"
         if [ "$EVAL_ENGINE" != "harbor" ] && [ "$CISCO_SCAN_MODE" != "disabled" ] && [ -f "$REPORT_DIR/security-scan.json" ]; then
           echo "=== Enriching report with security scan results ==="
-          python3 - "$REPORT_DIR" "$CISCO_SCAN_MODE" <<'ENRICH_SCRIPT'
-        import json
-        import sys
-        from pathlib import Path
-
-        report_dir = Path(sys.argv[1])
-        scan_mode = sys.argv[2]
-
-        report_path = report_dir / 'report.json'
-        scan_path = report_dir / 'security-scan.json'
-
-        if not report_path.exists() or not scan_path.exists():
-            sys.exit(0)
-
-        try:
-            report = json.loads(report_path.read_text())
-            scan_data = json.loads(scan_path.read_text())
-        except json.JSONDecodeError as e:
-            print(f'WARNING: Failed to parse scan JSON: {e}', file=sys.stderr)
-            sys.exit(0)  # Continue pipeline, just skip enrichment
-
-        # Build SecurityScanResult structure
-        findings = []
-        for f in scan_data.get('findings', []):
-            findings.append({
-                'rule_id': f.get('rule_id', f.get('id', 'unknown')),
-                'severity': f.get('severity', 'info').lower(),
-                'message': f.get('message', f.get('description', '')),
-                'file_path': f.get('file_path', f.get('location', {}).get('file')),
-                'line_number': f.get('line_number', f.get('location', {}).get('line')),
-                'scanner': 'cisco',
-            })
-
-        high_or_critical = sum(1 for f in findings if f['severity'] in ('critical', 'high'))
-        passed = scan_mode != 'block' or high_or_critical == 0
-
-        scan_result = {
-            'scanner': 'cisco',
-            'scan_mode': scan_mode,
-            'findings': findings,
-            'passed': passed,
-            'sarif_path': str(report_dir / 'security-scan.sarif'),
-            'json_path': str(scan_path),
-            'scan_duration_seconds': None,
-        }
-
-        # Append to security_scans
-        if 'security_scans' not in report:
-            report['security_scans'] = []
-        report['security_scans'].append(scan_result)
-
-        report_path.write_text(json.dumps(report, indent=2))
-        print(f'Added security scan: {len(findings)} findings, passed={passed}')
-        ENRICH_SCRIPT
-
-          # Regenerate report.md to include security section
-          echo "Regenerating report.md with security section..."
-          python3 -c "
-        import sys
-        sys.path.insert(0, '$PIPELINE_DIR')
-        from abevalflow.report import AnalysisResult
-        from scripts.analyze import render_markdown
-        from pathlib import Path
-
-        report_dir = Path('$REPORT_DIR')
-        report = AnalysisResult.model_validate_json((report_dir / 'report.json').read_text())
-        (report_dir / 'report.md').write_text(render_markdown(report))
-        print('Regenerated report.md')
-        "
+          python3 -c "import json,sys;from pathlib import Path;d,m=Path(sys.argv[1]),sys.argv[2];rp,sp=d/'report.json',d/'security-scan.json';r,s=json.loads(rp.read_text()),json.loads(sp.read_text()) if rp.exists() and sp.exists() else (sys.exit(0),None);f=[{'rule_id':x.get('rule_id',x.get('id','?')),'severity':x.get('severity','info').lower(),'message':x.get('message',''),'scanner':'cisco'} for x in s.get('findings',[])];p=m!='block' or sum(1 for x in f if x['severity'] in('critical','high'))==0;r.setdefault('security_scans',[]).append({'scanner':'cisco','scan_mode':m,'findings':f,'passed':p});rp.write_text(json.dumps(r,indent=2));print(f'Added {len(f)} findings')" "$REPORT_DIR" "$CISCO_SCAN_MODE"
+          echo "Security scan data added to report.json"
         fi
 
         # --- 3. Extract results for Tekton ---
         echo -n "$REPORT_DIR" > "$(results.report-path.path)"
 
-        python - "$REPORT_DIR/report.json" \
+        python3 -c "import json,sys;r=json.loads(open(sys.argv[1]).read());s=r['summary'];open(sys.argv[2],'w').write(s['recommendation']);t,c=s['treatment'].get('mean_reward'),s['control'].get('mean_reward');open(sys.argv[3],'w').write(f'{t:.4f}' if t else 'N/A');open(sys.argv[4],'w').write(f'{c:.4f}' if c else 'N/A');g=s.get('mean_reward_gap');open(sys.argv[5],'w').write(f'{g:+.4f}' if g else 'N/A');tt,fi=s.get('ttest_p_value'),s.get('fisher_p_value');open(sys.argv[6],'w').write(f'{tt:.4f}' if tt else 'N/A');open(sys.argv[7],'w').write(f'{fi:.4f}' if fi else 'N/A')" \
+          "$REPORT_DIR/report.json" \
           "$(results.recommendation.path)" \
           "$(results.treatment-mean-reward.path)" \
           "$(results.control-mean-reward.path)" \
           "$(results.mean-reward-gap.path)" \
           "$(results.ttest-p-value.path)" \
-          "$(results.fisher-p-value.path)" <<'EXTRACT'
-        import json, sys
-        try:
-            report = json.loads(open(sys.argv[1]).read())
-            s = report["summary"]
-            open(sys.argv[2], "w").write(s["recommendation"])
-            t_mr = s["treatment"].get("mean_reward")
-            c_mr = s["control"].get("mean_reward")
-            open(sys.argv[3], "w").write(f"{t_mr:.4f}" if t_mr is not None else "N/A")
-            open(sys.argv[4], "w").write(f"{c_mr:.4f}" if c_mr is not None else "N/A")
-            mrg = s.get("mean_reward_gap")
-            open(sys.argv[5], "w").write(f"{mrg:+.4f}" if mrg is not None else "N/A")
-            ttest = s.get("ttest_p_value")
-            open(sys.argv[6], "w").write(f"{ttest:.4f}" if ttest is not None else "N/A")
-            fisher = s.get("fisher_p_value")
-            open(sys.argv[7], "w").write(f"{fisher:.4f}" if fisher is not None else "N/A")
-        except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
-            print(f"ERROR: Failed to extract Tekton results from report: {e}", file=sys.stderr)
-            sys.exit(1)
-        EXTRACT
+          "$(results.fisher-p-value.path)"
 
         echo "=== Analysis complete ==="
         echo "Report: $REPORT_DIR"

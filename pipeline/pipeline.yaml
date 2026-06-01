@@ -114,7 +114,7 @@ spec:
       description: >-
         Run the AI-assisted test generation step. The step self-skips
         for submissions with generation_mode: manual.
-    - name: enable-ai-review
+    - name: enable-test-quality-review
       type: string
       default: "true"
       description: >-
@@ -268,17 +268,17 @@ spec:
     # ------------------------------------------------------------------
     # Step 1c: AI quality review (optional, after validation)
     # ------------------------------------------------------------------
-    - name: ai-review
+    - name: test-quality-review
       when:
         - input: $(params.agent-type)
           operator: notin
           values: ["oracle"]
-        - input: $(params.enable-ai-review)
+        - input: $(params.enable-test-quality-review)
           operator: in
           values: ["true"]
       runAfter: ["validate"]
       taskRef:
-        name: ai-review
+        name: test-quality-review
       params:
         - name: submission-dir
           value: $(params.submission-dir)
@@ -331,7 +331,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["harbor", "both"]
-      runAfter: ["validate", "ai-review", "security-scan"]
+      runAfter: ["validate", "test-quality-review", "security-scan"]
       taskRef:
         name: scaffold-submission
       params:
