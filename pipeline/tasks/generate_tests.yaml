@@ -5,14 +5,19 @@ metadata:
   namespace: ab-eval-flow
 spec:
   description: >-
-    AI-assisted generation of instruction.md and test_outputs.py from a skill
-    definition.  Only runs when the submission has generation_mode: ai.
+    AI-assisted generation of evaluation files from a skill definition.
+    For Harbor mode: generates instruction.md, test_outputs.py when generation_mode: ai.
+    For ASE mode: generates evals/evals.json when missing.
     Uses the OpenAI-compatible LLM API (works with LiteLLM proxy, direct API,
     or self-hosted models).
   params:
     - name: submission-dir
       type: string
       description: Submission directory name under submissions/
+    - name: eval-engine
+      type: string
+      default: "harbor"
+      description: Evaluation engine (harbor, ase, both)
     - name: pipeline-repo-url
       type: string
       default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
@@ -72,6 +77,8 @@ spec:
           value: "$(params.llm-model)"
         - name: AGENT_TYPE
           value: "$(params.agent-type)"
+        - name: EVAL_ENGINE
+          value: "$(params.eval-engine)"
         - name: LLM_API_KEY
           valueFrom:
             secretKeyRef:
@@ -89,14 +96,31 @@ spec:
         pip install --quiet --no-cache-dir pydantic pyyaml openai pytest
         export PYTHONPATH="$PIPELINE_DIR"
 
-        python scripts/generate_tests.py "$SUBMISSION_PATH" \
-          --workspace-dir "$WORKSPACE_DIR" \
-          --agent-type "$(params.agent-type)" \
-          --max-retries "$(params.max-retries)" \
-          | tee /tmp/generate-output.json
+        GENERATED='[]'
 
-        python -c "
-        import json, sys
-        data = json.load(open('/tmp/generate-output.json'))
-        print(json.dumps(data.get('generated', [])), end='')
-        " > "$(results.generated-files.path)"
+        # For ASE mode: generate evals.json if missing
+        if [ "$EVAL_ENGINE" = "ase" ] || [ "$EVAL_ENGINE" = "both" ]; then
+          if [ ! -f "$SUBMISSION_PATH/evals/evals.json" ]; then
+            echo "ASE mode: evals.json missing, generating from SKILL.md..."
+            python3 scripts/generate_ase_evals.py "$SUBMISSION_PATH" | tee /tmp/ase-output.json
+            GENERATED=$(python3 -c "import json,sys; print(json.dumps(json.load(open('/tmp/ase-output.json')).get('generated', [])))")
+          else
+            echo "ASE mode: evals.json already exists, skipping generation"
+          fi
+        fi
+
+        # For Harbor mode: generate instruction.md and tests if generation_mode: ai
+        if [ "$EVAL_ENGINE" = "harbor" ] || [ "$EVAL_ENGINE" = "both" ]; then
+          python scripts/generate_tests.py "$SUBMISSION_PATH" \
+            --workspace-dir "$WORKSPACE_DIR" \
+            --agent-type "$(params.agent-type)" \
+            --max-retries "$(params.max-retries)" \
+            | tee /tmp/generate-output.json
+
+          HARBOR_GENERATED=$(python3 -c "import json,sys; print(json.dumps(json.load(open('/tmp/generate-output.json')).get('generated', [])))")
+          # Merge generated lists
+          GENERATED=$(python3 -c "import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); print(json.dumps(list(set(a+b))))" "$GENERATED" "$HARBOR_GENERATED")
+        fi
+
+        echo "$GENERATED" > "$(results.generated-files.path)"
+        echo "Generated files: $GENERATED"

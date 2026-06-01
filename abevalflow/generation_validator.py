@@ -452,3 +452,115 @@ def _read_safe(path: Path) -> str:
     if path.is_file():
         return path.read_text()
     return "(file not present)"
+
+
+# ---------------------------------------------------------------------------
+# ASE evals.json semantic review
+# ---------------------------------------------------------------------------
+
+_ASE_REVIEWER_JSON_INSTRUCTION = """
+Respond ONLY with a JSON object in this exact format:
+{"pass": true/false, "issues": ["issue1", "issue2"]}
+
+If the evals pass review, use: {"pass": true, "issues": []}
+If there are problems, list them: {"pass": false, "issues": ["specific issue"]}
+"""
+
+_ASE_SKILL_SPECIFICITY_REVIEWER = """\
+You are a reviewer checking whether ASE eval assertions test SKILL-SPECIFIC knowledge.
+
+Your job: verify that the assertions differentiate a skill-enhanced LLM from a generic one.
+
+PASS if:
+- Assertions require knowledge that IS in the SKILL.md document
+- A generic LLM without the skill would likely fail these assertions
+- Assertions test specific concepts, patterns, or procedures from the skill
+
+FAIL if:
+- Assertions test only generic LLM capabilities (e.g., "responds politely")
+- Any LLM could pass without reading the skill document
+- Assertions are too vague to meaningfully evaluate skill knowledge
+""" + _ASE_REVIEWER_JSON_INSTRUCTION
+
+_ASE_PROMPT_QUALITY_REVIEWER = """\
+You are a reviewer checking whether ASE eval prompts are clear and testable.
+
+Your job: verify that prompts will elicit skill-relevant responses.
+
+PASS if:
+- Prompts are clear and unambiguous
+- Prompts ask questions that the skill document can answer
+- Prompts would cause an LLM to demonstrate skill knowledge
+
+FAIL if:
+- Prompts are vague or could be interpreted multiple ways
+- Prompts don't relate to the skill's core functionality
+- Prompts are too complex or combine too many concepts
+""" + _ASE_REVIEWER_JSON_INSTRUCTION
+
+_ASE_ASSERTION_ALIGNMENT_REVIEWER = """\
+You are a reviewer checking whether ASE assertions align with the expected_output.
+
+Your job: verify assertions match what a correct response should contain.
+
+PASS if:
+- Assertions accurately check for content described in expected_output
+- Assertions are specific enough to distinguish correct from incorrect responses
+- Each assertion tests a distinct aspect of the expected behavior
+
+FAIL if:
+- Assertions don't match what expected_output describes
+- Assertions are redundant or overlap significantly
+- Assertions would pass for incorrect responses
+""" + _ASE_REVIEWER_JSON_INSTRUCTION
+
+_ASE_REVIEWERS = [
+    ("skill_specificity", _ASE_SKILL_SPECIFICITY_REVIEWER),
+    ("prompt_quality", _ASE_PROMPT_QUALITY_REVIEWER),
+    ("assertion_alignment", _ASE_ASSERTION_ALIGNMENT_REVIEWER),
+]
+
+_ASE_REVIEW_USER_TEMPLATE = """\
+## SKILL.md
+{skill_content}
+
+## Generated evals.json
+{evals_content}
+
+Review whether this evals.json meets the criteria described in your system prompt.
+"""
+
+
+def ase_evals_review(skill_content: str, evals_content: str) -> dict:
+    """Run 3 LLM reviewers on generated ASE evals.json.
+
+    Each reviewer checks different quality aspects:
+    - skill_specificity: Do assertions test skill-specific knowledge?
+    - prompt_quality: Are prompts clear and testable?
+    - assertion_alignment: Do assertions match expected_output?
+
+    Returns {"passed": bool, "issues": [str], "reviewer_results": dict}.
+    """
+    user_prompt = _ASE_REVIEW_USER_TEMPLATE.format(
+        skill_content=skill_content,
+        evals_content=evals_content,
+    )
+
+    reviewer_results: dict[str, dict] = {}
+
+    for name, system in _ASE_REVIEWERS:
+        logger.info("Running ASE reviewer '%s'...", name)
+        name, result = _run_single_review(name, system, user_prompt)
+        reviewer_results[name] = result
+
+        status = "passed" if result["pass"] else "FAILED"
+        logger.info("ASE reviewer '%s': %s", name, status)
+
+    all_issues: list[str] = []
+    for name, result in reviewer_results.items():
+        if not result["pass"]:
+            for issue in result["issues"]:
+                all_issues.append(f"[{name}] {issue}")
+
+    passed = len(all_issues) == 0
+    return {"passed": passed, "issues": all_issues, "reviewer_results": reviewer_results}

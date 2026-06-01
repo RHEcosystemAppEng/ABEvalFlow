@@ -278,10 +278,13 @@ def upload_scaffolded_configs(
 
     submission_dir = workspace_root / "submissions" / submission_name
     generated_candidates = [
+        # Harbor-generated files
         (submission_dir / "instruction.md", "instruction.md"),
         (submission_dir / "tests" / "test_outputs.py", "test_outputs.py"),
         (submission_dir / "tests" / "llm_judge.py", "llm_judge.py"),
         (submission_dir / "scenario_brief.json", "scenario_brief.json"),
+        # ASE-generated files
+        (submission_dir / "evals" / "evals.json", "evals.json"),
     ]
     for filepath, name in generated_candidates:
         if not filepath.is_file():
