@@ -36,6 +36,7 @@ import yaml
 
 from abevalflow import llm_client, skill_loader
 from abevalflow.generation_validator import (
+    ase_evals_review,
     check_markdown,
     check_python,
     content_check,
@@ -399,6 +400,70 @@ the skill.  The tests must verify the agent's output from /workspace.
 Read the SKILL.md first, then generate both files.
 """
 
+# --- ASE evals.json generation ------------------------------------------------
+
+ASE_EVALS_SYSTEM_PROMPT = """\
+You are an expert at creating evaluation tests for AI agent skills using the \
+agent-skills-eval (ASE) framework.
+
+ASE uses LLM-as-judge evaluation where each eval has:
+- A prompt (the question/task given to the agent)
+- Expected output (what a good response should contain)
+- Assertions (specific claims that must be true in a good response)
+
+Your job is to create evals that differentiate between a skilled agent (one \
+that has the skill documentation) and an unskilled agent (one without it).
+"""
+
+ASE_EVALS_PROMPT = """\
+Create an evals.json file for the agent-skills-eval framework based on the \
+skill definition below.
+
+## Requirements
+
+1. **Focus on skill-specific knowledge** — create prompts that test what the \
+skill uniquely provides, not general knowledge any LLM would have.
+
+2. **Create 1-3 eval scenarios** — each should test a different aspect of the \
+skill. Quality over quantity.
+
+3. **Write clear assertions** — each assertion should be a verifiable claim \
+that an LLM judge can evaluate. Assertions should pass if the response \
+demonstrates skill-specific knowledge.
+
+4. **Assertions must be fair** — they should pass for a skilled agent and \
+reasonably fail for an unskilled one. Avoid assertions that test general \
+knowledge or formatting.
+
+## Output Format
+
+Return a valid JSON object with this structure:
+{{
+  "skill_name": "{skill_name}",
+  "evals": [
+    {{
+      "id": "unique-eval-id",
+      "name": "Human-readable eval name",
+      "prompt": "The question or task for the agent",
+      "expected_output": "Description of what a good response contains",
+      "assertions": [
+        "First specific claim that must be true in a good response",
+        "Second specific claim...",
+        "..."
+      ]
+    }}
+  ]
+}}
+
+## Skill Analysis
+{skill_analysis}
+
+## Skill Content (SKILL.md)
+{skill_content}
+
+Output ONLY valid JSON — no markdown fences, no commentary.
+"""
+
 
 def _load_submission(submission_dir: Path) -> tuple[SubmissionMetadata, str]:
     """Load metadata and skill content from the submission directory."""
@@ -499,6 +564,127 @@ def _format_analysis(analysis: dict) -> str:
     for item in analysis.get("test_focus_areas", []):
         lines.append(f"- {item}")
     return "\n".join(lines)
+
+
+def generate_ase_evals(
+    submission_dir: Path,
+    skill_name: str,
+    skill_content: str,
+    max_retries: int = 3,
+) -> Path:
+    """Generate evals/evals.json for ASE evaluation from SKILL.md.
+
+    Uses LLM to analyze the skill and create evaluation prompts with assertions
+    that test skill-specific knowledge.
+
+    Returns the path to the generated evals.json file.
+    """
+    logger.info("Generating ASE evals.json for skill: %s", skill_name)
+
+    # Step 1: Analyze the skill
+    analysis = _analyze_skill(skill_content)
+    analysis_text = _format_analysis(analysis)
+
+    # Step 2: Generate evals.json
+    evals_dir = submission_dir / "evals"
+    evals_dir.mkdir(exist_ok=True)
+    evals_path = evals_dir / "evals.json"
+
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        logger.info("ASE evals generation attempt %d/%d", attempt, max_retries)
+
+        raw = llm_client.chat_completion(
+            messages=[
+                {"role": "system", "content": ASE_EVALS_SYSTEM_PROMPT},
+                {"role": "user", "content": ASE_EVALS_PROMPT.format(
+                    skill_name=skill_name,
+                    skill_content=skill_content,
+                    skill_analysis=analysis_text,
+                )},
+            ],
+            temperature=0.3,
+            max_tokens=4096,
+        )
+
+        # Strip markdown fences if present
+        text = raw.strip()
+        for fence in ("```json", "```"):
+            if text.startswith(fence):
+                text = text[len(fence):]
+                break
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        # Parse and validate JSON
+        try:
+            evals_data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            json_match = re.search(r"\{.*\}", text, re.DOTALL)
+            if json_match:
+                try:
+                    evals_data = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    last_error = f"Invalid JSON: {exc}"
+                    logger.warning("Attempt %d: %s", attempt, last_error)
+                    continue
+            else:
+                last_error = f"Invalid JSON: {exc}"
+                logger.warning("Attempt %d: %s", attempt, last_error)
+                continue
+
+        # Validate structure
+        if not isinstance(evals_data, dict):
+            last_error = "evals.json must be a JSON object"
+            logger.warning("Attempt %d: %s", attempt, last_error)
+            continue
+
+        evals = evals_data.get("evals")
+        if not isinstance(evals, list) or len(evals) == 0:
+            last_error = "evals.json must contain a non-empty 'evals' array"
+            logger.warning("Attempt %d: %s", attempt, last_error)
+            continue
+
+        # Validate each eval
+        valid = True
+        for i, ev in enumerate(evals):
+            if not isinstance(ev, dict):
+                last_error = f"evals[{i}]: must be a JSON object"
+                valid = False
+                break
+            if not ev.get("prompt"):
+                last_error = f"evals[{i}]: missing 'prompt' field"
+                valid = False
+                break
+            if not ev.get("assertions") and not ev.get("expected_output"):
+                last_error = f"evals[{i}]: must have 'assertions' or 'expected_output'"
+                valid = False
+                break
+
+        if not valid:
+            logger.warning("Attempt %d: %s", attempt, last_error)
+            continue
+
+        # Semantic review - advisory quality check (never blocks generation)
+        evals_json_str = json.dumps(evals_data, indent=2)
+        review = ase_evals_review(skill_content, evals_json_str)
+        if not review["passed"]:
+            logger.warning(
+                "Semantic review found issues (advisory, not blocking): %s",
+                review["issues"],
+            )
+
+        # Success - write the file (structural validation passed)
+        evals_path.write_text(evals_json_str + "\n")
+        logger.info(
+            "Generated evals.json with %d evals, %d total assertions",
+            len(evals),
+            sum(len(ev.get("assertions", [])) for ev in evals),
+        )
+        return evals_path
+
+    raise ValueError(f"ASE evals generation failed after {max_retries} attempts: {last_error}")
 
 
 def _generate_scenario_brief(

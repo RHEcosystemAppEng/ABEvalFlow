@@ -175,10 +175,15 @@ def _check_skill_md_frontmatter(submission_dir: Path) -> list[str]:
 
 
 def _check_evals_json(submission_dir: Path) -> list[str]:
-    """Validate evals/evals.json for agent-skills-eval format."""
+    """Validate evals/evals.json for agent-skills-eval format.
+    
+    Note: Missing evals.json is NOT an error - the pipeline will generate it
+    from SKILL.md. This function only validates format when the file exists.
+    """
     evals_path = submission_dir / "evals" / "evals.json"
     if not evals_path.is_file():
-        return ["evals/evals.json is missing (required for ASE evaluation)"]
+        logger.info("evals/evals.json not present - will be generated from SKILL.md")
+        return []  # Not an error - pipeline will generate it
 
     try:
         data = json.loads(evals_path.read_text())

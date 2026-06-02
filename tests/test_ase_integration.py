@@ -222,7 +222,8 @@ class TestAseValidation:
         assert not any("instruction.md" in e for e in errors)
         assert not any("test_outputs.py" in e for e in errors)
 
-    def test_ase_mode_missing_evals_json(self, tmp_path: Path) -> None:
+    def test_ase_mode_missing_evals_json_is_ok(self, tmp_path: Path) -> None:
+        """Missing evals.json is NOT an error - pipeline will generate it."""
         sub = tmp_path / "skill"
         sub.mkdir()
         (sub / "metadata.yaml").write_text(yaml.dump(VALID_METADATA))
@@ -230,7 +231,9 @@ class TestAseValidation:
         skills.mkdir()
         (skills / "SKILL.md").write_text(SKILL_MD_WITH_FRONTMATTER)
         errors = validate_submission(sub, eval_engine=EvalEngine.ASE)
-        assert any("evals/evals.json is missing" in e for e in errors)
+        # Missing evals.json should NOT cause validation error
+        assert not any("evals" in e.lower() for e in errors)
+        assert errors == []  # Should pass validation
 
     def test_ase_mode_missing_frontmatter(self, tmp_path: Path) -> None:
         sub = tmp_path / "skill"
@@ -316,9 +319,11 @@ class TestAseValidation:
         errors = validate_submission(both_submission, eval_engine=EvalEngine.BOTH)
         assert errors == []
 
-    def test_both_mode_missing_evals(self, harbor_submission: Path) -> None:
+    def test_both_mode_missing_evals_is_ok(self, harbor_submission: Path) -> None:
+        """Missing evals.json is NOT an error - pipeline will generate it."""
         errors = validate_submission(harbor_submission, eval_engine=EvalEngine.BOTH)
-        assert any("evals/evals.json is missing" in e for e in errors)
+        # Missing evals.json should NOT cause validation error (will be generated)
+        assert not any("evals/evals.json is missing" in e for e in errors)
 
     def test_cli_eval_engine_flag(
         self,

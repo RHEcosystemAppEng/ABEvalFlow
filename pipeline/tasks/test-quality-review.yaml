@@ -1,7 +1,7 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  name: ai-review
+  name: test-quality-review
   namespace: ab-eval-flow
 spec:
   description: >-
@@ -75,7 +75,7 @@ spec:
         export PYTHONPATH="$PIPELINE_DIR"
 
         REVIEW_EXIT=0
-        python scripts/ai_review.py "$SUBMISSION_PATH" \
+        python scripts/test_quality_review.py "$SUBMISSION_PATH" \
           | tee /tmp/review-output.json || REVIEW_EXIT=$?
 
         cat /tmp/review-output.json | tr -d '\n' \

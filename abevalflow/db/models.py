@@ -1,8 +1,9 @@
 """SQLAlchemy models for evaluation results persistence.
 
-Two tables:
+Three tables:
 - ``evaluation_runs``: one row per pipeline run (flattened summary for fast queries)
 - ``trials``: one row per trial (drill-down into individual outcomes)
+- ``security_scans``: one row per security scan (independent of evaluation runs)
 """
 
 from __future__ import annotations
@@ -145,4 +146,53 @@ class Trial(Base):
         return (
             f"<Trial {self.trial_name!r} variant={self.variant!r} "
             f"reward={self.reward!r}>"
+        )
+
+
+class SecurityScan(Base):
+    """One row per security scan, independent of evaluation runs.
+
+    Allows querying security findings across all submissions without
+    coupling to the A/B evaluation workflow.
+    """
+
+    __tablename__ = "security_scans"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    pipeline_run_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
+    )
+    submission_name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    scanner: Mapped[str] = mapped_column(String(50), nullable=False)
+    scan_mode: Mapped[str] = mapped_column(String(10), nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    findings_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Only blocking severities (critical, high) are indexed for fast queries.
+    # Medium/low/info counts can be derived from findings_json if needed.
+    critical_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    high_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    findings_json: Mapped[list] = mapped_column(_JsonVariant, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_security_scans_submission_name", "submission_name"),
+        Index(
+            "ix_security_scans_submission_created",
+            "submission_name",
+            "created_at",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<SecurityScan {self.submission_name!r} scanner={self.scanner!r} "
+            f"passed={self.passed!r} findings={self.findings_count}>"
         )

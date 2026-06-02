@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from abevalflow.db.engine import get_engine, init_db, make_session
-from abevalflow.db.models import EvaluationRun, Trial
+from abevalflow.db.models import EvaluationRun, SecurityScan, Trial
 from abevalflow.db.observer import discover_observers, notify_observers
 from abevalflow.report import AnalysisResult
 
@@ -96,6 +96,30 @@ def map_trials(result: AnalysisResult, run: EvaluationRun) -> list[Trial]:
     return trials
 
 
+def map_security_scans(
+    result: AnalysisResult,
+    run_id: str,
+) -> list[SecurityScan]:
+    """Create SecurityScan rows from security_scans in the report."""
+    scans: list[SecurityScan] = []
+    for scan in result.security_scans:
+        findings_list = [f.model_dump() for f in scan.findings]
+        scans.append(
+            SecurityScan(
+                pipeline_run_id=run_id,
+                submission_name=result.submission_name,
+                scanner=scan.scanner,
+                scan_mode=scan.scan_mode.value,
+                passed=scan.passed,
+                findings_count=len(scan.findings),
+                critical_count=scan.severity_counts.get("critical", 0),
+                high_count=scan.severity_counts.get("high", 0),
+                findings_json=findings_list,
+            )
+        )
+    return scans
+
+
 def store(
     report_dir: Path,
     database_url: str | None = None,
@@ -138,9 +162,11 @@ def store(
 
         ev_run = map_result_to_run(result, effective_run_id)
         trials = map_trials(result, ev_run)
+        security_scans = map_security_scans(result, effective_run_id)
 
         session.add(ev_run)
         session.add_all(trials)
+        session.add_all(security_scans)
         try:
             session.commit()
         except IntegrityError:
@@ -152,10 +178,11 @@ def store(
             return True
 
         logger.info(
-            "Stored: submission=%s run_id=%s trials=%d recommendation=%s",
+            "Stored: submission=%s run_id=%s trials=%d security_scans=%d recommendation=%s",
             result.submission_name,
             effective_run_id,
             len(trials),
+            len(security_scans),
             result.summary.recommendation.value,
         )
 

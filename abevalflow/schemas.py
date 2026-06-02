@@ -30,6 +30,12 @@ class EvalEngine(StrEnum):
     BOTH = "both"
 
 
+class SecurityScanMode(StrEnum):
+    DISABLED = "disabled"
+    WARN = "warn"
+    BLOCK = "block"
+
+
 class LlmConfig(BaseModel):
     """Optional per-submission LLM overrides.
 
@@ -224,6 +230,25 @@ class SubmissionMetadata(BaseModel):
             "Evaluation engine: 'harbor' for full containerized A/B evaluation, "
             "'ase' for lightweight LLM-as-a-judge via agent-skills-eval, "
             "'both' to run both engines. Pipeline param takes precedence."
+        ),
+    )
+
+    security_scan: SecurityScanMode = Field(
+        default=SecurityScanMode.WARN,
+        description=(
+            "Security scan mode for all scanners (Cisco, Snyk, etc.): 'disabled' "
+            "skips all security scanning, 'warn' reports findings but continues, "
+            "'block' fails the pipeline on HIGH/CRITICAL findings. "
+            "Pipeline param takes precedence if set."
+        ),
+    )
+
+    security_scan_use_llm: bool = Field(
+        default=False,
+        description=(
+            "Enable LLM-based semantic analysis in security scanning. "
+            "Uses the pipeline's LLM proxy to detect sophisticated threats "
+            "like semantic prompt injection. Adds latency and cost."
         ),
     )
 

@@ -18,6 +18,65 @@ class Recommendation(StrEnum):
     FAIL = "fail"
 
 
+class SecuritySeverity(StrEnum):
+    """Severity levels for security findings."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
+
+
+class SecurityFinding(BaseModel):
+    """A single security finding from a scanner."""
+
+    rule_id: str = Field(description="Scanner rule identifier")
+    severity: SecuritySeverity
+    message: str = Field(description="Human-readable description of the finding")
+    file_path: str | None = Field(default=None, description="File where the finding was detected")
+    line_number: int | None = Field(default=None, description="Line number if applicable")
+    scanner: str = Field(description="Scanner that produced this finding")
+
+
+class ScanMode(StrEnum):
+    """Security scan mode for results.
+
+    Note: DISABLED is not included here because if a scan result exists,
+    scanning was not disabled. The submission-level SecurityScanMode enum
+    in schemas.py includes DISABLED for configuration purposes.
+    """
+
+    WARN = "warn"
+    BLOCK = "block"
+
+
+class SecurityScanResult(BaseModel):
+    """Results from security scanning step."""
+
+    scanner: str = Field(description="Scanner identifier (e.g. cisco)")
+    scan_mode: ScanMode = Field(description="Scan mode used: warn or block")
+    findings: list[SecurityFinding] = Field(default_factory=list)
+    passed: bool = Field(
+        default=True,
+        description="True if scan passed (warn mode always passes; block mode fails on HIGH/CRITICAL)",
+    )
+    sarif_path: str | None = Field(default=None, description="Path to SARIF output file")
+    json_path: str | None = Field(default=None, description="Path to JSON output file")
+    scan_duration_seconds: float | None = Field(default=None, description="Time taken to run scan")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def severity_counts(self) -> dict[str, int]:
+        """Count of findings by severity level, derived from findings list."""
+        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for finding in self.findings:
+            sev = finding.severity.value
+            if sev in counts:
+                counts[sev] += 1
+        return counts
+
+
 class TrialResult(BaseModel):
     """A single trial's outcome."""
 
@@ -67,6 +126,14 @@ class Provenance(BaseModel):
 class AnalysisSummary(BaseModel):
     """Comparison statistics between treatment and control."""
 
+    related_pr: str | None = Field(
+        default=None,
+        description="URL of the PR that triggered this evaluation",
+    )
+    llm: str | None = Field(
+        default=None,
+        description="LLM model used for evaluation (e.g. 'Claude Sonnet 4.6 (vertex_ai)')",
+    )
     treatment: VariantSummary
     control: VariantSummary
     uplift: float = Field(description="treatment pass_rate - control pass_rate (secondary; see mean_reward_gap)")
@@ -93,4 +160,8 @@ class AnalysisResult(BaseModel):
     summary: AnalysisSummary
     trials: dict[str, list[TrialResult]] = Field(
         description="Per-variant list of trial outcomes, keyed by 'treatment'/'control'",
+    )
+    security_scans: list[SecurityScanResult] = Field(
+        default_factory=list,
+        description="Results from security scanners. Empty if scanning disabled.",
     )

@@ -114,7 +114,7 @@ spec:
       description: >-
         Run the AI-assisted test generation step. The step self-skips
         for submissions with generation_mode: manual.
-    - name: enable-ai-review
+    - name: enable-test-quality-review
       type: string
       default: "true"
       description: >-
@@ -163,6 +163,14 @@ spec:
       default: ""
       description: >-
         Judge model for agent-skills-eval (defaults to llm-model if empty)
+    # Security scanning
+    - name: security-scan
+      type: string
+      default: ""
+      description: >-
+        Cisco skill-scanner mode override. Empty string uses submission's
+        metadata.yaml preference. 'disabled' skips scan, 'warn' reports
+        findings but continues, 'block' fails on HIGH/CRITICAL findings.
 
   results:
     - name: recommendation
@@ -224,6 +232,8 @@ spec:
       params:
         - name: submission-dir
           value: $(params.submission-dir)
+        - name: eval-engine
+          value: $(params.eval-engine)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
@@ -253,6 +263,8 @@ spec:
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
           value: $(params.pipeline-repo-revision)
+        - name: pipeline-run-name
+          value: $(context.pipelineRun.name)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -260,17 +272,17 @@ spec:
     # ------------------------------------------------------------------
     # Step 1c: AI quality review (optional, after validation)
     # ------------------------------------------------------------------
-    - name: ai-review
+    - name: test-quality-review
       when:
         - input: $(params.agent-type)
           operator: notin
           values: ["oracle"]
-        - input: $(params.enable-ai-review)
+        - input: $(params.enable-test-quality-review)
           operator: in
           values: ["true"]
       runAfter: ["validate"]
       taskRef:
-        name: ai-review
+        name: test-quality-review
       params:
         - name: submission-dir
           value: $(params.submission-dir)
@@ -287,6 +299,40 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
+    # Step 1d: Security scan (optional, after validation)
+    # Runs Cisco skill-scanner to detect prompt injection, data
+    # exfiltration, and malicious code patterns. Skipped when disabled.
+    # ------------------------------------------------------------------
+    - name: security-scan
+      runAfter: ["validate"]
+      taskRef:
+        name: security-scan
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: pipeline-scan-mode
+          value: $(params.security-scan)
+        - name: submission-scan-mode
+          value: $(tasks.validate.results.security-scan)
+        - name: use-llm
+          value: $(tasks.validate.results.security-scan-use-llm)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: llm-api-base
+          value: $(params.llm-api-base)
+        - name: llm-api-key
+          value: $(params.llm-api-key)
+        - name: report-prefix
+          value: $(tasks.validate.results.report-prefix)
+        - name: pipeline-run-name
+          value: $(context.pipelineRun.name)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
     # Step 2: Scaffold treatment and control task directories
     #         (Harbor path only — skipped for ASE-only evaluation)
     # ------------------------------------------------------------------
@@ -295,7 +341,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["harbor", "both"]
-      runAfter: ["validate", "ai-review"]
+      runAfter: ["validate", "test-quality-review", "security-scan"]
       taskRef:
         name: scaffold-submission
       params:
@@ -399,7 +445,7 @@ spec:
         - input: $(params.eval-engine)
           operator: in
           values: ["ase", "both"]
-      runAfter: ["validate"]
+      runAfter: ["validate", "security-scan"]
       timeout: "2h"
       taskRef:
         name: ase-eval
@@ -456,10 +502,18 @@ spec:
           value: $(params.harbor-fork-revision)
         - name: uplift-threshold
           value: $(params.uplift-threshold)
+        - name: security-scan-mode
+          value: $(tasks.security-scan.results.effective-mode)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
           value: $(params.pipeline-repo-revision)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: repo-name
+          value: $(params.repo-name)
+        - name: pr-number
+          value: $(params.pr-number)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -504,6 +558,8 @@ spec:
           value: $(tasks.validate.results.submission-name)
         - name: pipeline-run-id
           value: $(context.pipelineRun.name)
+        - name: report-prefix
+          value: $(tasks.validate.results.report-prefix)
         - name: recommendation
           value: $(tasks.analyze.results.recommendation)
         - name: eval-engine

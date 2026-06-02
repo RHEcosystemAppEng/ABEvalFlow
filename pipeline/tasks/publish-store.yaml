@@ -18,6 +18,12 @@ spec:
     - name: pipeline-run-id
       type: string
       description: Tekton PipelineRun name
+    - name: report-prefix
+      type: string
+      default: ""
+      description: >-
+        MinIO report prefix (YYYYMMDD_HHMMSS_submissionname_runid).
+        If empty, one will be generated (legacy behavior).
     - name: recommendation
       type: string
       description: "'pass' or 'fail' from the analyze step"
@@ -168,6 +174,9 @@ spec:
 
         ARGS+=(--eval-engine "$(params.eval-engine)")
         ARGS+=(--workspace-root "$(workspaces.source.path)")
+        if [ -n "$(params.report-prefix)" ]; then
+          ARGS+=(--report-prefix "$(params.report-prefix)")
+        fi
 
         python scripts/publish.py "${ARGS[@]}"
 

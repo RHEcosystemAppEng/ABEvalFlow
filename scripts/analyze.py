@@ -42,6 +42,10 @@ from abevalflow.report import (
     AnalysisSummary,
     Provenance,
     Recommendation,
+    ScanMode,
+    SecurityFinding,
+    SecurityScanResult,
+    SecuritySeverity,
     TrialResult,
     VariantSummary,
 )
@@ -49,6 +53,56 @@ from abevalflow.report import (
 logger = logging.getLogger(__name__)
 
 VARIANTS = ("treatment", "control")
+
+
+# ---------------------------------------------------------------------------
+# Security scan parsing
+# ---------------------------------------------------------------------------
+
+def parse_security_scan(report_dir: Path, scan_mode: str | None) -> SecurityScanResult | None:
+    """Parse security-scan.json if it exists in the report directory.
+
+    Returns None if scanning was disabled or file doesn't exist.
+    """
+    scan_json = report_dir / "security-scan.json"
+    if not scan_json.exists():
+        logger.debug("No security-scan.json found, security scanning was disabled")
+        return None
+
+    if not scan_mode:
+        scan_mode = "warn"
+
+    try:
+        data = json.loads(scan_json.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to parse security-scan.json: %s", e)
+        return None
+
+    findings: list[SecurityFinding] = []
+    for f in data.get("findings", []):
+        try:
+            sev_str = f.get("severity", "info").lower()
+            severity = SecuritySeverity(sev_str) if sev_str in SecuritySeverity.__members__.values() else SecuritySeverity.INFO
+            findings.append(SecurityFinding(
+                rule_id=f.get("rule_id", f.get("id", "unknown")),
+                severity=severity,
+                message=f.get("message", f.get("description", "")),
+                file_path=f.get("file_path", f.get("location", {}).get("file")),
+                line_number=f.get("line_number", f.get("location", {}).get("line")),
+                scanner="cisco",
+            ))
+        except Exception as e:
+            logger.warning("Failed to parse finding: %s", e)
+
+    high_or_critical = sum(1 for f in findings if f.severity in (SecuritySeverity.CRITICAL, SecuritySeverity.HIGH))
+    passed = scan_mode != "block" or high_or_critical == 0
+
+    return SecurityScanResult(
+        scanner="cisco",
+        scan_mode=ScanMode(scan_mode),
+        findings=findings,
+        passed=passed,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +223,8 @@ def build_analysis(
     submission_name: str,
     threshold: float = 0.0,
     provenance: Provenance | None = None,
+    related_pr: str | None = None,
+    llm_label: str | None = None,
 ) -> AnalysisResult:
     """Parse results, compute stats, and assemble the full analysis model."""
     treatment_trials = parse_variant_trials(results_dir / "treatment")
@@ -208,6 +264,8 @@ def build_analysis(
         submission_name=submission_name,
         provenance=provenance or Provenance(),
         summary=AnalysisSummary(
+            related_pr=related_pr,
+            llm=llm_label,
             treatment=t_summary,
             control=c_summary,
             uplift=uplift,
@@ -251,6 +309,12 @@ def render_markdown(result: AnalysisResult) -> str:
 
     # --- Summary table ---
     lines.append("## Summary\n")
+    if s.related_pr:
+        lines.append(f"* Related PR: {s.related_pr}")
+    if s.llm:
+        lines.append(f"* LLM: {s.llm}")
+    if s.related_pr or s.llm:
+        lines.append("")
     lines.append("| Metric | Treatment | Control |")
     lines.append("|--------|-----------|---------|")
     lines.append(f"| Trials | {t.n_trials} | {c.n_trials} |")
@@ -265,9 +329,10 @@ def render_markdown(result: AnalysisResult) -> str:
 
     # --- Comparison ---
     lines.append("## Comparison\n")
-    lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
     if s.mean_reward_gap is not None:
-        lines.append(f"- **Mean reward gap:** {s.mean_reward_gap:+.4f}")
+        lines.append(f"- **Mean reward gap (Uplift):** {s.mean_reward_gap:+.4f}")
+    else:
+        lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
     lines.append(
         f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}"
     )
@@ -292,6 +357,36 @@ def render_markdown(result: AnalysisResult) -> str:
     if prov.harbor_fork_revision:
         lines.append(f"- Harbor fork revision: `{prov.harbor_fork_revision}`")
     lines.append("")
+
+    # --- Security scans ---
+    if result.security_scans:
+        lines.append("## Security Scans\n")
+        for scan in result.security_scans:
+            status = "PASSED" if scan.passed else "FAILED"
+            lines.append(f"### {scan.scanner.upper()} Scanner [{status}]\n")
+            lines.append(f"- **Mode:** {scan.scan_mode}")
+            lines.append(f"- **Status:** {status}")
+            counts = scan.severity_counts
+            lines.append(
+                f"- **Findings:** {len(scan.findings)} total "
+                f"({counts['critical']} critical, {counts['high']} high, "
+                f"{counts['medium']} medium, {counts['low']} low)"
+            )
+            if scan.findings:
+                lines.append("\n<details>\n<summary>Finding Details</summary>\n")
+                lines.append("| Severity | Rule | Message | File |")
+                lines.append("|----------|------|---------|------|")
+                for f in scan.findings[:20]:  # Limit to first 20
+                    sev = f.severity.value.upper()
+                    file_info = f.file_path or "-"
+                    if f.line_number:
+                        file_info += f":{f.line_number}"
+                    msg = f.message[:60] + "..." if len(f.message) > 60 else f.message
+                    lines.append(f"| {sev} | {f.rule_id} | {msg} | {file_info} |")
+                if len(scan.findings) > 20:
+                    lines.append(f"\n*... and {len(scan.findings) - 20} more findings*")
+                lines.append("\n</details>\n")
+            lines.append("")
 
     # --- Per-trial details ---
     lines.append("## Trial Details\n")
@@ -347,6 +442,25 @@ def main(argv: list[str] | None = None) -> int:
         default="harbor",
         help="Evaluation engine used (for provenance tagging)",
     )
+    parser.add_argument(
+        "--security-scan-mode",
+        type=str,
+        choices=["disabled", "warn", "block"],
+        default="disabled",
+        help="Cisco security scan mode (disabled, warn, block)",
+    )
+    parser.add_argument(
+        "--pr-url",
+        type=str,
+        default=None,
+        help="URL of the PR that triggered this evaluation",
+    )
+    parser.add_argument(
+        "--llm-label",
+        type=str,
+        default=None,
+        help="LLM model label for the report (e.g. 'Claude Sonnet 4.6 (vertex_ai)')",
+    )
 
     args = parser.parse_args(argv)
 
@@ -368,7 +482,22 @@ def main(argv: list[str] | None = None) -> int:
         submission_name=args.submission_name,
         threshold=args.threshold,
         provenance=provenance,
+        related_pr=args.pr_url,
+        llm_label=args.llm_label,
     )
+
+    # Include security scan results if available
+    if args.security_scan_mode != "disabled":
+        security_result = parse_security_scan(args.output_dir, args.security_scan_mode)
+        if security_result:
+            result.security_scans.append(security_result)
+            logger.info(
+                "Security scan: %d findings (%d critical, %d high), passed=%s",
+                len(security_result.findings),
+                security_result.severity_counts["critical"],
+                security_result.severity_counts["high"],
+                security_result.passed,
+            )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
