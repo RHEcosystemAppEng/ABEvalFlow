@@ -6,26 +6,41 @@ Automated Tekton-orchestrated pipeline on OpenShift for evaluating AI skill subm
 
 1. **Submit** — Push a skill directory to the submissions repo; a Tekton EventListener triggers the pipeline.
 2. **Validate** — Checks structure, compiles test files, validates `metadata.yaml` schema.
-3. **Scaffold** — Generates two container variants via Jinja2 templates and an experiment strategy:
-   - **Treatment** — includes the experimental material (e.g., skills and reference docs for a skill experiment).
-   - **Control** — baseline without the experimental material.
-4. **Build & Push** — Builds both images and pushes to the OpenShift internal registry.
-5. **Evaluate** — Harbor runs N attempts per variant (default N=20, 40 total) using a custom OpenShift backend.
-6. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value), and generates heatmaps.
-7. **Publish** — Stores reports, promotes passing images to Quay.io, and records results.
+3. **Generate** — AI-assisted generation of missing test artifacts (optional):
+   - Harbor: generates `instruction.md` and `test_outputs.py` from `SKILL.md`
+   - ASE: generates `evals.json` from `SKILL.md` if not provided
+4. **Quality Review** — AI-powered review of skill/test coherence (advisory, non-blocking).
+5. **Security Scan** — Optional Cisco AI Defense scan for prompt injection, data exfiltration risks.
+6. **Evaluate** — Two evaluation engines supported:
+   - **Harbor** — Full agent evaluation with container isolation:
+     - Scaffold treatment/control container variants
+     - Build & push images to OpenShift internal registry
+     - Run N=20 attempts per variant
+   - **ASE** — Lightweight LLM-as-judge evaluation using `evals.json` assertions (no containers).
+7. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value).
+8. **Publish** — Stores reports to MinIO, records results to PostgreSQL.
 
 ## Repository Structure
 
 ```
 ABEvalFlow/
-├── Docs/                    # ADR, implementation plan
-├── pipeline/                # Tekton pipeline and task definitions
-│   ├── pipeline.yaml
-│   ├── triggers/            # EventListener, TriggerTemplate, TriggerBinding, Interceptor
-│   └── tasks/               # validate, scaffold, build-push, harbor-eval, analyze-report, publish-store
+├── Docs/                    # ADR, implementation plan, guides
+├── pipeline/
+│   ├── pipeline.yaml        # Main pipeline definition
+│   ├── triggers/            # EventListener, TriggerTemplate, TriggerBinding
+│   └── tasks/
+│       ├── validate.yaml
+│       ├── generate_tests.yaml
+│       ├── test-quality-review.yaml
+│       ├── security-scan.yaml
+│       ├── scaffold.yaml
+│       ├── build-push.yaml
+│       ├── harbor-eval.yaml
+│       ├── analyze-report.yaml
+│       └── publish-store.yaml
 ├── templates/               # Jinja2 templates (Dockerfiles, test.sh, task.toml)
 ├── scripts/                 # Python scripts invoked by pipeline tasks
-├── config/                  # K8s manifests (RBAC, LiteLLM, pipeline config)
+├── config/                  # K8s manifests (RBAC, PostgreSQL, LiteLLM)
 └── tests/                   # Unit and integration tests
 ```
 
@@ -35,22 +50,38 @@ ABEvalFlow/
 |---|---|
 | [skill-submissions](https://github.com/RHEcosystemAppEng/skill-submissions) | Submission intake — users push skills here to trigger evaluation |
 | [skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) | Harbor fork with OpenShift backend |
+| [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Security scanner for prompt injection and data exfiltration detection |
 
-## Submission Contract
+## Submission Formats
 
-A skill submission directory follows this structure:
+### Harbor Format (full agent evaluation)
 
 ```
 my-skill-name/
 ├── instruction.md       # Task description (required)
-├── skills/              # Must contain SKILL.md (required, canonical name)
-├── docs/                # Reference documentation (optional)
+├── skills/
+│   └── SKILL.md         # Skill definition (required)
 ├── tests/
 │   ├── test_outputs.py  # Verification tests (required)
 │   └── llm_judge.py     # LLM-based judge (optional)
+├── docs/                # Reference documentation (optional)
 ├── supportive/          # Mock MCPs, data files (optional, <50MB)
-└── metadata.yaml        # Name, persona, generation_mode, etc. (required)
+└── metadata.yaml        # Name, persona, etc. (required)
 ```
+
+### ASE Format (lightweight LLM-as-judge)
+
+```
+my-skill-name/
+├── skills/
+│   └── SKILL.md         # Skill definition (required)
+├── evals/
+│   ├── evals.json       # Evaluation prompts and assertions (optional, generated if missing)
+│   └── files/           # Test data files (optional)
+└── metadata.yaml        # Name, etc. (required)
+```
+
+Trigger with `eval-engine=ase` parameter. See [Trigger Guide](Docs/trigger_guide.md) for details.
 
 ## LLM Access
 
@@ -72,8 +103,8 @@ The pipeline is LLM-agnostic. Three modes are supported:
 
 ## Documentation
 
-- [ADR: Skill Evaluation Pipeline and Harbor Execution Strategy](Docs/ADR_Skill_Evaluation_Pipeline_and_Harbor_Execution_Strategy.txt)
-- [Implementation Plan](Docs/implementation_plan.md)
+- [Trigger Guide](Docs/trigger_guide.md) — How to submit skills for evaluation
+- [ADR: Skill Evaluation Pipeline](Docs/ADR_Skill_Evaluation_Pipeline_and_Harbor_Execution_Strategy.txt)
 
 ## License
 

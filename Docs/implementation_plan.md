@@ -57,10 +57,14 @@ ABEvalFlow/
 │   │   ├── trigger-binding.yaml    # TriggerBinding
 │   │   └── interceptor.yaml        # Filters pushes to submissions/ path
 │   └── tasks/
-│       ├── validate.yaml           # Step 2
+│       ├── validate.yaml           # Step 2: validation + metadata extraction
+│       ├── generate_tests.yaml     # Step 2b: AI test generation (optional)
+│       ├── test-quality-review.yaml # Step 2c: AI quality review (advisory)
+│       ├── security-scan.yaml      # Step 2d: Security scanning (optional)
 │       ├── scaffold.yaml           # Step 3
 │       ├── build-push.yaml         # Steps 4-5
-│       ├── harbor-eval.yaml        # Step 6
+│       ├── harbor-eval.yaml        # Step 6a: Harbor evaluation
+│       ├── ase-eval.yaml           # Step 6b: ASE evaluation (alternative)
 │       ├── analyze-report.yaml     # Step 7
 │       └── publish-store.yaml      # Step 8
 ├── templates/                      # Jinja2 templates for scaffolding
@@ -73,7 +77,7 @@ ABEvalFlow/
 │   ├── analyze.py                  # Analysis & report generation (Step 7)
 │   ├── publish.py                  # Publish & store logic (Step 8)
 │   ├── generate_tests.py           # AI-generated tests (optional path)
-│   ├── ai_review.py                # Independent AI evaluation
+│   ├── test_quality_review.py      # Independent AI quality review
 │   └── monitor.py                  # Degradation detection (Phase 9)
 ├── config/                         # K8s manifests for supporting infra
 │   ├── litellm-config.yaml         # Optional: only for Vertex AI mode
@@ -431,17 +435,70 @@ Pipeline task order when AI features are enabled:
 - [ ] Add a conditional step in the pipeline: if `generation_mode: ai`, invoke generation before validation.
 - [ ] Safeguard: if `generation_mode: ai`, ALL of `instruction.md` and `test_outputs.py` must be produced by `generate_tests.py` or the run fails. Partial manual + partial AI is not supported.
 
-### 7.2 Independent AI Evaluation (Decision #3)
+### 7.2 Independent AI Quality Review (Decision #3)
 
-- [ ] For both paths, run an independent AI review of the skill, test, and task quality before proceeding to Harbor evaluation.
-- [ ] Create `scripts/ai_review.py` that uses the LLM to assess coherence, coverage, and potential issues.
-- [ ] Add as a pipeline task between validation and scaffolding.
+- [x] For both paths, run an independent AI review of the skill, test, and task quality before proceeding to evaluation.
+- [x] Create `scripts/test_quality_review.py` that uses the LLM to assess coherence, coverage, clarity, feasibility, and robustness.
+- [x] Add as a pipeline task (`test-quality-review`) between validation and scaffolding.
+- [x] Support both Harbor (`instruction.md` + `test_outputs.py`) and ASE (`evals.json`) formats.
+- [x] Review is **advisory** (non-blocking) — always exits 0 regardless of recommendation.
 
-### 7.3 Definition of Done
+### 7.3 ASE (Agent Skills Eval) Integration
 
-- [ ] AI generation produces valid submission structure when enabled.
-- [ ] AI review produces structured quality assessment.
-- [ ] Feature flags correctly toggle these steps.
+> **Jira:** APPENG-5312
+
+ABEvalFlow supports two evaluation engines:
+
+| Engine | Use Case | Eval Format |
+|--------|----------|-------------|
+| **Harbor** | Full agent evaluation with container isolation | `instruction.md` + `tests/test_outputs.py` |
+| **ASE** | Lightweight LLM-as-judge evaluation | `evals/evals.json` with prompts and assertions |
+
+ASE integration includes:
+- [x] `eval-engine` pipeline parameter (`harbor` / `ase` / `both`)
+- [x] `scripts/generate_ase_evals.py` — generates `evals.json` from `SKILL.md` if not provided
+- [x] Semantic review of generated `evals.json` (skill specificity, prompt quality, assertion alignment)
+- [x] Upload generated files to MinIO under `generated/` folder
+- [x] ASE results aggregated into unified `report.json` format
+
+### 7.4 Security Scanning (APPENG-5305)
+
+Optional security scan step using Cisco AI Defense `skill-scanner` to detect:
+- Prompt injection patterns
+- Data exfiltration risks
+- Malicious code patterns
+
+Implementation:
+- [x] `pipeline/tasks/security-scan.yaml` — Tekton task with configurable modes
+- [x] Three modes: `disabled` (skip), `warn` (report only), `block` (fail on HIGH/CRITICAL)
+- [x] Submission-level control via `metadata.yaml` (`security_scan: warn|block|disabled`)
+- [x] LLM semantic analysis using pipeline's configured model
+- [x] **Immediate persistence**: results uploaded to MinIO and written to PostgreSQL `security_scans` table as soon as scan completes (not waiting for pipeline end)
+- [x] SARIF output format for IDE/CI integration
+
+Database schema (`security_scans` table):
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID | PK |
+| `pipeline_run_id` | VARCHAR(255) | UNIQUE, NOT NULL |
+| `submission_name` | VARCHAR(255) | NOT NULL |
+| `scanner` | VARCHAR(50) | e.g., "cisco" |
+| `scan_mode` | VARCHAR(20) | warn/block |
+| `passed` | BOOLEAN | NOT NULL |
+| `findings_count` | INT | Total findings |
+| `critical_count` | INT | Critical severity |
+| `high_count` | INT | High severity |
+| `findings_json` | JSON | Full scan results |
+| `created_at` | TIMESTAMP TZ | NOT NULL |
+
+### 7.5 Definition of Done
+
+- [x] AI generation produces valid submission structure when enabled.
+- [x] AI quality review produces structured assessment (advisory, non-blocking).
+- [x] ASE evaluation runs when `eval-engine=ase` or `both`.
+- [x] Security scan runs based on mode configuration.
+- [x] Security results persisted immediately to MinIO and DB.
 
 ---
 
