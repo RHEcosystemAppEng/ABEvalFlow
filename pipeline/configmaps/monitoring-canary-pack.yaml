@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-canary-pack
+  namespace: ab-eval-flow
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: monitoring
+data:
+  config.yaml: |
+    # Monitoring configuration for continuous performance tracking
+    # Edit this file to add/remove skills from the canary pack
+
+    defaults:
+      # Ratio threshold: current_score / previous_score
+      # Alert if below this value (e.g., 0.85 = 15% drop triggers alert)
+      threshold: 0.85
+
+      # Number of trials per evaluation run
+      trials: 20
+
+      # Default evaluation engine (harbor or ase)
+      eval_engine: harbor
+
+    skills:
+      - name: lightspeed-validator
+        repo: RHEcosystemAppEng/skill-submissions
+        path: submissions/rh-sre-mcp-lightspeed-validator
+        eval_engine: harbor
+        # Optional: override default threshold for this skill
+        # threshold: 0.90

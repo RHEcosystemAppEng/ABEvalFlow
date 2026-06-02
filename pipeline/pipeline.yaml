@@ -128,6 +128,20 @@ spec:
     - name: pr-number
       type: string
       default: ""
+    # Monitoring params
+    - name: enable-monitoring
+      type: string
+      default: "false"
+      description: >-
+        Enable degradation monitoring. When true, compares this run's score
+        against the previous run and alerts if degraded. Used by scheduled
+        monitoring jobs.
+    - name: monitoring-threshold
+      type: string
+      default: "0.85"
+      description: >-
+        Degradation threshold as a ratio. Alert if current/previous < threshold.
+        Default 0.85 means a 15% drop triggers an alert.
 
   results:
     - name: recommendation
@@ -403,6 +417,26 @@ spec:
   # PHASE 7: CLEANUP (finally - always runs)
   # ========================================================================
   finally:
+    # Check for degradation and send alerts (when monitoring enabled)
+    - name: check-degradation
+      when:
+        - input: $(params.enable-monitoring)
+          operator: in
+          values: ["true", "True", "1"]
+      taskRef:
+        name: check-degradation
+      params:
+        - name: submission-name
+          value: $(tasks.prepare.results.submission-name)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: threshold
+          value: $(params.monitoring-threshold)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+
     - name: cleanup
       taskRef:
         name: cleanup-pvc
