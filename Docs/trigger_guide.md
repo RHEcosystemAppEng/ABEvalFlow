@@ -89,6 +89,36 @@ my-skill/
 
 See `examples/sample_skill/` for a minimal working example (manual mode).
 
+### ASE (Agent Skills Eval) Mode
+
+For lightweight LLM-as-judge evaluation without full container isolation,
+use the ASE format:
+
+```
+submissions/<skill-name>/
+├── metadata.yaml              # Required
+├── skills/
+│   └── SKILL.md               # Required — skill definition
+└── evals/
+    ├── evals.json             # Optional — generated if missing
+    └── files/                 # Optional — test data files
+```
+
+Trigger with `eval-engine=ase`:
+
+```bash
+tkn pipeline start abevalflow-pipeline \
+  -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
+  -p revision=main \
+  -p submission-dir=my-skill \
+  -p eval-engine=ase \
+  -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
+  -n ab-eval-flow
+```
+
+If `evals/evals.json` is not provided, the pipeline generates it from
+`SKILL.md` using an LLM.
+
 ### AI-Assisted Mode
 
 If you only have the skill definition and want the pipeline to generate the
@@ -140,11 +170,18 @@ tags:
   - openshift
 ```
 
-For AI-assisted mode (not yet available):
+For AI-assisted mode:
 
 ```yaml
 name: my-skill
 generation_mode: ai
+```
+
+For security scan configuration:
+
+```yaml
+name: my-skill
+security_scan: warn  # Options: disabled, warn (default), block
 ```
 
 **Name rules:** lowercase letters, numbers, hyphens, dots, and underscores
@@ -456,11 +493,16 @@ spec:
     name: abevalflow-pipeline
   params:
     - name: repo-url
-      value: https://github.com/RHEcosystemAppEng/agentic-collections.git
+      value: https://github.com/RHEcosystemAppEng/skill-submissions.git
     - name: revision
       value: main
     - name: submission-dir
       value: my-skill
+    # Optional parameters:
+    # - name: eval-engine
+    #   value: harbor  # Options: harbor (default), ase, both
+    # - name: llm-model
+    #   value: claude-sonnet  # LLM model for evaluation
   workspaces:
     - name: shared-workspace
       volumeClaimTemplate:
@@ -488,4 +530,5 @@ oc create -f pipelinerun.yaml -n ab-eval-flow
 | TriggerTemplate | `pipeline/triggers/trigger-template.yaml` | Creates PipelineRun from params |
 | Validate Task | `pipeline/tasks/validate.yaml` | Validates submission structure and schema |
 | Generate Tests | `pipeline/tasks/generate_tests.yaml` | AI-assisted test generation (optional) |
-| AI Review | `pipeline/tasks/ai_review.yaml` | AI quality review of submission (optional) |
+| Test Quality Review | `pipeline/tasks/test-quality-review.yaml` | AI quality review of submission (advisory, non-blocking) |
+| Security Scan | `pipeline/tasks/security-scan.yaml` | Cisco AI Defense security scanning (optional) |
