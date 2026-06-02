@@ -28,7 +28,7 @@ times in two configurations:
     ┌──────────▼──────────┐     ┌──────────▼──────────┐
     │   Treatment (WITH   │     │   Control (WITHOUT   │
     │   your skill)       │     │   your skill)        │
-    │   × 20 trials       │     │   × 20 trials        │
+    │   × K trials        │     │   × K trials         │
     └──────────┬──────────┘     └──────────┬──────────┘
                │                           │
                └─────────────┬─────────────┘
@@ -74,7 +74,10 @@ and tests automatically using an AI assistant. To use this mode, set
 
 ## Step 1: Create your submission folder
 
-Create a folder with your skill name. The folder must contain these files:
+Create a folder with your skill name. The structure depends on which evaluation
+engine you're using:
+
+### Harbor Format (full agent evaluation)
 
 ```
 my-skill/
@@ -84,7 +87,21 @@ my-skill/
 │   └── SKILL.md           ← your skill file (required)
 ├── tests/
 │   └── test_outputs.py    ← pytest tests that verify the solution (required in manual mode)
-└── docs/                  ← reference docs for the agent (optional)
+│   └── llm_judge.py       ← LLM-based judge (optional)
+├── docs/                  ← reference docs for the agent (optional)
+└── supportive/            ← mock MCPs, data files (optional, <50MB)
+```
+
+### ASE Format (lightweight LLM-as-judge)
+
+```
+my-skill/
+├── metadata.yaml          ← describes your submission (required)
+├── skills/
+│   └── SKILL.md           ← your skill file (required)
+└── evals/
+    ├── evals.json         ← evaluation prompts and assertions (optional, generated if missing)
+    └── files/             ← test data files referenced by evals (optional)
 ```
 
 See `examples/sample_skill/` for a minimal working example (manual mode).
@@ -132,9 +149,12 @@ submissions/<skill-name>/
     └── SKILL.md               # Required — the pipeline generates the rest
 ```
 
-The pipeline will use an LLM to generate `instruction.md` and
+**Harbor mode:** The pipeline will use an LLM to generate `instruction.md` and
 `tests/test_outputs.py` from the skill definition before validation.
 See `examples/sample_skill_ai/` for a minimal AI-mode example.
+
+**ASE mode:** The pipeline will generate `evals/evals.json` from `SKILL.md` if
+not provided. No `instruction.md` or `test_outputs.py` needed.
 
 To enable AI-assisted features, pass the feature flags when triggering:
 
@@ -290,21 +310,32 @@ That's it. The push triggers the pipeline automatically.
 After you push, the pipeline runs automatically:
 
 1. **Validates** your files (structure, naming, tests compile)
-2. **Builds** two container images (one with your skill, one without)
-3. **Runs** 20 trials per variant (40 total) against an LLM agent
-4. **Analyzes** pass rates, computes uplift and statistical significance
-5. **Stores** results in the database for historical tracking
-6. **Reports** a PASS or FAIL recommendation
+2. **Generates** missing test artifacts if needed (instruction.md, evals.json)
+3. **Reviews** submission quality (advisory, non-blocking)
+4. **Scans** for security issues (optional)
+5. **Evaluates** using Harbor (container-based) or ASE (LLM-as-judge)
+6. **Analyzes** pass rates, computes uplift and statistical significance
+7. **Stores** results to MinIO and PostgreSQL
+8. **Reports** a PASS or FAIL recommendation
 
-Typical runtime: **10-30 minutes** depending on task complexity.
+Typical runtime: **5-30 minutes** depending on evaluation engine and task complexity.
 
 ### Where to find results
 
 - **Pipeline status:** visible in the OpenShift console under
   Pipelines > PipelineRuns in the `ab-eval-flow` namespace
-- **Report:** a detailed Markdown/JSON report with pass rates, uplift,
-  p-values, and a PASS/FAIL recommendation
-- **Historical results:** queryable via `scripts/query_results.py`
+- **Tekton results:** task outputs available in PipelineRun status
+
+**MinIO (S3 object storage):**
+- `report.json` / `report.md` — evaluation report with pass rates, uplift, p-values
+- `security-scan.json` / `security-scan.sarif` — security scan findings
+- `generated/` — AI-generated files (instruction.md, test_outputs.py, evals.json)
+- `debug/` — trial logs, agent outputs, error traces
+
+**PostgreSQL database:**
+- `analysis_results` table — evaluation summaries (pass rates, uplift, p-values)
+- `security_scans` table — security scan results per pipeline run
+- Historical results queryable via `scripts/query_results.py`
 
 ---
 

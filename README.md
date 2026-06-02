@@ -6,17 +6,19 @@ Automated Tekton-orchestrated pipeline on OpenShift for evaluating AI skill subm
 
 1. **Submit** — Push a skill directory to the submissions repo; a Tekton EventListener triggers the pipeline.
 2. **Validate** — Checks structure, compiles test files, validates `metadata.yaml` schema.
-3. **Quality Review** — AI-powered review of skill/test coherence (advisory, non-blocking).
-4. **Security Scan** — Optional Cisco AI Defense scan for prompt injection, data exfiltration risks.
-5. **Scaffold** — Generates two container variants via Jinja2 templates and an experiment strategy:
-   - **Treatment** — includes the experimental material (e.g., skills and reference docs).
-   - **Control** — baseline without the experimental material.
-6. **Build & Push** — Builds both images and pushes to the OpenShift internal registry.
-7. **Evaluate** — Two evaluation engines supported:
-   - **Harbor** — Full agent evaluation with container isolation (N=20 attempts per variant).
-   - **ASE** — Lightweight LLM-as-judge evaluation using `evals.json` assertions.
-8. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value).
-9. **Publish** — Stores reports to MinIO, records results to PostgreSQL, promotes passing images.
+3. **Generate** — AI-assisted generation of missing test artifacts (optional):
+   - Harbor: generates `instruction.md` and `test_outputs.py` from `SKILL.md`
+   - ASE: generates `evals.json` from `SKILL.md` if not provided
+4. **Quality Review** — AI-powered review of skill/test coherence (advisory, non-blocking).
+5. **Security Scan** — Optional Cisco AI Defense scan for prompt injection, data exfiltration risks.
+6. **Evaluate** — Two evaluation engines supported:
+   - **Harbor** — Full agent evaluation with container isolation:
+     - Scaffold treatment/control container variants
+     - Build & push images to OpenShift internal registry
+     - Run N=20 attempts per variant
+   - **ASE** — Lightweight LLM-as-judge evaluation using `evals.json` assertions (no containers).
+7. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value).
+8. **Publish** — Stores reports to MinIO, records results to PostgreSQL.
 
 ## Repository Structure
 
@@ -48,6 +50,7 @@ ABEvalFlow/
 |---|---|
 | [skill-submissions](https://github.com/RHEcosystemAppEng/skill-submissions) | Submission intake — users push skills here to trigger evaluation |
 | [skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) | Harbor fork with OpenShift backend |
+| [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Security scanner for prompt injection and data exfiltration detection |
 
 ## Submission Formats
 
@@ -101,7 +104,6 @@ The pipeline is LLM-agnostic. Three modes are supported:
 ## Documentation
 
 - [Trigger Guide](Docs/trigger_guide.md) — How to submit skills for evaluation
-- [Implementation Plan](Docs/implementation_plan.md) — Phased development plan
 - [ADR: Skill Evaluation Pipeline](Docs/ADR_Skill_Evaluation_Pipeline_and_Harbor_Execution_Strategy.txt)
 
 ## License
