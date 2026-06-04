@@ -50,6 +50,10 @@ spec:
       description: >-
         MinIO report prefix (YYYYMMDD_HHMMSS_submissionname_runid) for consistent
         artifact paths across all pipeline tasks
+    - name: mcp-credentials-secret
+      description: >-
+        Name of the secret containing MCP credentials (for MCPChecker eval).
+        Empty if not using MCPChecker.
   steps:
     - name: check-workspace-size
       image: registry.access.redhat.com/ubi9/python-311:latest
@@ -130,10 +134,19 @@ spec:
           REPORT_PREFIX="${TIMESTAMP}_${SUBMISSION_NAME}_$(params.pipeline-run-name)"
           echo -n "$REPORT_PREFIX" > "$(results.report-prefix.path)"
           echo "Report prefix: $REPORT_PREFIX"
+
+          # Extract mcp.credentials_secret (for MCPChecker, empty if not set)
+          python3 -c "
+        import yaml, sys
+        meta = yaml.safe_load(open(sys.argv[1]))
+        mcp = meta.get('mcp') or {}
+        print(mcp.get('credentials_secret', ''), end='')
+        " "$SUBMISSION_PATH/metadata.yaml" > "$(results.mcp-credentials-secret.path)"
         else
           echo "INVALID" > "$(results.submission-name.path)"
           echo "warn" > "$(results.security-scan.path)"
           echo "false" > "$(results.security-scan-use-llm.path)"
           echo "INVALID" > "$(results.report-prefix.path)"
+          echo "" > "$(results.mcp-credentials-secret.path)"
           exit 1
         fi

@@ -338,6 +338,11 @@ def validate_submission(
         errors.extend(_check_mcpchecker_eval_yaml(submission_dir))
         errors.extend(_check_mcpchecker_mcp_config(submission_dir))
         errors.extend(_check_mcpchecker_tasks(submission_dir))
+        # Validate mcp.credentials_secret is provided
+        if metadata and not metadata.mcp:
+            errors.append("mcp.credentials_secret is required for MCPChecker evaluation")
+        elif metadata and metadata.mcp and not metadata.mcp.credentials_secret:
+            errors.append("mcp.credentials_secret must not be empty")
 
     # Common: supportive/ size check (skip for mcpchecker)
     if not run_mcpchecker:

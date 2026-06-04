@@ -516,6 +516,8 @@ spec:
           value: $(params.submission-dir)
         - name: submission-name
           value: $(tasks.validate.results.submission-name)
+        - name: mcp-credentials-secret
+          value: $(tasks.validate.results.mcp-credentials-secret)
         - name: agent-model
           value: $(params.mcpchecker-agent-model)
         - name: judge-model

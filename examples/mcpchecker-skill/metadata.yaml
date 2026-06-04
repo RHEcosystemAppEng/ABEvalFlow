@@ -11,6 +11,13 @@ author: ABEvalFlow Team
 
 eval_engine: mcpchecker
 
+# MCP server credentials - user must create this secret in ab-eval-flow namespace
+# The secret must contain:
+#   MCP_URL: The MCP server endpoint URL
+#   MCP_BEARER_TOKEN: Authentication token (optional)
+mcp:
+  credentials_secret: example-mcpchecker-credentials
+
 # MCPChecker-specific timeouts and settings can be configured here
 # (defaults are used if not specified)
 agent_timeout_sec: 300

@@ -19,6 +19,9 @@ spec:
     - name: submission-name
       type: string
       description: Name of the submission being evaluated
+    - name: mcp-credentials-secret
+      type: string
+      description: Name of the secret containing MCP_URL and MCP_BEARER_TOKEN
     - name: agent-model
       type: string
       default: "google:gemini-2.5-flash"
@@ -74,6 +77,19 @@ spec:
     - name: run-mcpchecker
       image: quay.io/rhecosystemappeng/mcpchecker-runner:latest
       env:
+        # MCP server credentials from user-provided secret
+        - name: MCP_URL
+          valueFrom:
+            secretKeyRef:
+              name: $(params.mcp-credentials-secret)
+              key: MCP_URL
+        - name: MCP_BEARER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: $(params.mcp-credentials-secret)
+              key: MCP_BEARER_TOKEN
+              optional: true
+        # LLM credentials
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
@@ -97,7 +113,15 @@ spec:
         echo "Submission: $(params.submission-name)"
         echo "Agent model: $(params.agent-model)"
         echo "Judge model: $(params.judge-model)"
+        echo "MCP credentials secret: $(params.mcp-credentials-secret)"
         echo "Working directory: $(pwd)"
+
+        # Verify MCP_URL is set
+        if [ -z "${MCP_URL:-}" ]; then
+          echo "ERROR: MCP_URL not found in secret $(params.mcp-credentials-secret)"
+          exit 1
+        fi
+        echo "MCP URL: $MCP_URL"
 
         # Verify required files exist
         if [ ! -f "eval.yaml" ]; then

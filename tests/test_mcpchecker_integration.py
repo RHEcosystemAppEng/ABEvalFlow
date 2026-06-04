@@ -31,6 +31,8 @@ class TestMCPCheckerValidation:
 name: test-mcpchecker
 description: Test MCPChecker submission
 eval_engine: mcpchecker
+mcp:
+  credentials_secret: test-mcp-credentials
 """)
 
         # eval.yaml

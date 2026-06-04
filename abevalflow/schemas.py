@@ -66,6 +66,24 @@ class LlmConfig(BaseModel):
     )
 
 
+class McpConfig(BaseModel):
+    """MCP server configuration for MCPChecker evaluations.
+
+    Users must create the referenced secret in the ab-eval-flow namespace
+    before submitting. The secret should contain:
+    - MCP_URL: The MCP server endpoint URL
+    - MCP_BEARER_TOKEN: Authentication token (optional, if server requires auth)
+    """
+
+    credentials_secret: str = Field(
+        description=(
+            "Name of the Kubernetes secret containing MCP server credentials. "
+            "The secret must exist in the ab-eval-flow namespace and contain "
+            "MCP_URL (required) and MCP_BEARER_TOKEN (optional) keys."
+        ),
+    )
+
+
 class ExperimentType(StrEnum):
     SKILL = "skill"
     MODEL = "model"
@@ -258,5 +276,14 @@ class SubmissionMetadata(BaseModel):
         description=(
             "Optional LLM config overrides for Harbor evaluation agents. "
             "Overrides pipeline-level defaults from the pipeline-defaults ConfigMap."
+        ),
+    )
+
+    mcp: McpConfig | None = Field(
+        default=None,
+        description=(
+            "MCP server configuration for MCPChecker evaluations. "
+            "Required when eval_engine is 'mcpchecker'. The referenced secret "
+            "must be created by the user in the ab-eval-flow namespace."
         ),
     )
