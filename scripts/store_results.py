@@ -284,16 +284,31 @@ def store(
         trials = map_trials(result, ev_run)
         security_scans = map_security_scans(result, effective_run_id)
 
+        # Check if security scans already exist (may have been inserted by
+        # security-scan task's immediate persistence step)
+        existing_scan = session.execute(
+            select(SecurityScan).where(
+                SecurityScan.pipeline_run_id == effective_run_id
+            )
+        ).scalar_one_or_none()
+
         session.add(ev_run)
         session.add_all(trials)
-        session.add_all(security_scans)
+        if existing_scan is None:
+            session.add_all(security_scans)
+        else:
+            logger.info(
+                "Security scans already exist for run %s, skipping",
+                effective_run_id,
+            )
         try:
             session.commit()
-        except IntegrityError:
+        except IntegrityError as e:
             session.rollback()
             logger.warning(
-                "Concurrent insert for run %s — treating as idempotent",
+                "Concurrent insert for run %s — treating as idempotent: %s",
                 effective_run_id,
+                str(e)[:100],
             )
             return True
 

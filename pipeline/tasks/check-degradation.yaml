@@ -41,9 +41,9 @@ spec:
       description: Human-readable result message
   steps:
     - name: clone-scripts
-      image: gcr.io/tekton-releases/github.com/tektoncd/pipeline/cmd/git-init:v0.44.0
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
-        #!/bin/sh
+        #!/bin/bash
         set -e
         git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
           "$(params.pipeline-repo-url)" /workspace/pipeline
@@ -57,8 +57,9 @@ spec:
         - name: DB_URL
           valueFrom:
             secretKeyRef:
-              name: postgres-credentials
-              key: url
+              name: ab-eval-db-credentials
+              key: database-url
+              optional: true
         - name: SLACK_WEBHOOK_URL
           valueFrom:
             secretKeyRef:
@@ -74,10 +75,19 @@ spec:
         echo "Pipeline Run: $(params.pipeline-run-id)"
         echo "Threshold: $(params.threshold)"
 
+        # Check if DB_URL is configured
+        if [ -z "$DB_URL" ]; then
+          echo "DB_URL not configured, skipping degradation check"
+          echo "false" > $(results.degraded.path)
+          echo "DB not configured" > $(results.message.path)
+          exit 0
+        fi
+
         # Install dependencies
-        pip install --quiet sqlalchemy 'psycopg[binary]'
+        pip install --quiet sqlalchemy 'psycopg[binary]' tenacity
 
         cd /workspace/pipeline
+        export PYTHONPATH=/workspace/pipeline
 
         # Run monitor.py
         MONITOR_OUTPUT=/tmp/monitor_result.json
