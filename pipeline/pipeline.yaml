@@ -149,7 +149,29 @@ spec:
       description: >-
         Evaluation engine: 'harbor' for full containerized A/B evaluation,
         'ase' for lightweight agent-skills-eval LLM-as-a-judge,
-        'both' to run both engines.
+        'mcpchecker' for MCP server/agent evaluation,
+        'both' to run both harbor and ase engines.
+    # MCPChecker parameters
+    - name: mcpchecker-agent-model
+      type: string
+      default: "google:gemini-2.5-flash"
+      description: >-
+        LLM model for MCPChecker agent (provider:model format)
+    - name: mcpchecker-judge-model
+      type: string
+      default: "openai:gpt-4o"
+      description: >-
+        LLM model for MCPChecker LLM judge verification
+    - name: mcpchecker-task-timeout
+      type: string
+      default: "10m"
+      description: Timeout for each MCPChecker task
+    - name: harbor-trials
+      type: string
+      default: ""
+      description: >-
+        Number of Harbor evaluation trials per variant. Empty string uses
+        submission's metadata.yaml value. Set explicitly to override.
     - name: ase-iterations
       type: string
       default: "5"
@@ -477,16 +499,50 @@ spec:
           workspace: shared-workspace
 
     # ------------------------------------------------------------------
+    # Step 4c: Run MCPChecker evaluation for MCP servers/agents
+    #          (MCPChecker path only — single-agent evaluation)
+    # ------------------------------------------------------------------
+    - name: mcpchecker-eval
+      when:
+        - input: $(params.eval-engine)
+          operator: in
+          values: ["mcpchecker"]
+      runAfter: ["validate", "security-scan"]
+      timeout: "2h"
+      taskRef:
+        name: mcpchecker-eval
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: agent-model
+          value: $(params.mcpchecker-agent-model)
+        - name: judge-model
+          value: $(params.mcpchecker-judge-model)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: task-timeout
+          value: $(params.mcpchecker-task-timeout)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ------------------------------------------------------------------
     # Step 5: Analyze results and produce statistical report
     # NOTE: analyze-report Task defined in APPENG-4985 — must be deployed
     #       to the cluster before this pipeline runs end-to-end.
-    # Runs after both harbor-eval and ase-eval (Tekton proceeds when
-    # skipped tasks are in runAfter). Uses filesystem conventions for
-    # results-dir instead of task result references to avoid skip
-    # propagation issues.
+    # Runs after harbor-eval, ase-eval, and mcpchecker-eval (Tekton
+    # proceeds when skipped tasks are in runAfter). Uses filesystem
+    # conventions for results-dir instead of task result references
+    # to avoid skip propagation issues.
     # ------------------------------------------------------------------
     - name: analyze
-      runAfter: ["harbor-eval", "ase-eval"]
+      runAfter: ["harbor-eval", "ase-eval", "mcpchecker-eval"]
       taskRef:
         name: analyze-report
       params:

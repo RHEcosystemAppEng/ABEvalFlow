@@ -27,7 +27,8 @@ class GenerationMode(StrEnum):
 class EvalEngine(StrEnum):
     HARBOR = "harbor"
     ASE = "ase"
-    BOTH = "both"
+    MCPCHECKER = "mcpchecker"
+    BOTH = "both"  # Harbor + ASE
 
 
 class SecurityScanMode(StrEnum):

@@ -136,6 +136,77 @@ tkn pipeline start abevalflow-pipeline \
 If `evals/evals.json` is not provided, the pipeline generates it from
 `SKILL.md` using an LLM.
 
+### MCPChecker Mode (MCP Server/Agent Evaluation)
+
+For evaluating AI agents that interact with MCP (Model Context Protocol)
+servers, use MCPChecker format. This mode tests the agent's ability to use
+MCP tools correctly and produce valid outputs.
+
+```
+submissions/<name>/
+├── metadata.yaml              # Required — eval_engine: mcpchecker
+├── eval.yaml                  # Required — MCPChecker evaluation config
+├── mcp-config.yaml            # Required — MCP server connection settings
+└── tasks/
+    └── *.yaml                 # Required — at least one task definition
+```
+
+**eval.yaml example:**
+
+```yaml
+apiVersion: mcpchecker/v1
+kind: Eval
+metadata:
+  name: my-mcp-eval
+spec:
+  agent:
+    model: google:gemini-2.5-flash
+  judge:
+    model: openai:gpt-4o
+  tasks:
+    - tasks/health-check.yaml
+```
+
+**mcp-config.yaml example:**
+
+```yaml
+mcpServers:
+  - name: my-server
+    url: http://localhost:3000
+```
+
+**Task file example:**
+
+```yaml
+apiVersion: mcpchecker/v1
+kind: Task
+metadata:
+  name: health-check
+spec:
+  prompt: Check if the MCP server is healthy
+  assertions:
+    - type: contains
+      expected: healthy
+```
+
+Trigger with `eval-engine=mcpchecker`:
+
+```bash
+tkn pipeline start abevalflow-pipeline \
+  -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
+  -p revision=main \
+  -p submission-dir=my-mcp-eval \
+  -p eval-engine=mcpchecker \
+  -p mcpchecker-agent-model=google:gemini-2.5-flash \
+  -p mcpchecker-judge-model=openai:gpt-4o \
+  -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
+  -n ab-eval-flow
+```
+
+MCPChecker is single-agent evaluation (no A/B comparison). Results are
+scored by task pass rate and LLM judge verification. See
+`examples/mcpchecker-skill/` for a complete example.
+
 ### AI-Assisted Mode
 
 If you only have the skill definition and want the pipeline to generate the
