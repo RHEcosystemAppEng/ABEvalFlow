@@ -71,6 +71,11 @@ spec:
       type: string
       default: ""
       description: Agent wrapper for non-Claude models (e.g. opencode). Empty uses claude-code.
+    - name: harbor-trials
+      type: string
+      default: ""
+      description: >-
+        Override number of trials per variant. Empty uses submission's metadata.yaml value.
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions and scaffolded task directories
@@ -178,6 +183,12 @@ spec:
         # Ensure ANTHROPIC_API_KEY is available for the verifier's llm_judge.py.
         # The agent env extract above usually sets it; this is a safety fallback.
         export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-mock}}"
+
+        # Override trial count if specified
+        if [ -n "$(params.harbor-trials)" ]; then
+          export OVERRIDE_N_TRIALS="$(params.harbor-trials)"
+          echo "Overriding trial count: $OVERRIDE_N_TRIALS"
+        fi
 
         # --- 4. Run treatment evaluation ---
         TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y $AGENT_FLAGS"

@@ -10,22 +10,26 @@ data:
   config.yaml: |
     # Monitoring configuration for continuous performance tracking
     # Edit this file to add/remove skills from the canary pack
-
-    defaults:
-      # Ratio threshold: current_score / previous_score
-      # Alert if below this value (e.g., 0.85 = 15% drop triggers alert)
-      threshold: 0.85
-
-      # Number of trials per evaluation run
-      trials: 20
-
-      # Default evaluation engine (harbor or ase)
-      eval_engine: harbor
+    #
+    # NOTE: Canary skills should eventually be moved to a dedicated location
+    # (separate repo or branch) since they are persistent baselines, not
+    # one-time submissions. Current PRs used as placeholders:
+    #   - PR #88: mcp-lightspeed-validator
+    #   - PR #17: (can be reopened)
+    #
+    # Each skill must specify:
+    #   - name: unique identifier
+    #   - repo: GitHub repository (org/repo)
+    #   - path: submission directory path
+    #   - eval_engine: harbor or ase
+    #   - trials: number of evaluation trials
+    #   - threshold: alert if current_score/previous_score < threshold
 
     skills:
-      - name: lightspeed-validator
+      # MCP Lightspeed Validator - PR #88
+      - name: mcp-lightspeed-validator
         repo: RHEcosystemAppEng/skill-submissions
         path: submissions/rh-sre-mcp-lightspeed-validator
         eval_engine: harbor
-        # Optional: override default threshold for this skill
-        # threshold: 0.90
+        trials: 20
+        threshold: 0.85

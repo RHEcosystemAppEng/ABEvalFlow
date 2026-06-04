@@ -62,29 +62,30 @@ spec:
                     echo ""
                     echo "--- Triggering evaluation for: $SKILL ---"
 
-                    # Extract skill config (simplified - assumes first skill for now)
-                    REPO=$(echo "$CONFIG" | grep -A 5 "name: $SKILL" | grep "repo:" | head -1 | sed 's/.*repo: //' | tr -d ' ')
-                    PATH_VAL=$(echo "$CONFIG" | grep -A 5 "name: $SKILL" | grep "path:" | head -1 | sed 's/.*path: //' | tr -d ' ')
-                    ENGINE=$(echo "$CONFIG" | grep -A 5 "name: $SKILL" | grep "eval_engine:" | head -1 | sed 's/.*eval_engine: //' | tr -d ' ')
+                    # Extract skill config
+                    REPO=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "repo:" | head -1 | sed 's/.*repo: //' | tr -d ' ')
+                    PATH_VAL=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "path:" | head -1 | sed 's/.*path: //' | tr -d ' ')
+                    ENGINE=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "eval_engine:" | head -1 | sed 's/.*eval_engine: //' | tr -d ' ')
+                    TRIALS=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "trials:" | head -1 | sed 's/.*trials: //' | tr -d ' ')
+                    THRESHOLD=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "threshold:" | head -1 | sed 's/.*threshold: //' | tr -d ' ')
 
-                    # Defaults
-                    REPO=${REPO:-"RHEcosystemAppEng/skill-submissions"}
-                    ENGINE=${ENGINE:-"harbor"}
+                    # Validate required fields
+                    if [ -z "$REPO" ] || [ -z "$PATH_VAL" ] || [ -z "$ENGINE" ]; then
+                      echo "  ERROR: Missing required fields (repo, path, or eval_engine) for $SKILL"
+                      continue
+                    fi
 
                     echo "  Repo: $REPO"
                     echo "  Path: $PATH_VAL"
                     echo "  Engine: $ENGINE"
+                    echo "  Trials: $TRIALS"
+                    echo "  Threshold: $THRESHOLD"
 
-                    # Get the latest commit from the repo
-                    # Note: This requires network access; for air-gapped, use a known good SHA
+                    # Build repo URL
                     REPO_URL="https://github.com/${REPO}.git"
 
                     # Create PipelineRun
                     PIPELINE_RUN_NAME="monitoring-${SKILL}-$(date +%s)"
-
-                    # Extract threshold if specified for this skill
-                    THRESHOLD=$(echo "$CONFIG" | grep -A 5 "name: $SKILL" | grep "threshold:" | head -1 | sed 's/.*threshold: //' | tr -d ' ')
-                    THRESHOLD=${THRESHOLD:-"0.85"}
 
                     cat <<EOF | oc create -f -
                   apiVersion: tekton.dev/v1
@@ -113,6 +114,10 @@ spec:
                         value: "monitoring"
                       - name: eval-engine
                         value: "${ENGINE}"
+                      - name: harbor-trials
+                        value: "${TRIALS}"
+                      - name: ase-iterations
+                        value: "${TRIALS}"
                       - name: enable-monitoring
                         value: "true"
                       - name: monitoring-threshold
