@@ -81,17 +81,29 @@ def extract_task_results(raw_output: dict) -> list[MCPCheckerTaskResult]:
         else:
             status = "error"
 
-        # Handle tool calls (v1alpha2 uses callHistory, legacy uses toolCalls)
-        tool_calls_data = task_data.get("toolCalls") or task_data.get("callHistory") or []
+        # Handle tool calls (v1alpha2 uses callHistory.ToolCalls, legacy uses toolCalls)
+        call_history = task_data.get("callHistory") or {}
+        if isinstance(call_history, dict):
+            tool_calls_data = call_history.get("ToolCalls") or []
+        else:
+            tool_calls_data = call_history or []
+        # Fallback to legacy toolCalls field
+        if not tool_calls_data:
+            tool_calls_data = task_data.get("toolCalls") or []
         
         tool_call_records = []
         for tc in (tool_calls_data or []):
             if isinstance(tc, dict):
+                # Extract arguments from request.Params.arguments if present
+                request = tc.get("request") or {}
+                params = request.get("Params") or {}
+                arguments = params.get("arguments") or tc.get("arguments") or tc.get("params")
+                
                 tool_call_records.append(
                     ToolCallRecord(
-                        server=tc.get("server", tc.get("mcpServer", "unknown")),
-                        tool_name=tc.get("tool", tc.get("toolName", tc.get("name", "unknown"))),
-                        arguments=tc.get("arguments", tc.get("params")),
+                        server=tc.get("serverName", tc.get("server", tc.get("mcpServer", "unknown"))),
+                        tool_name=tc.get("name", tc.get("tool", tc.get("toolName", "unknown"))),
+                        arguments=arguments,
                         success=tc.get("success", True),
                     )
                 )
