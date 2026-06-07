@@ -360,38 +360,40 @@ spec:
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
         METADATA_FILE="$SUBMISSION_PATH/metadata.yaml"
         
-        # Read config from metadata.yaml with pipeline params as fallback
-        # Node.js is available, use it to parse YAML
-        CONFIG=$(node -e "
-        const fs = require('fs');
-        const yaml = require('js-yaml');
-        try {
-          const meta = yaml.load(fs.readFileSync('$METADATA_FILE', 'utf8'));
-          const exp = meta.experiment || {};
-          const llm = meta.llm || {};
-          console.log(JSON.stringify({
-            iterations: exp.n_trials || parseInt(process.env.PARAM_ASE_ITERATIONS) || 5,
-            model: llm.model || process.env.PARAM_LLM_MODEL || 'claude-sonnet',
-            api_base: llm.api_base || process.env.PARAM_LLM_API_BASE || 'http://litellm.ab-eval-flow.svc:4000',
-            judge_model: process.env.PARAM_ASE_JUDGE_MODEL || llm.model || process.env.PARAM_LLM_MODEL || 'claude-sonnet',
-            concurrency: parseInt(process.env.PARAM_ASE_CONCURRENCY) || 1
-          }));
-        } catch(e) {
-          console.log(JSON.stringify({
-            iterations: parseInt(process.env.PARAM_ASE_ITERATIONS) || 5,
-            model: process.env.PARAM_LLM_MODEL || 'claude-sonnet',
-            api_base: process.env.PARAM_LLM_API_BASE || 'http://litellm.ab-eval-flow.svc:4000',
-            judge_model: process.env.PARAM_ASE_JUDGE_MODEL || process.env.PARAM_LLM_MODEL || 'claude-sonnet',
-            concurrency: parseInt(process.env.PARAM_ASE_CONCURRENCY) || 1
-          }));
-        }
-        " 2>/dev/null || echo '{}')
+        # Base: pipeline params
+        ITERATIONS="$PARAM_ASE_ITERATIONS"
+        LLM_MODEL="$PARAM_LLM_MODEL"
+        BASE_URL="$PARAM_LLM_API_BASE"
+        JUDGE_MODEL="${PARAM_ASE_JUDGE_MODEL:-$PARAM_LLM_MODEL}"
+        CONCURRENCY="$PARAM_ASE_CONCURRENCY"
         
-        ITERATIONS=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.iterations||5)")
-        LLM_MODEL=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.model||'claude-sonnet')")
-        BASE_URL=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.api_base||'http://litellm.ab-eval-flow.svc:4000')")
-        JUDGE_MODEL=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.judge_model||d.model||'claude-sonnet')")
-        CONCURRENCY=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.concurrency||1)")
+        # Override from metadata.yaml if present
+        if [ -f "$METADATA_FILE" ]; then
+          pip install --quiet pyyaml 2>/dev/null || true
+          OVERRIDES=$(python3 -c "
+import yaml, sys, os
+try:
+    meta = yaml.safe_load(open('$METADATA_FILE'))
+    exp = meta.get('experiment') or {}
+    llm = meta.get('llm') or {}
+    # Only output if value exists in metadata
+    if exp.get('n_trials'): print(f\"ITERATIONS={exp['n_trials']}\")
+    if llm.get('model'): print(f\"LLM_MODEL={llm['model']}\")
+    if llm.get('api_base'): print(f\"BASE_URL={llm['api_base']}\")
+    if llm.get('judge_model'): print(f\"JUDGE_MODEL={llm['judge_model']}\")
+    if exp.get('concurrency'): print(f\"CONCURRENCY={exp['concurrency']}\")
+except Exception as e:
+    pass
+" 2>/dev/null || true)
+          eval "$OVERRIDES"
+        fi
+        
+        # Apply defaults for any empty values
+        ITERATIONS="${ITERATIONS:-5}"
+        LLM_MODEL="${LLM_MODEL:-claude-sonnet}"
+        BASE_URL="${BASE_URL:-http://litellm.ab-eval-flow.svc:4000}"
+        JUDGE_MODEL="${JUDGE_MODEL:-$LLM_MODEL}"
+        CONCURRENCY="${CONCURRENCY:-1}"
         
         [[ "$BASE_URL" != */v1 ]] && BASE_URL="${BASE_URL}/v1"
         
