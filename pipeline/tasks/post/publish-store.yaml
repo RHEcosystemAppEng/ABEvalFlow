@@ -9,9 +9,6 @@ spec:
     promotes images to Quay.io, posts a summary comment on the triggering
     GitHub PR, and cleans up ephemeral images from the internal registry.
   params:
-    - name: report-dir
-      type: string
-      description: Path to the directory containing report.json and report.md
     - name: submission-name
       type: string
       description: Submission name
@@ -132,10 +129,12 @@ spec:
         pip install --quiet --no-cache-dir minio
 
         # --- 3. Run publish script (MinIO upload, Quay promotion, PR comment) ---
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
         echo "Publishing artifacts for submission=$(params.submission-name) run=$(params.pipeline-run-id)"
+        echo "Report dir: $REPORT_DIR"
 
         ARGS=(
-          --report-dir "$(params.report-dir)"
+          --report-dir "$REPORT_DIR"
           --submission-name "$(params.submission-name)"
           --pipeline-run-id "$(params.pipeline-run-id)"
           --recommendation "$(params.recommendation)"
