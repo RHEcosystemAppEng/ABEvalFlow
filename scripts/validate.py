@@ -212,6 +212,94 @@ def _check_evals_json(submission_dir: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# MCPChecker-specific checks
+# ---------------------------------------------------------------------------
+
+def _check_mcpchecker_eval_yaml(submission_dir: Path) -> list[str]:
+    """Validate eval.yaml exists and has valid MCPChecker structure."""
+    eval_path = submission_dir / "eval.yaml"
+    if not eval_path.is_file():
+        return ["eval.yaml is required for MCPChecker evaluation"]
+
+    try:
+        data = yaml.safe_load(eval_path.read_text())
+    except yaml.YAMLError as exc:
+        return [f"eval.yaml is not valid YAML: {exc}"]
+
+    if not isinstance(data, dict):
+        return ["eval.yaml must be a YAML mapping"]
+
+    errors: list[str] = []
+
+    kind = data.get("kind")
+    if kind != "Eval":
+        errors.append(f"eval.yaml: 'kind' must be 'Eval', got '{kind}'")
+
+    api_version = data.get("apiVersion", "")
+    if not api_version.startswith("mcpchecker/"):
+        errors.append(f"eval.yaml: 'apiVersion' must start with 'mcpchecker/', got '{api_version}'")
+
+    metadata = data.get("metadata", {})
+    if not metadata.get("name"):
+        errors.append("eval.yaml: 'metadata.name' is required")
+
+    return errors
+
+
+def _check_mcpchecker_mcp_config(submission_dir: Path) -> list[str]:
+    """Validate mcp-config.yaml exists for MCPChecker."""
+    config_path = submission_dir / "mcp-config.yaml"
+    if not config_path.is_file():
+        return ["mcp-config.yaml is required for MCPChecker evaluation"]
+
+    try:
+        data = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as exc:
+        return [f"mcp-config.yaml is not valid YAML: {exc}"]
+
+    if not isinstance(data, dict):
+        return ["mcp-config.yaml must be a YAML mapping"]
+
+    if not data.get("mcpServers"):
+        return ["mcp-config.yaml: 'mcpServers' section is required"]
+
+    return []
+
+
+def _check_mcpchecker_tasks(submission_dir: Path) -> list[str]:
+    """Validate at least one task file exists in tasks/ directory."""
+    tasks_dir = submission_dir / "tasks"
+    if not tasks_dir.is_dir():
+        return ["tasks/ directory is required for MCPChecker evaluation"]
+
+    task_files = list(tasks_dir.rglob("*.yaml")) + list(tasks_dir.rglob("*.yml"))
+    if not task_files:
+        return ["tasks/ must contain at least one .yaml task file"]
+
+    errors: list[str] = []
+    for task_file in task_files:
+        try:
+            data = yaml.safe_load(task_file.read_text())
+        except yaml.YAMLError as exc:
+            errors.append(f"{task_file.relative_to(submission_dir)}: invalid YAML: {exc}")
+            continue
+
+        if not isinstance(data, dict):
+            errors.append(f"{task_file.relative_to(submission_dir)}: must be a YAML mapping")
+            continue
+
+        kind = data.get("kind")
+        if kind != "Task":
+            errors.append(f"{task_file.relative_to(submission_dir)}: 'kind' must be 'Task'")
+
+        spec = data.get("spec", {})
+        if not spec.get("prompt"):
+            errors.append(f"{task_file.relative_to(submission_dir)}: 'spec.prompt' is required")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Main validation
 # ---------------------------------------------------------------------------
 
@@ -225,11 +313,15 @@ def validate_submission(
 
     run_harbor = eval_engine in (EvalEngine.HARBOR, EvalEngine.BOTH)
     run_ase = eval_engine in (EvalEngine.ASE, EvalEngine.BOTH)
+    run_mcpchecker = eval_engine == EvalEngine.MCPCHECKER
 
+    # Common: metadata.yaml is always required
     metadata_errors, metadata = _check_metadata_yaml(submission_dir)
     errors.extend(metadata_errors)
 
-    errors.extend(_check_skills_dir(submission_dir))
+    # MCPChecker has its own structure - skip skills/ check
+    if not run_mcpchecker:
+        errors.extend(_check_skills_dir(submission_dir))
 
     if run_harbor:
         errors.extend(_check_instruction_md(submission_dir))
@@ -242,7 +334,19 @@ def validate_submission(
         errors.extend(_check_skill_md_frontmatter(submission_dir))
         errors.extend(_check_evals_json(submission_dir))
 
-    errors.extend(_check_supportive_size(submission_dir))
+    if run_mcpchecker:
+        errors.extend(_check_mcpchecker_eval_yaml(submission_dir))
+        errors.extend(_check_mcpchecker_mcp_config(submission_dir))
+        errors.extend(_check_mcpchecker_tasks(submission_dir))
+        # Validate mcp.credentials_secret is provided
+        if metadata and not metadata.mcp:
+            errors.append("mcp.credentials_secret is required for MCPChecker evaluation")
+        elif metadata and metadata.mcp and not metadata.mcp.credentials_secret:
+            errors.append("mcp.credentials_secret must not be empty")
+
+    # Common: supportive/ size check (skip for mcpchecker)
+    if not run_mcpchecker:
+        errors.extend(_check_supportive_size(submission_dir))
 
     if errors:
         logger.warning("Validation failed with %d error(s)", len(errors))
@@ -257,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--eval-engine",
         type=str,
-        choices=["harbor", "ase", "both"],
+        choices=["harbor", "ase", "mcpchecker", "both"],
         default="harbor",
         help="Evaluation engine (controls which checks run)",
     )

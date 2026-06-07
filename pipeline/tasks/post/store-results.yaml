@@ -12,11 +12,6 @@ spec:
     pipeline-run-id. Invokes any configured ResultsObservers after
     the DB commit.
   params:
-    - name: report-dir
-      type: string
-      description: >-
-        Path to the directory containing report.json and report.md
-        (output of the analyze-report task)
     - name: submission-name
       type: string
       description: Submission name for logging
@@ -69,9 +64,11 @@ spec:
         pip install --quiet --no-cache-dir pydantic sqlalchemy "psycopg[binary]" "tenacity>=8.2"
 
         # --- 3. Run store script ---
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
         echo "Storing results for submission=$(params.submission-name) run=$(params.pipeline-run-id)"
+        echo "Report dir: $REPORT_DIR"
         python scripts/store_results.py \
-          --report-dir "$(params.report-dir)" \
+          --report-dir "$REPORT_DIR" \
           --run-id "$(params.pipeline-run-id)"
 
         echo "Results stored successfully"

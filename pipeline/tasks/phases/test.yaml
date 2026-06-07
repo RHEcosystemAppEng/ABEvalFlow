@@ -1,0 +1,347 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test
+  namespace: ab-eval-flow
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: phase
+spec:
+  description: >-
+    Testing phase: runs security scanning (Cisco skill-scanner) and quality
+    review checks. Results are persisted immediately to MinIO/DB after each
+    check completes. Skipped entirely for MCPChecker eval-engine.
+  params:
+    - name: submission-dir
+      type: string
+      description: Submission directory name under submissions/
+    - name: submission-name
+      type: string
+      description: Validated submission name from metadata.yaml
+    - name: eval-engine
+      type: string
+      description: Evaluation engine (harbor, ase, mcpchecker, both)
+    - name: report-prefix
+      type: string
+      description: MinIO report prefix (timestamp_name_runid)
+    - name: pipeline-run-name
+      type: string
+      description: PipelineRun name for DB records
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+    - name: security-scan-mode
+      type: string
+      default: ""
+      description: Pipeline-level security scan mode override
+    - name: submission-security-scan
+      type: string
+      default: "warn"
+      description: Submission's preferred scan mode from metadata.yaml
+    - name: security-scan-use-llm
+      type: string
+      default: "true"
+    - name: enable-quality-review
+      type: string
+      default: "true"
+    - name: llm-base-url
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000/v1"
+    - name: llm-model
+      type: string
+      default: "claude-sonnet"
+    - name: llm-api-key
+      type: string
+      default: ""
+    - name: minio-endpoint
+      type: string
+      default: "minio.ab-eval-flow.svc:9000"
+    - name: minio-bucket
+      type: string
+      default: "ab-eval-reports"
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned submissions repository
+  results:
+    - name: security-passed
+      description: Whether security scan passed
+    - name: security-mode
+      description: Effective security scan mode used
+    - name: security-findings
+      description: Number of security findings
+    - name: quality-passed
+      description: Whether quality review passed
+    - name: tests-passed
+      description: Overall tests passed (all checks)
+  steps:
+    # Step 1: Clone pipeline repo (if not already)
+    - name: setup
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== TEST PHASE: Setup ==="
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        
+        # MCPChecker doesn't need testing phase
+        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
+          echo "MCPChecker mode: skipping test phase"
+          echo -n "true" > "$(results.security-passed.path)"
+          echo -n "disabled" > "$(results.security-mode.path)"
+          echo -n "0" > "$(results.security-findings.path)"
+          echo -n "true" > "$(results.quality-passed.path)"
+          echo -n "true" > "$(results.tests-passed.path)"
+          exit 0
+        fi
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR/.git" ]; then
+          echo "Pipeline repo exists, updating..."
+          cd "$PIPELINE_DIR"
+          git fetch origin "$(params.pipeline-repo-revision)" 2>/dev/null || true
+          git reset --hard FETCH_HEAD 2>/dev/null || true
+        else
+          git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+            "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
+        fi
+        echo "Pipeline repo ready"
+        
+        # Initialize results with defaults (will be overwritten)
+        echo -n "true" > "$(results.security-passed.path)"
+        echo -n "warn" > "$(results.security-mode.path)"
+        echo -n "0" > "$(results.security-findings.path)"
+        echo -n "true" > "$(results.quality-passed.path)"
+        echo -n "true" > "$(results.tests-passed.path)"
+
+    # Step 2: Security scan with immediate persistence
+    - name: security-scan
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      env:
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-password
+        - name: DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: ab-eval-db-credentials
+              key: database-url
+              optional: true
+        - name: LLM_API_KEY
+          value: "$(params.llm-api-key)"
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== TEST PHASE: Security Scan ==="
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
+          echo "MCPChecker mode: security scan skipped"
+          exit 0
+        fi
+        
+        # Determine scan mode
+        PIPELINE_MODE="$(params.security-scan-mode)"
+        SUBMISSION_MODE="$(params.submission-security-scan)"
+        SCAN_MODE="${PIPELINE_MODE:-$SUBMISSION_MODE}"
+        echo -n "$SCAN_MODE" > "$(results.security-mode.path)"
+        
+        if [ "$SCAN_MODE" = "disabled" ]; then
+          echo "Security scanning disabled"
+          echo -n "true" > "$(results.security-passed.path)"
+          echo -n "0" > "$(results.security-findings.path)"
+          exit 0
+        fi
+        
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        SUBMISSION_NAME="$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$SUBMISSION_NAME"
+        JSON_PATH="$REPORT_DIR/security-scan.json"
+        SARIF_PATH="$REPORT_DIR/security-scan.sarif"
+        mkdir -p "$REPORT_DIR"
+        
+        # Handle ASE structure
+        if [ -d "$SUBMISSION_PATH/skills" ] && [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
+          SUBMISSION_PATH="$SUBMISSION_PATH/skills"
+        fi
+        
+        # Install scanner
+        pip install --quiet --no-cache-dir 'cisco-ai-skill-scanner==2.0.11' minio sqlalchemy 'psycopg[binary]' 2>&1 | tail -3
+        
+        # Build scanner command
+        SCANNER_CMD=(skill-scanner scan "$SUBMISSION_PATH" --format json --output-json "$JSON_PATH" --output-sarif "$SARIF_PATH" --lenient --verbose)
+        
+        if [ "$SCAN_MODE" = "block" ]; then
+          SCANNER_CMD+=(--fail-on-severity high)
+        fi
+        
+        USE_LLM="$(params.security-scan-use-llm)"
+        if [ "$USE_LLM" = "true" ]; then
+          SCANNER_CMD+=(--use-llm)
+          export SKILL_SCANNER_LLM_MODEL="openai/$(params.llm-model)"
+          export SKILL_SCANNER_LLM_API_KEY="${LLM_API_KEY:-}"
+          export OPENAI_API_KEY="${LLM_API_KEY:-}"
+          export OPENAI_BASE_URL="$(params.llm-base-url)"
+        fi
+        
+        # Run scanner
+        set +e
+        "${SCANNER_CMD[@]}" 2>&1 | tee /tmp/scan-output.txt
+        SCAN_EXIT=$?
+        set -e
+        
+        # Parse results
+        FINDINGS_COUNT=0
+        CRITICAL_COUNT=0
+        HIGH_COUNT=0
+        PASSED="true"
+        
+        if [ -f "$JSON_PATH" ]; then
+          FINDINGS_COUNT=$(python3 -c "import json; print(len(json.load(open('$JSON_PATH')).get('findings', [])))" 2>/dev/null || echo "0")
+          CRITICAL_COUNT=$(python3 -c "import json; print(sum(1 for f in json.load(open('$JSON_PATH')).get('findings', []) if f.get('severity','').lower()=='critical'))" 2>/dev/null || echo "0")
+          HIGH_COUNT=$(python3 -c "import json; print(sum(1 for f in json.load(open('$JSON_PATH')).get('findings', []) if f.get('severity','').lower()=='high'))" 2>/dev/null || echo "0")
+        else
+          PASSED="false"
+        fi
+        
+        if [ "$SCAN_MODE" = "block" ] && [ "$SCAN_EXIT" -ne 0 ]; then
+          PASSED="false"
+        fi
+        
+        echo -n "$PASSED" > "$(results.security-passed.path)"
+        echo -n "$FINDINGS_COUNT" > "$(results.security-findings.path)"
+        
+        echo "Security scan: $FINDINGS_COUNT findings (critical: $CRITICAL_COUNT, high: $HIGH_COUNT)"
+        echo "Mode: $SCAN_MODE, Passed: $PASSED"
+        
+        # Immediate persistence to MinIO
+        echo "Uploading to MinIO..."
+        REPORT_PREFIX="$(params.report-prefix)"
+        python3 - "$JSON_PATH" "$SARIF_PATH" "$REPORT_PREFIX" "$(params.minio-endpoint)" "$(params.minio-bucket)" <<'UPLOAD'
+        import os, sys
+        from minio import Minio
+        
+        json_path, sarif_path, prefix, endpoint, bucket = sys.argv[1:6]
+        client = Minio(endpoint, access_key=os.environ["MINIO_ACCESS_KEY"], secret_key=os.environ["MINIO_SECRET_KEY"], secure=False)
+        
+        for path, name in [(json_path, "security-scan.json"), (sarif_path, "security-scan.sarif")]:
+            if os.path.isfile(path):
+                obj = f"{prefix}/security_scans/{name}"
+                client.fput_object(bucket, obj, path)
+                print(f"Uploaded: {obj}")
+        UPLOAD
+        
+        # Immediate persistence to DB
+        if [ -n "${DB_URL:-}" ]; then
+          echo "Writing to DB..."
+          python3 - "$JSON_PATH" "$(params.submission-name)" "$(params.pipeline-run-name)" "$SCAN_MODE" "$PASSED" <<'WRITE_DB'
+        import os, sys, json, uuid
+        from sqlalchemy import create_engine, text
+        
+        json_path, sub_name, run_id, mode, passed = sys.argv[1:6]
+        db_url = os.environ.get("DB_URL", "")
+        if not db_url:
+            sys.exit(0)
+        
+        findings_json = None
+        counts = {"total": 0, "critical": 0, "high": 0}
+        if os.path.isfile(json_path):
+            with open(json_path) as f:
+                data = json.load(f)
+            findings_json = json.dumps(data)
+            for f in data.get("findings", []):
+                counts["total"] += 1
+                sev = f.get("severity", "").lower()
+                if sev in counts:
+                    counts[sev] += 1
+        
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO security_scans (id, pipeline_run_id, submission_name, scanner, scan_mode, passed, findings_count, critical_count, high_count, findings_json, created_at)
+                VALUES (:id, :run, :name, 'cisco', :mode, :passed, :total, :critical, :high, :json, NOW())
+                ON CONFLICT (pipeline_run_id) DO UPDATE SET findings_count=EXCLUDED.findings_count, critical_count=EXCLUDED.critical_count, high_count=EXCLUDED.high_count, passed=EXCLUDED.passed
+            """), {"id": str(uuid.uuid4()), "run": run_id, "name": sub_name, "mode": mode, "passed": passed == "true", "total": counts["total"], "critical": counts["critical"], "high": counts["high"], "json": findings_json})
+            conn.commit()
+        print("DB record written")
+        WRITE_DB
+        fi
+        
+        echo "Security scan complete"
+
+    # Step 3: Quality review
+    - name: quality-review
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      env:
+        - name: LLM_API_KEY
+          value: "$(params.llm-api-key)"
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== TEST PHASE: Quality Review ==="
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        ENABLE_REVIEW="$(params.enable-quality-review)"
+        
+        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
+          echo "MCPChecker mode: quality review skipped"
+          exit 0
+        fi
+        
+        if [ "$ENABLE_REVIEW" != "true" ]; then
+          echo "Quality review disabled"
+          echo -n "true" > "$(results.quality-passed.path)"
+          exit 0
+        fi
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        
+        cd "$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pydantic pyyaml openai
+        export PYTHONPATH="$PIPELINE_DIR"
+        export LLM_BASE_URL="$(params.llm-base-url)"
+        export LLM_MODEL="$(params.llm-model)"
+        
+        set +e
+        python scripts/test_quality_review.py "$SUBMISSION_PATH" | tee /tmp/review-output.json
+        REVIEW_EXIT=$?
+        set -e
+        
+        # Save to workspace for later use
+        cp /tmp/review-output.json "$(workspaces.source.path)/_ai_review.json" 2>/dev/null || true
+        
+        PASSED=$(python3 -c "import json; print(str(json.load(open('/tmp/review-output.json')).get('passed', False)).lower())" 2>/dev/null || echo "true")
+        echo -n "$PASSED" > "$(results.quality-passed.path)"
+        
+        echo "Quality review: passed=$PASSED"
+
+    # Step 4: Finalize results
+    - name: finalize
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== TEST PHASE: Finalize ==="
+        
+        SECURITY_PASSED=$(cat "$(results.security-passed.path)")
+        QUALITY_PASSED=$(cat "$(results.quality-passed.path)")
+        
+        # Overall pass if both passed
+        if [ "$SECURITY_PASSED" = "true" ] && [ "$QUALITY_PASSED" = "true" ]; then
+          echo -n "true" > "$(results.tests-passed.path)"
+          echo "All tests PASSED"
+        else
+          echo -n "false" > "$(results.tests-passed.path)"
+          echo "Tests FAILED (security=$SECURITY_PASSED, quality=$QUALITY_PASSED)"
+        fi

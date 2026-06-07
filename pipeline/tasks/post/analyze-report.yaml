@@ -193,7 +193,7 @@ spec:
         # --- 6. Extract results for Tekton ---
         echo -n "$REPORT_DIR" > "$(results.report-path.path)"
 
-        python3 -c "import json,sys;r=json.loads(open(sys.argv[1]).read());s=r['summary'];open(sys.argv[2],'w').write(s['recommendation']);t,c=s['treatment'].get('mean_reward'),s['control'].get('mean_reward');open(sys.argv[3],'w').write(f'{t:.4f}' if t else 'N/A');open(sys.argv[4],'w').write(f'{c:.4f}' if c else 'N/A');g=s.get('mean_reward_gap');open(sys.argv[5],'w').write(f'{g:+.4f}' if g else 'N/A');tt,fi=s.get('ttest_p_value'),s.get('fisher_p_value');open(sys.argv[6],'w').write(f'{tt:.4f}' if tt else 'N/A');open(sys.argv[7],'w').write(f'{fi:.4f}' if fi else 'N/A')" \
+        python3 -c "import json,sys;r=json.loads(open(sys.argv[1]).read());s=r['summary'];open(sys.argv[2],'w').write(s['recommendation']);t,c=s['treatment'].get('mean_reward'),s['control'].get('mean_reward');open(sys.argv[3],'w').write(f'{t:.4f}' if t is not None else 'N/A');open(sys.argv[4],'w').write(f'{c:.4f}' if c is not None else 'N/A');g=s.get('mean_reward_gap');open(sys.argv[5],'w').write(f'{g:+.4f}' if g is not None else 'N/A');tt,fi=s.get('ttest_p_value'),s.get('fisher_p_value');open(sys.argv[6],'w').write(f'{tt:.4f}' if tt is not None else 'N/A');open(sys.argv[7],'w').write(f'{fi:.4f}' if fi is not None else 'N/A')" \
           "$REPORT_DIR/report.json" \
           "$(results.recommendation.path)" \
           "$(results.treatment-mean-reward.path)" \

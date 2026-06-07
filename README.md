@@ -11,12 +11,13 @@ Automated Tekton-orchestrated pipeline on OpenShift for evaluating AI skill subm
    - ASE: generates `evals.json` from `SKILL.md` if not provided
 4. **Quality Review** — AI-powered review of skill/test coherence (advisory, non-blocking).
 5. **Security Scan** — Optional Cisco AI Defense scan for prompt injection, data exfiltration risks.
-6. **Evaluate** — Two evaluation engines supported:
+6. **Evaluate** — Three evaluation engines supported:
    - **Harbor** — Full agent evaluation with container isolation:
      - Scaffold treatment/control container variants
      - Build & push images to OpenShift internal registry
-     - Run N=20 attempts per variant
-   - **ASE** — Lightweight LLM-as-judge evaluation using `evals.json` assertions (no containers).
+     - Run N=20 attempts per variant (A/B comparison)
+   - **ASE** — Lightweight LLM-as-judge evaluation using `evals.json` assertions (no containers, A/B comparison)
+   - **MCPChecker** — MCP server/agent evaluation (single-agent, task-based verification with LLM judge)
 7. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value).
 8. **Publish** — Stores reports to MinIO, records results to PostgreSQL.
 
@@ -81,7 +82,22 @@ my-skill-name/
 └── metadata.yaml        # Name, etc. (required)
 ```
 
-Trigger with `eval-engine=ase` parameter. See [Trigger Guide](Docs/trigger_guide.md) for details.
+Trigger with `eval-engine=ase` parameter.
+
+### MCPChecker Format (MCP server/agent evaluation)
+
+```
+my-mcp-eval/
+├── metadata.yaml        # eval_engine: mcpchecker (required)
+├── eval.yaml            # MCPChecker evaluation config (required)
+├── mcp-config.yaml      # MCP server connection settings (required)
+└── tasks/
+    └── *.yaml           # Task definitions (at least one required)
+```
+
+Trigger with `eval-engine=mcpchecker` parameter. MCPChecker tests agents' ability to use MCP tools and verify outputs via LLM judge.
+
+See [Trigger Guide](Docs/trigger_guide.md) for detailed submission instructions.
 
 ## LLM Access
 
