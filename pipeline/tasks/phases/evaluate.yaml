@@ -1,0 +1,615 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: evaluate
+  namespace: ab-eval-flow
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: phase
+spec:
+  description: >-
+    Evaluation phase: dispatches to the appropriate evaluation engine based on
+    eval-engine parameter. Handles Harbor (scaffold+build+eval), ASE (LLM-as-judge),
+    and MCPChecker (MCP server testing) in a single composite task.
+  params:
+    - name: eval-engine
+      type: string
+      description: Evaluation engine (harbor, ase, mcpchecker, both)
+    - name: submission-dir
+      type: string
+      description: Submission directory name under submissions/
+    - name: submission-name
+      type: string
+      description: Validated submission name
+    - name: commit-sha
+      type: string
+      description: Git commit SHA for image tagging
+    - name: pipeline-run-id
+      type: string
+      description: PipelineRun name
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+    # Harbor params
+    - name: harbor-fork-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
+    - name: harbor-fork-revision
+      type: string
+      default: "main"
+    - name: eval-mode
+      type: string
+      default: "prebuilt"
+    - name: registry-url
+      type: string
+      default: "image-registry.openshift-image-registry.svc:5000"
+    - name: registry-namespace
+      type: string
+      default: "ab-eval-flow"
+    - name: base-image
+      type: string
+      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:latest"
+    # LLM params
+    - name: llm-model
+      type: string
+      default: "claude-sonnet"
+    - name: llm-api-base
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000"
+    - name: llm-api-key
+      type: string
+      default: "mock"
+    - name: llm-agent-wrapper
+      type: string
+      default: ""
+    # ASE params
+    - name: ase-iterations
+      type: string
+      default: "5"
+    - name: ase-concurrency
+      type: string
+      default: "1"
+    - name: ase-judge-model
+      type: string
+      default: ""
+    - name: uplift-threshold
+      type: string
+      default: "0.0"
+    # MCPChecker params
+    - name: mcp-credentials-secret
+      type: string
+      default: "mcp-credentials-placeholder"
+      description: Secret containing MCP credentials (use placeholder when not using MCPChecker)
+    - name: mcpchecker-agent-model
+      type: string
+      default: "google:gemini-2.5-flash"
+    - name: mcpchecker-judge-model
+      type: string
+      default: "openai:gpt-4o"
+    - name: mcpchecker-task-timeout
+      type: string
+      default: "10m"
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned submissions repository
+  results:
+    - name: treatment-mean-reward
+      description: Treatment/with-skill mean reward
+    - name: control-mean-reward
+      description: Control/without-skill mean reward
+    - name: recommendation
+      description: Pass or fail recommendation
+    - name: results-dir
+      description: Path to evaluation results
+  steps:
+    # Step 1: Setup and route to appropriate engine
+    - name: setup
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== EVALUATE PHASE: Setup ==="
+        echo "Eval engine: $(params.eval-engine)"
+        echo "Submission: $(params.submission-name)"
+        
+        # Clone/update pipeline repo
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -d "$PIPELINE_DIR/.git" ]; then
+          cd "$PIPELINE_DIR"
+          git fetch origin "$(params.pipeline-repo-revision)" --depth 1 2>/dev/null || true
+          git reset --hard FETCH_HEAD 2>/dev/null || true
+        else
+          git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+            "$(params.pipeline-repo-url)" "$PIPELINE_DIR"
+        fi
+        
+        # Create results directories
+        mkdir -p "$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        mkdir -p "$(workspaces.source.path)/reports/$(params.submission-name)"
+        mkdir -p "$(workspaces.source.path)/_eval_tmp"
+        
+        # Initialize results with defaults
+        echo -n "0.0" > "$(results.treatment-mean-reward.path)"
+        echo -n "0.0" > "$(results.control-mean-reward.path)"
+        echo -n "fail" > "$(results.recommendation.path)"
+        echo -n "$(workspaces.source.path)/eval-results/$(params.submission-name)" > "$(results.results-dir.path)"
+
+    # Step 2: Harbor - Scaffold
+    - name: harbor-scaffold
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          echo "Skipping scaffold (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: Harbor Scaffold ==="
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_DIR="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        OUTPUT_DIR="$(workspaces.source.path)"
+        
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir jinja2 pyyaml pydantic
+        
+        python scripts/scaffold.py "$SUBMISSION_DIR" "$OUTPUT_DIR"
+        
+        echo "Treatment: $OUTPUT_DIR/tasks-treatment/$(params.submission-name)"
+        echo "Control: $OUTPUT_DIR/tasks-control/$(params.submission-name)"
+
+    # Step 3: Harbor - Build Treatment
+    - name: harbor-build-treatment
+      image: registry.access.redhat.com/ubi9/buildah:9.6
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          echo "Skipping build (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: Harbor Build Treatment ==="
+        BASE_IMAGE="$(params.base-image)"
+        REGISTRY="$(params.registry-url)"
+        NS="$(params.registry-namespace)"
+        NAME="$(params.submission-name)"
+        SHA="$(echo '$(params.commit-sha)' | tr '/' '-')"
+        IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:treatment-${SHA}"
+        CONTEXT="$(workspaces.source.path)/tasks-treatment/${NAME}/environment"
+        
+        buildah login --tls-verify=false -u serviceaccount \
+          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" "$REGISTRY"
+        
+        buildah build --storage-driver=vfs --tls-verify=false \
+          --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE_TAG" "$CONTEXT"
+        
+        buildah push --storage-driver=vfs --tls-verify=false \
+          --digestfile /tmp/treatment-digest "$IMAGE_TAG" "docker://$IMAGE_TAG"
+        
+        DIGEST=$(tr -d '\n' < /tmp/treatment-digest)
+        echo "${REGISTRY}/${NS}/${NAME}@${DIGEST}" > "$(workspaces.source.path)/_eval_tmp/treatment-image-ref"
+        echo "Treatment image: $(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref")"
+
+    # Step 4: Harbor - Build Control
+    - name: harbor-build-control
+      image: registry.access.redhat.com/ubi9/buildah:9.6
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: Harbor Build Control ==="
+        BASE_IMAGE="$(params.base-image)"
+        REGISTRY="$(params.registry-url)"
+        NS="$(params.registry-namespace)"
+        NAME="$(params.submission-name)"
+        SHA="$(echo '$(params.commit-sha)' | tr '/' '-')"
+        IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:control-${SHA}"
+        CONTEXT="$(workspaces.source.path)/tasks-control/${NAME}/environment"
+        
+        buildah login --tls-verify=false -u serviceaccount \
+          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" "$REGISTRY"
+        
+        buildah build --storage-driver=vfs --tls-verify=false \
+          --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE_TAG" "$CONTEXT"
+        
+        buildah push --storage-driver=vfs --tls-verify=false \
+          --digestfile /tmp/control-digest "$IMAGE_TAG" "docker://$IMAGE_TAG"
+        
+        DIGEST=$(tr -d '\n' < /tmp/control-digest)
+        echo "${REGISTRY}/${NS}/${NAME}@${DIGEST}" > "$(workspaces.source.path)/_eval_tmp/control-image-ref"
+        echo "Control image: $(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref")"
+
+    # Step 5: Harbor - Run Evaluation
+    - name: harbor-eval
+      image: registry.access.redhat.com/ubi9/python-312:latest
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: Harbor Evaluation ==="
+        pip install --quiet --no-cache-dir \
+          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+          "kubernetes>=32.0.0"
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        CONFIG_DIR="$(workspaces.source.path)/_eval-configs"
+        NAME="$(params.submission-name)"
+        
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pydantic pyyaml
+        
+        TREATMENT_REF=$(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref" 2>/dev/null || echo "")
+        CONTROL_REF=$(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref" 2>/dev/null || echo "")
+        
+        python scripts/generate_eval_config.py \
+          --submission-dir "$SUBMISSION_PATH" \
+          --treatment-task-dir "$(workspaces.source.path)/tasks-treatment/${NAME}" \
+          --control-task-dir "$(workspaces.source.path)/tasks-control/${NAME}" \
+          --output-dir "$CONFIG_DIR" \
+          --eval-mode "$(params.eval-mode)" \
+          --results-base-dir "$RESULTS_DIR" \
+          --treatment-image-ref "$TREATMENT_REF" \
+          --control-image-ref "$CONTROL_REF" \
+          --llm-model "$(params.llm-model)" \
+          --llm-api-base "$(params.llm-api-base)" \
+          --llm-api-key "$(params.llm-api-key)"
+        
+        mkdir -p "$RESULTS_DIR/treatment" "$RESULTS_DIR/control"
+        
+        echo "=== Running treatment evaluation ==="
+        harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
+        
+        echo "=== Running control evaluation ==="
+        harbor run -c "$CONFIG_DIR/control-config.yaml" -y
+        
+        # Compute mean rewards from trial results (report generated by analyze task)
+        python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
+        import json
+        import sys
+        from pathlib import Path
+        
+        results_dir = Path(sys.argv[1])
+        output_dir = Path(sys.argv[2])
+        
+        def compute_mean_reward(variant_dir: Path) -> float:
+            if not variant_dir.is_dir():
+                return 0.0
+            rewards = []
+            for result_file in sorted(variant_dir.rglob("result.json")):
+                try:
+                    data = json.loads(result_file.read_text())
+                    vr = data.get("verifier_result") or {}
+                    rw = vr.get("rewards") or {}
+                    reward = rw.get("reward") or vr.get("reward")
+                    if reward is not None:
+                        rewards.append(float(reward))
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+            return sum(rewards) / len(rewards) if rewards else 0.0
+        
+        t_mean = compute_mean_reward(results_dir / "treatment")
+        c_mean = compute_mean_reward(results_dir / "control")
+        rec = "pass" if t_mean >= c_mean else "fail"
+        
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "treatment-reward").write_text(f"{t_mean:.4f}")
+        (output_dir / "control-reward").write_text(f"{c_mean:.4f}")
+        (output_dir / "recommendation").write_text(rec)
+        
+        print(f"Treatment mean reward: {t_mean:.4f}")
+        print(f"Control mean reward:   {c_mean:.4f}")
+        print(f"Recommendation: {rec}")
+        COMPUTE_REWARDS
+
+    # Step 6: ASE - Run Evaluation
+    - name: ase-eval
+      image: registry.access.redhat.com/ubi9/nodejs-20:latest
+      env:
+        - name: OPENAI_API_KEY
+          value: "$(params.llm-api-key)"
+        - name: PARAM_LLM_MODEL
+          value: "$(params.llm-model)"
+        - name: PARAM_LLM_API_BASE
+          value: "$(params.llm-api-base)"
+        - name: PARAM_ASE_ITERATIONS
+          value: "$(params.ase-iterations)"
+        - name: PARAM_ASE_CONCURRENCY
+          value: "$(params.ase-concurrency)"
+        - name: PARAM_ASE_JUDGE_MODEL
+          value: "$(params.ase-judge-model)"
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: ASE Evaluation ==="
+        npm install --global agent-skills-eval 2>&1 | tail -3
+        
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        METADATA_FILE="$SUBMISSION_PATH/metadata.yaml"
+        
+        # Read config from metadata.yaml with pipeline params as fallback
+        # Node.js is available, use it to parse YAML
+        CONFIG=$(node -e "
+        const fs = require('fs');
+        const yaml = require('js-yaml');
+        try {
+          const meta = yaml.load(fs.readFileSync('$METADATA_FILE', 'utf8'));
+          const exp = meta.experiment || {};
+          const llm = meta.llm || {};
+          console.log(JSON.stringify({
+            iterations: exp.n_trials || parseInt(process.env.PARAM_ASE_ITERATIONS) || 5,
+            model: llm.model || process.env.PARAM_LLM_MODEL || 'claude-sonnet',
+            api_base: llm.api_base || process.env.PARAM_LLM_API_BASE || 'http://litellm.ab-eval-flow.svc:4000',
+            judge_model: process.env.PARAM_ASE_JUDGE_MODEL || llm.model || process.env.PARAM_LLM_MODEL || 'claude-sonnet',
+            concurrency: parseInt(process.env.PARAM_ASE_CONCURRENCY) || 1
+          }));
+        } catch(e) {
+          console.log(JSON.stringify({
+            iterations: parseInt(process.env.PARAM_ASE_ITERATIONS) || 5,
+            model: process.env.PARAM_LLM_MODEL || 'claude-sonnet',
+            api_base: process.env.PARAM_LLM_API_BASE || 'http://litellm.ab-eval-flow.svc:4000',
+            judge_model: process.env.PARAM_ASE_JUDGE_MODEL || process.env.PARAM_LLM_MODEL || 'claude-sonnet',
+            concurrency: parseInt(process.env.PARAM_ASE_CONCURRENCY) || 1
+          }));
+        }
+        " 2>/dev/null || echo '{}')
+        
+        ITERATIONS=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.iterations||5)")
+        LLM_MODEL=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.model||'claude-sonnet')")
+        BASE_URL=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.api_base||'http://litellm.ab-eval-flow.svc:4000')")
+        JUDGE_MODEL=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.judge_model||d.model||'claude-sonnet')")
+        CONCURRENCY=$(echo "$CONFIG" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.concurrency||1)")
+        
+        [[ "$BASE_URL" != */v1 ]] && BASE_URL="${BASE_URL}/v1"
+        
+        echo "Config from metadata.yaml (with fallbacks):"
+        echo "  Iterations: $ITERATIONS"
+        echo "  Model: $LLM_MODEL"
+        echo "  Judge: $JUDGE_MODEL"
+        echo "  API Base: $BASE_URL"
+        echo "  Concurrency: $CONCURRENCY"
+        
+        SKILL_DIR=""
+        if [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
+          SKILL_DIR="$SUBMISSION_PATH/skills"
+        else
+          for dir in "$SUBMISSION_PATH"/skills/*/; do
+            if [ -f "${dir}SKILL.md" ]; then
+              SKILL_DIR="$dir"
+              break
+            fi
+          done
+        fi
+        
+        if [ -z "$SKILL_DIR" ]; then
+          echo "ERROR: No SKILL.md found"
+          exit 1
+        fi
+        
+        if [ ! -f "$SKILL_DIR/evals/evals.json" ] && [ -f "$SUBMISSION_PATH/evals/evals.json" ]; then
+          ln -sf "$SUBMISSION_PATH/evals" "$SKILL_DIR/evals"
+        fi
+        
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        
+        for i in $(seq 1 "$ITERATIONS"); do
+          echo "--- ASE Iteration $i/$ITERATIONS ---"
+          agent-skills-eval "$SKILL_DIR" --baseline --layout iteration --report \
+            --base-url "$BASE_URL" --target "$LLM_MODEL" --judge "$JUDGE_MODEL" \
+            --concurrency "$CONCURRENCY" --workspace "$RESULTS_DIR/iteration-$i" \
+            --api-key-env OPENAI_API_KEY || true
+        done
+
+    # Step 7: ASE - Aggregate
+    - name: ase-aggregate
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: ASE Aggregation ==="
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        pip install --quiet --no-cache-dir pydantic pyyaml scipy
+        
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        
+        # Read iterations from metadata.yaml with pipeline param as fallback
+        ITERATIONS=$(python3 -c "
+        import yaml, sys
+        try:
+            meta = yaml.safe_load(open('$SUBMISSION_PATH/metadata.yaml'))
+            exp = meta.get('experiment', {})
+            print(exp.get('n_trials', $(params.ase-iterations)))
+        except:
+            print($(params.ase-iterations))
+        ")
+        echo "Using iterations: $ITERATIONS"
+        
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        
+        python3 scripts/aggregate_ase.py \
+          --results-dir "$RESULTS_DIR" \
+          --output-dir "$REPORT_DIR" \
+          --submission-name "$(params.submission-name)" \
+          --iterations "$ITERATIONS" \
+          --threshold "$(params.uplift-threshold)"
+        
+        python3 - "$REPORT_DIR/report.json" <<'PARSE'
+        import json, sys
+        r = json.load(open(sys.argv[1]))
+        t = r["summary"]["treatment"].get("mean_reward", 0)
+        c = r["summary"]["control"].get("mean_reward", 0)
+        rec = r["summary"].get("recommendation", "fail")
+        open("$(workspaces.source.path)/_eval_tmp/treatment-reward", "w").write(f"{t:.4f}")
+        open("$(workspaces.source.path)/_eval_tmp/control-reward", "w").write(f"{c:.4f}")
+        open("$(workspaces.source.path)/_eval_tmp/recommendation", "w").write(rec)
+        PARSE
+
+    # Step 8: MCPChecker - Run Evaluation
+    - name: mcpchecker-eval
+      image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/mcpchecker-runner:latest
+      env:
+        - name: MCP_URL
+          valueFrom:
+            secretKeyRef:
+              name: $(params.mcp-credentials-secret)
+              key: MCP_URL
+              optional: true
+        - name: MCP_BEARER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: $(params.mcp-credentials-secret)
+              key: MCP_BEARER_TOKEN
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: api-key
+              optional: true
+        - name: LITELLM_PROXY_URL
+          value: "http://litellm.ab-eval-flow.svc:4000/v1"
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "mcpchecker" ]; then
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: MCPChecker ==="
+        
+        if [ -z "${MCP_URL:-}" ]; then
+          echo "ERROR: MCP_URL not set"
+          exit 1
+        fi
+        
+        cd "$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        
+        # Expand env vars in mcp-config.yaml
+        envsubst < mcp-config.yaml > mcp-config-resolved.yaml
+        
+        if [ -n "$LITELLM_PROXY_URL" ]; then
+          export OPENAI_BASE_URL="$LITELLM_PROXY_URL"
+        fi
+        
+        OUTPUT_FILE="/tmp/mcpchecker-out.json"
+        RAW_OUTPUT="/tmp/mcpchecker-raw.txt"
+        
+        mcpchecker check eval.yaml --mcp-config-file mcp-config-resolved.yaml -o json > "$RAW_OUTPUT" 2>&1 || true
+        
+        # Extract JSON
+        if grep -n '^{' "$RAW_OUTPUT" > /dev/null; then
+          START_LINE=$(grep -n '^{' "$RAW_OUTPUT" | head -1 | cut -d: -f1)
+          tail -n +$START_LINE "$RAW_OUTPUT" > "$OUTPUT_FILE"
+        else
+          cp "$RAW_OUTPUT" "$OUTPUT_FILE"
+        fi
+        
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        mkdir -p "$RESULTS_DIR"
+        cp "$OUTPUT_FILE" "$RESULTS_DIR/mcpchecker-out.json"
+
+    # Step 9: MCPChecker - Aggregate
+    - name: mcpchecker-aggregate
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "mcpchecker" ]; then
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: MCPChecker Aggregation ==="
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        pip install --quiet --no-cache-dir pydantic pyyaml
+        
+        export PYTHONPATH="$PIPELINE_DIR"
+        
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        mkdir -p "$REPORT_DIR"
+        
+        python "$PIPELINE_DIR/scripts/aggregate_mcpchecker.py" \
+          --output-json "$RESULTS_DIR/mcpchecker-out.json" \
+          --submission-name "$(params.submission-name)" \
+          --report-dir "$REPORT_DIR" \
+          --pipeline-run-id "$(params.pipeline-run-id)" \
+          > /tmp/mcp-result.json
+        
+        python3 - /tmp/mcp-result.json <<'PARSE'
+        import json, sys
+        r = json.load(open(sys.argv[1]))
+        score = r.get("overall_score", 0)
+        rec = r.get("recommendation", "fail")
+        open("$(workspaces.source.path)/_eval_tmp/treatment-reward", "w").write(f"{score:.4f}")
+        open("$(workspaces.source.path)/_eval_tmp/control-reward", "w").write("0.0000")
+        open("$(workspaces.source.path)/_eval_tmp/recommendation", "w").write(rec)
+        PARSE
+
+    # Step 10: Finalize results
+    - name: finalize
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== EVALUATE PHASE: Finalize ==="
+        
+        # Read results from temp files
+        EVAL_TMP="$(workspaces.source.path)/_eval_tmp"
+        T_REWARD=$(cat "$EVAL_TMP/treatment-reward" 2>/dev/null || echo "0.0")
+        C_REWARD=$(cat "$EVAL_TMP/control-reward" 2>/dev/null || echo "0.0")
+        REC=$(cat "$EVAL_TMP/recommendation" 2>/dev/null || echo "fail")
+        
+        echo -n "$T_REWARD" > "$(results.treatment-mean-reward.path)"
+        echo -n "$C_REWARD" > "$(results.control-mean-reward.path)"
+        echo -n "$REC" > "$(results.recommendation.path)"
+        
+        echo "Treatment reward: $T_REWARD"
+        echo "Control reward: $C_REWARD"
+        echo "Recommendation: $REC"
+        echo "Results: $(cat "$(results.results-dir.path)")"
