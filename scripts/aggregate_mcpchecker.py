@@ -238,11 +238,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args.report_dir.mkdir(parents=True, exist_ok=True)
     report_path = args.report_dir / "mcpchecker-report.json"
+    compat_report_path = args.report_dir / "report.json"
 
     with open(report_path, "w") as f:
         f.write(result.model_dump_json(indent=2))
+    
+    # Also write to report.json for compatibility with analyze task
+    with open(compat_report_path, "w") as f:
+        f.write(result.model_dump_json(indent=2))
 
-    logger.info("Wrote report to %s", report_path)
+    logger.info("Wrote report to %s (and %s)", report_path, compat_report_path)
     logger.info(
         "Results: %d/%d passed (%.1f%%), recommendation: %s",
         result.passed_tasks,
