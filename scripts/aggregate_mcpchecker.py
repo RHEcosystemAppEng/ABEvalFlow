@@ -82,12 +82,10 @@ def extract_task_results(raw_output: dict) -> list[MCPCheckerTaskResult]:
             status = "error"
 
         # Handle tool calls (v1alpha2 uses callHistory, legacy uses toolCalls)
-        tool_calls_data = task_data.get("toolCalls", [])
-        if not tool_calls_data:
-            tool_calls_data = task_data.get("callHistory", [])
+        tool_calls_data = task_data.get("toolCalls") or task_data.get("callHistory") or []
         
         tool_call_records = []
-        for tc in tool_calls_data:
+        for tc in (tool_calls_data or []):
             if isinstance(tc, dict):
                 tool_call_records.append(
                     ToolCallRecord(
@@ -99,14 +97,15 @@ def extract_task_results(raw_output: dict) -> list[MCPCheckerTaskResult]:
                 )
 
         # Handle judge/assertion results (v1alpha2 uses assertionResults, legacy uses llmJudgeResults)
-        llm_judge_data = task_data.get("llmJudgeResults", [])
-        if not llm_judge_data:
-            llm_judge_data = task_data.get("verifyResults", [])
-        if not llm_judge_data:
-            llm_judge_data = task_data.get("assertionResults", [])
+        llm_judge_data = (
+            task_data.get("llmJudgeResults") or 
+            task_data.get("verifyResults") or 
+            task_data.get("assertionResults") or 
+            []
+        )
 
         llm_judge_results = []
-        for judge in llm_judge_data:
+        for judge in (llm_judge_data or []):
             if isinstance(judge, dict):
                 llm_judge_results.append(
                     LLMJudgeResult(

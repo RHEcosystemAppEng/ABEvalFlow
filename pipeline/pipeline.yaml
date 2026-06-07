@@ -302,6 +302,9 @@ spec:
         - input: $(params.enable-test-quality-review)
           operator: in
           values: ["true"]
+        - input: $(params.eval-engine)
+          operator: notin
+          values: ["mcpchecker"]
       runAfter: ["validate"]
       taskRef:
         name: test-quality-review
@@ -326,6 +329,10 @@ spec:
     # exfiltration, and malicious code patterns. Skipped when disabled.
     # ------------------------------------------------------------------
     - name: security-scan
+      when:
+        - input: $(params.eval-engine)
+          operator: notin
+          values: ["mcpchecker"]
       runAfter: ["validate"]
       taskRef:
         name: security-scan

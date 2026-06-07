@@ -75,7 +75,7 @@ spec:
         echo "Cloned pipeline repo at $(params.pipeline-repo-revision)"
 
     - name: run-mcpchecker
-      image: quay.io/rhecosystemappeng/mcpchecker-runner:latest
+      image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/mcpchecker-runner:latest
       env:
         # MCP server credentials from user-provided secret
         - name: MCP_URL
@@ -133,6 +133,12 @@ spec:
           exit 1
         fi
 
+        # Expand environment variables in mcp-config.yaml
+        echo "Expanding environment variables in mcp-config.yaml..."
+        envsubst < mcp-config.yaml > mcp-config-resolved.yaml
+        echo "Resolved MCP config:"
+        cat mcp-config-resolved.yaml
+
         # Set up LLM environment based on model provider
         AGENT_MODEL="$(params.agent-model)"
         JUDGE_MODEL="$(params.judge-model)"
@@ -147,13 +153,37 @@ spec:
         echo ""
         echo "Running mcpchecker check..."
         OUTPUT_FILE="/tmp/mcpchecker-$(params.submission-name)-out.json"
+        RAW_OUTPUT="/tmp/mcpchecker-raw-out.txt"
 
-        mcpchecker check eval.yaml \
-          --output "$OUTPUT_FILE" \
-          --timeout "$(params.task-timeout)" \
-          || {
-            echo "MCPChecker completed with some failures (continuing)"
+        # Run mcpchecker - capture all output to raw file first
+        # Use resolved mcp-config with env vars expanded
+        mcpchecker check eval.yaml --mcp-config-file mcp-config-resolved.yaml -o json > "$RAW_OUTPUT" 2>&1 || {
+            echo "MCPChecker completed with exit code $?"
           }
+        
+        # Extract JSON object from output (mcpchecker outputs headers before JSON)
+        echo "Extracting JSON from output..."
+        # Find line starting with { and extract from there to end
+        if grep -n '^{' "$RAW_OUTPUT" > /dev/null; then
+          START_LINE=$(grep -n '^{' "$RAW_OUTPUT" | head -1 | cut -d: -f1)
+          tail -n +$START_LINE "$RAW_OUTPUT" > "$OUTPUT_FILE"
+          echo "Extracted JSON starting at line $START_LINE"
+        else
+          echo "No JSON object found in output, using raw output"
+          cp "$RAW_OUTPUT" "$OUTPUT_FILE"
+        fi
+        
+        # Validate JSON
+        if python3 -c "import json; json.load(open('$OUTPUT_FILE'))" 2>/dev/null; then
+          echo "JSON validation passed"
+        else
+          echo "WARNING: Output is not valid JSON"
+          echo "Creating error placeholder..."
+          echo '{"error": "MCPChecker did not produce valid JSON", "results": []}' > "$OUTPUT_FILE"
+        fi
+        
+        echo "MCPChecker output (first 50 lines):"
+        head -50 "$OUTPUT_FILE" || true
 
         # Copy output to workspace
         RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
