@@ -551,7 +551,9 @@ spec:
     # to avoid skip propagation issues.
     # ------------------------------------------------------------------
     - name: analyze
-      runAfter: ["harbor-eval", "ase-eval", "mcpchecker-eval"]
+      # For harbor/ase/both: runs after eval tasks complete
+      # For mcpchecker: this is skipped, use analyze-mcpchecker in finally section
+      runAfter: ["harbor-eval", "ase-eval"]
       taskRef:
         name: analyze-report
       params:
@@ -653,6 +655,43 @@ spec:
   # Cleanup: delete workspace PVC after run completes (success or fail)
   # ------------------------------------------------------------------
   finally:
+    # For MCPChecker: run analyze in finally to avoid skip propagation issues
+    - name: analyze-mcpchecker
+      when:
+        - input: $(params.eval-engine)
+          operator: in
+          values: ["mcpchecker"]
+      taskRef:
+        name: analyze-report
+      params:
+        - name: submission-name
+          value: $(tasks.validate.results.submission-name)
+        - name: eval-engine
+          value: $(params.eval-engine)
+        - name: commit-sha
+          value: $(params.revision)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: harbor-fork-revision
+          value: $(params.harbor-fork-revision)
+        - name: uplift-threshold
+          value: $(params.uplift-threshold)
+        - name: security-scan-mode
+          value: ""
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: llm-model
+          value: $(params.llm-model)
+        - name: repo-name
+          value: $(params.repo-name)
+        - name: pr-number
+          value: $(params.pr-number)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
     - name: cleanup-pvc
       taskRef:
         name: cleanup-pvc
