@@ -370,21 +370,21 @@ spec:
         # Override from metadata.yaml if present
         if [ -f "$METADATA_FILE" ]; then
           pip install --quiet pyyaml 2>/dev/null || true
-          OVERRIDES=$(python3 -c "
-import yaml, sys, os
+          OVERRIDES=$(python3 - "$METADATA_FILE" <<'PYEOF'
+import yaml, sys
 try:
-    meta = yaml.safe_load(open('$METADATA_FILE'))
-    exp = meta.get('experiment') or {}
-    llm = meta.get('llm') or {}
-    # Only output if value exists in metadata
-    if exp.get('n_trials'): print(f\"ITERATIONS={exp['n_trials']}\")
-    if llm.get('model'): print(f\"LLM_MODEL={llm['model']}\")
-    if llm.get('api_base'): print(f\"BASE_URL={llm['api_base']}\")
-    if llm.get('judge_model'): print(f\"JUDGE_MODEL={llm['judge_model']}\")
-    if exp.get('concurrency'): print(f\"CONCURRENCY={exp['concurrency']}\")
-except Exception as e:
+    meta = yaml.safe_load(open(sys.argv[1]))
+    exp = meta.get("experiment") or {}
+    llm = meta.get("llm") or {}
+    if exp.get("n_trials"): print(f'ITERATIONS={exp["n_trials"]}')
+    if llm.get("model"): print(f'LLM_MODEL={llm["model"]}')
+    if llm.get("api_base"): print(f'BASE_URL={llm["api_base"]}')
+    if llm.get("judge_model"): print(f'JUDGE_MODEL={llm["judge_model"]}')
+    if exp.get("concurrency"): print(f'CONCURRENCY={exp["concurrency"]}')
+except:
     pass
-" 2>/dev/null || true)
+PYEOF
+)
           eval "$OVERRIDES"
         fi
         
