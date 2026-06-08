@@ -98,7 +98,7 @@ spec:
                       abevalflow.skill: "${SKILL}"
                   spec:
                     pipelineRef:
-                      name: abevalflow-pipeline
+                      name: abevalflow-monitoring-pipeline
                     params:
                       - name: repo-url
                         value: "${REPO_URL}"
@@ -108,23 +108,15 @@ spec:
                         value: "${PATH_VAL}"
                       - name: pipeline-repo-revision
                         value: "main"
-                      - name: repo-name
-                        value: "${REPO}"
-                      - name: pr-number
-                        value: "monitoring"
                       - name: eval-engine
                         value: "${ENGINE}"
-                      - name: harbor-trials
-                        value: "${TRIALS}"
                       - name: ase-iterations
                         value: "${TRIALS}"
-                      - name: enable-monitoring
-                        value: "true"
-                      - name: monitoring-threshold
+                      - name: degradation-threshold
                         value: "${THRESHOLD}"
                     timeouts:
-                      pipeline: "4h"
-                      tasks: "3h"
+                      pipeline: "2h"
+                      tasks: "1h30m"
                     taskRunTemplate:
                       serviceAccountName: pipeline
                     workspaces:
