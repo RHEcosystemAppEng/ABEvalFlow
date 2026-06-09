@@ -14,11 +14,11 @@ spec:
   stepTemplate:
     resources:
       requests:
-        cpu: 50m
-        memory: 128Mi
+        cpu: 25m
+        memory: 64Mi
       limits:
-        cpu: 500m
-        memory: 512Mi
+        cpu: 200m
+        memory: 256Mi
   params:
     - name: eval-engine
       type: string
@@ -698,7 +698,10 @@ spec:
     - name: a2a-eval
       image: registry.access.redhat.com/ubi9/python-312:latest
       resources:
+        requests:
+          memory: 256Mi
         limits:
+          cpu: 500m
           memory: 1Gi
       env:
         - name: LLM_JUDGE_MODEL
