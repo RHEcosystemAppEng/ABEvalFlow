@@ -730,14 +730,27 @@ spec:
         ")
         echo "Running $N_ATTEMPTS evaluation attempts"
         
-        # Use submission path - Harbor will find tasks/ subdirectory
+        # Find task directory
         echo "Submission path: $SUBMISSION_PATH"
         ls -la "$SUBMISSION_PATH" || true
-        ls -la "$SUBMISSION_PATH/tasks" 2>/dev/null || true
+        
+        TASK_DIR=""
+        if [ -f "$SUBMISSION_PATH/task.toml" ]; then
+          TASK_DIR="$SUBMISSION_PATH"
+        elif [ -d "$SUBMISSION_PATH/tasks" ]; then
+          echo "Looking for task.toml in tasks/..."
+          ls -la "$SUBMISSION_PATH/tasks" || true
+          TASK_DIR=$(find "$SUBMISSION_PATH/tasks" -name "task.toml" -type f | head -1 | xargs dirname 2>/dev/null || true)
+        fi
+        
+        echo "Task directory: $TASK_DIR"
+        if [ -n "$TASK_DIR" ]; then
+          ls -la "$TASK_DIR" || true
+        fi
         
         # Run Harbor with A2A adapter
         harbor run \
-          -p "$SUBMISSION_PATH" \
+          -p "${TASK_DIR:-$SUBMISSION_PATH}" \
           --agent-import-path abevalflow.harbor_agents.a2a_adapter:A2AAgent \
           --ak "endpoint=$AGENT_ENDPOINT" \
           --ak "timeout=$(params.agent-timeout)" \
