@@ -1,11 +1,7 @@
 name: a2a-agent-eval
 description: A2A agent evaluation for google-lightspeed-agent
 version: "1.0.0"
-
 eval_engine: a2a
 
 experiment:
   n_trials: 3
-
-agent:
-  timeout: 120
