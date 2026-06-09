@@ -828,8 +828,20 @@ spec:
         echo "Recommendation: $REC"
         echo "Results: $(cat "$(results.results-dir.path)")"
 
-  # A2A Agent sidecar - runs alongside steps, auto-cleaned when pod terminates
+  # A2A Agent sidecars - run alongside steps, auto-cleaned when pod terminates
   sidecars:
+    - name: a2a-redis
+      image: redis:7-alpine
+      ports:
+        - containerPort: 6379
+          name: redis
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
     - name: a2a-agent
       image: $(params.agent-image):$(params.agent-tag)
       ports:
@@ -844,6 +856,8 @@ spec:
           value: "$(params.llm-api-base)"
         - name: OPENAI_API_KEY
           value: "dummy"
+        - name: REDIS_URL
+          value: "redis://localhost:6379"
       resources:
         requests:
           cpu: 100m
