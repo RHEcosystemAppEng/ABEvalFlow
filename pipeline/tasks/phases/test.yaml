@@ -87,9 +87,9 @@ spec:
         
         EVAL_ENGINE="$(params.eval-engine)"
         
-        # MCPChecker doesn't need testing phase
-        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
-          echo "MCPChecker mode: skipping test phase"
+        # MCPChecker and A2A don't need testing phase
+        if [ "$EVAL_ENGINE" = "mcpchecker" ] || [ "$EVAL_ENGINE" = "a2a" ]; then
+          echo "$EVAL_ENGINE mode: skipping test phase"
           echo -n "true" > "$(results.security-passed.path)"
           echo -n "disabled" > "$(results.security-mode.path)"
           echo -n "0" > "$(results.security-findings.path)"
@@ -293,8 +293,8 @@ spec:
         EVAL_ENGINE="$(params.eval-engine)"
         ENABLE_REVIEW="$(params.enable-quality-review)"
         
-        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
-          echo "MCPChecker mode: quality review skipped"
+        if [ "$EVAL_ENGINE" = "mcpchecker" ] || [ "$EVAL_ENGINE" = "a2a" ]; then
+          echo "$EVAL_ENGINE mode: quality review skipped"
           exit 0
         fi
         
