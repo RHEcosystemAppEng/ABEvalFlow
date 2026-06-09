@@ -47,6 +47,10 @@ spec:
     - name: enable-quality-review
       type: string
       default: "true"
+    - name: submission-skip-quality-review
+      type: string
+      default: "false"
+      description: Submission's skip_quality_review setting from metadata.yaml
     - name: llm-base-url
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000/v1"
@@ -87,9 +91,9 @@ spec:
         
         EVAL_ENGINE="$(params.eval-engine)"
         
-        # MCPChecker and A2A don't need testing phase
-        if [ "$EVAL_ENGINE" = "mcpchecker" ] || [ "$EVAL_ENGINE" = "a2a" ]; then
-          echo "$EVAL_ENGINE mode: skipping test phase"
+        # MCPChecker doesn't need testing phase
+        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
+          echo "MCPChecker mode: skipping test phase"
           echo -n "true" > "$(results.security-passed.path)"
           echo -n "disabled" > "$(results.security-mode.path)"
           echo -n "0" > "$(results.security-findings.path)"
@@ -293,13 +297,15 @@ spec:
         EVAL_ENGINE="$(params.eval-engine)"
         ENABLE_REVIEW="$(params.enable-quality-review)"
         
-        if [ "$EVAL_ENGINE" = "mcpchecker" ] || [ "$EVAL_ENGINE" = "a2a" ]; then
-          echo "$EVAL_ENGINE mode: quality review skipped"
+        SUBMISSION_SKIP="$(params.submission-skip-quality-review)"
+        
+        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
+          echo "MCPChecker mode: quality review skipped"
           exit 0
         fi
         
-        if [ "$ENABLE_REVIEW" != "true" ]; then
-          echo "Quality review disabled"
+        if [ "$ENABLE_REVIEW" != "true" ] || [ "$SUBMISSION_SKIP" = "true" ]; then
+          echo "Quality review disabled (enable=$ENABLE_REVIEW, submission_skip=$SUBMISSION_SKIP)"
           echo -n "true" > "$(results.quality-passed.path)"
           exit 0
         fi

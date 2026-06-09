@@ -66,6 +66,8 @@ spec:
       description: Security scan mode from metadata (disabled/warn/block)
     - name: security-scan-use-llm
       description: Whether to use LLM in security scanning
+    - name: skip-quality-review
+      description: Whether to skip quality review (from metadata)
     - name: mcp-credentials-secret
       description: Secret name for MCP credentials (MCPChecker only)
     - name: generated-files
@@ -248,6 +250,13 @@ spec:
         print(str(meta.get('security_scan_use_llm', True)).lower(), end='')
         " "$SUBMISSION_PATH/metadata.yaml" > "$(results.security-scan-use-llm.path)"
           
+          # Extract skip_quality_review
+          python3 -c "
+        import yaml, sys
+        meta = yaml.safe_load(open(sys.argv[1]))
+        print(str(meta.get('skip_quality_review', False)).lower(), end='')
+        " "$SUBMISSION_PATH/metadata.yaml" > "$(results.skip-quality-review.path)"
+          
           # Generate report prefix
           SUBMISSION_NAME=$(cat "$(results.submission-name.path)")
           TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
@@ -271,6 +280,7 @@ spec:
           echo "INVALID" > "$(results.submission-name.path)"
           echo "warn" > "$(results.security-scan.path)"
           echo "false" > "$(results.security-scan-use-llm.path)"
+          echo "false" > "$(results.skip-quality-review.path)"
           echo "INVALID" > "$(results.report-prefix.path)"
           echo "" > "$(results.mcp-credentials-secret.path)"
           echo "Validation FAILED"

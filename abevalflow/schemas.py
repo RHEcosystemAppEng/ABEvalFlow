@@ -263,6 +263,14 @@ class SubmissionMetadata(BaseModel):
         ),
     )
 
+    skip_quality_review: bool = Field(
+        default=False,
+        description=(
+            "Skip the LLM-based test quality review step. "
+            "Useful for A2A evaluations or when quality review is not needed."
+        ),
+    )
+
     security_scan_use_llm: bool = Field(
         default=False,
         description=(

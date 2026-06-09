@@ -5,3 +5,7 @@ eval_engine: a2a
 
 experiment:
   n_trials: 3
+
+# Skip test phase for A2A - we're testing external agent, not our code
+security_scan: disabled
+skip_quality_review: true
