@@ -1,11 +1,22 @@
-# Harbor Task Configuration for A2A Agent Evaluation
-# This task evaluates the lightspeed-agent via A2A protocol
+version = "1.0"
 
-[task]
-name = "lightspeed-qa-basic"
-version = "1.0.0"
-description = "Basic Q&A evaluation for lightspeed-agent"
+[metadata]
+difficulty = "medium"
+category = "a2a-agent"
+tags = ["a2a", "lightspeed", "qa"]
 
-[test]
-file = "tests/llm_judge.py"
-function = "grade"
+[verifier]
+timeout_sec = 120.0
+
+[verifier.env]
+LLM_JUDGE_MODEL = "claude-sonnet"
+
+[agent]
+timeout_sec = 300.0
+setup_timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 60.0
+cpus = 1
+memory_mb = 512
+storage_mb = 1024
