@@ -637,9 +637,13 @@ spec:
           exit 0
         fi
 
-        # Use sidecar agent at localhost (agent listens on port 8000)
-        ENDPOINT="http://localhost:8000"
-        echo "Using sidecar agent at: $ENDPOINT"
+        # Get pod IP so Harbor's OpenShift environment pods can reach the sidecar
+        POD_IP=$(hostname -i 2>/dev/null || cat /etc/hosts | grep $(hostname) | awk '{print $1}' | head -1)
+        if [ -z "$POD_IP" ]; then
+          POD_IP="localhost"
+        fi
+        ENDPOINT="http://${POD_IP}:8000"
+        echo "Using sidecar agent at: $ENDPOINT (Pod IP: $POD_IP)"
         echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
         
         # Wait for sidecar agent to be ready
