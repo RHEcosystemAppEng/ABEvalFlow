@@ -10,7 +10,15 @@ spec:
   description: >-
     Evaluation phase: dispatches to the appropriate evaluation engine based on
     eval-engine parameter. Handles Harbor (scaffold+build+eval), ASE (LLM-as-judge),
-    and MCPChecker (MCP server testing) in a single composite task.
+    MCPChecker (MCP server testing), and A2A (agent evaluation) in a single composite task.
+  stepTemplate:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
   params:
     - name: eval-engine
       type: string
@@ -689,6 +697,9 @@ spec:
     # Step 11: A2A Agent Evaluation
     - name: a2a-eval
       image: registry.access.redhat.com/ubi9/python-312:latest
+      resources:
+        limits:
+          memory: 1Gi
       env:
         - name: LLM_JUDGE_MODEL
           value: "openai/$(params.llm-model)"

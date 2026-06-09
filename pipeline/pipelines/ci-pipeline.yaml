@@ -219,6 +219,8 @@ spec:
           value: $(params.security-scan)
         - name: submission-security-scan
           value: $(tasks.prepare.results.security-scan)
+        - name: submission-skip-quality-review
+          value: $(tasks.prepare.results.skip-quality-review)
         - name: security-scan-use-llm
           value: $(tasks.prepare.results.security-scan-use-llm)
         - name: enable-quality-review
