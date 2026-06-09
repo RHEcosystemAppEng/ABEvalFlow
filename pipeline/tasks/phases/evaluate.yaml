@@ -618,33 +618,33 @@ spec:
 
     # Step 10: A2A - Deploy Agent (if no endpoint provided)
     - name: a2a-deploy
-      image: registry.access.redhat.com/ubi9/ubi:latest
+      image: registry.access.redhat.com/ubi9/python-312:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
-        
+
         EVAL_ENGINE="$(params.eval-engine)"
         if [ "$EVAL_ENGINE" != "a2a" ]; then
           echo "Skipping A2A deploy (eval-engine=$EVAL_ENGINE)"
           exit 0
         fi
-        
+
         AGENT_ENDPOINT="$(params.agent-endpoint)"
         if [ -n "$AGENT_ENDPOINT" ]; then
           echo "Using provided agent endpoint: $AGENT_ENDPOINT"
           echo "$AGENT_ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
           exit 0
         fi
-        
+
         echo "=== EVALUATE PHASE: A2A Agent Deployment ==="
         echo "Image: $(params.agent-image):$(params.agent-tag)"
         echo "Namespace: $(params.agent-namespace)"
         echo "Release: $(params.agent-release-name)"
-        
-        # Install Helm and oc
+
+        # Install Helm
         curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-amd64 -o /tmp/helm
         chmod +x /tmp/helm
-        
+
         # Clone the agent repo to get Helm chart
         CHART_DIR="$(workspaces.source.path)/_agent-chart"
         git clone --depth 1 "$(params.agent-chart-url)" "$CHART_DIR"
