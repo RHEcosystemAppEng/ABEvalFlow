@@ -14,7 +14,7 @@ spec:
   params:
     - name: eval-engine
       type: string
-      description: Evaluation engine (harbor, ase, mcpchecker, both)
+      description: Evaluation engine (harbor, ase, mcpchecker, a2a, both)
     - name: submission-dir
       type: string
       description: Submission directory name under submissions/
@@ -92,6 +92,35 @@ spec:
     - name: mcpchecker-task-timeout
       type: string
       default: "10m"
+    # A2A params
+    - name: agent-endpoint
+      type: string
+      default: ""
+      description: A2A agent endpoint URL (if empty, deploys agent from agent-image)
+    - name: agent-timeout
+      type: string
+      default: "120"
+      description: A2A agent request timeout in seconds
+    - name: agent-image
+      type: string
+      default: "quay.io/ecosystem-appeng/google-lightspeed-agent"
+      description: Agent container image for deployment
+    - name: agent-tag
+      type: string
+      default: "latest"
+      description: Agent image tag
+    - name: agent-namespace
+      type: string
+      default: "ab-eval-flow"
+      description: Namespace to deploy agent
+    - name: agent-release-name
+      type: string
+      default: "eval-agent"
+      description: Helm release name for agent deployment
+    - name: agent-chart-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/google-lightspeed-agent.git"
+      description: Agent Helm chart Git URL
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions repository
@@ -579,7 +608,227 @@ spec:
         open("$(workspaces.source.path)/_eval_tmp/recommendation", "w").write(rec)
         PARSE
 
-    # Step 10: Finalize results
+    # Step 10: A2A - Deploy Agent (if no endpoint provided)
+    - name: a2a-deploy
+      image: registry.access.redhat.com/ubi9/ubi:latest
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          echo "Skipping A2A deploy (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+        
+        AGENT_ENDPOINT="$(params.agent-endpoint)"
+        if [ -n "$AGENT_ENDPOINT" ]; then
+          echo "Using provided agent endpoint: $AGENT_ENDPOINT"
+          echo "$AGENT_ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+          exit 0
+        fi
+        
+        echo "=== EVALUATE PHASE: A2A Agent Deployment ==="
+        echo "Image: $(params.agent-image):$(params.agent-tag)"
+        echo "Namespace: $(params.agent-namespace)"
+        echo "Release: $(params.agent-release-name)"
+        
+        # Install Helm and oc
+        curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-amd64 -o /tmp/helm
+        chmod +x /tmp/helm
+        
+        # Clone the agent repo to get Helm chart
+        CHART_DIR="$(workspaces.source.path)/_agent-chart"
+        git clone --depth 1 "$(params.agent-chart-url)" "$CHART_DIR"
+        
+        # Deploy/upgrade the agent
+        /tmp/helm upgrade --install "$(params.agent-release-name)" \
+          "$CHART_DIR/deploy/openshift" \
+          --namespace "$(params.agent-namespace)" \
+          --set agent.image.repository="$(params.agent-image)" \
+          --set agent.image.tag="$(params.agent-tag)" \
+          --set llm.provider=litellm \
+          --set llm.model="openai/$(params.llm-model)" \
+          --set llm.apiBase="$(params.llm-api-base)" \
+          --set secrets.llmApiKey=dummy \
+          --wait --timeout 5m \
+          2>&1 || {
+            echo "Helm upgrade failed, checking if already deployed..."
+          }
+        
+        # Get the route endpoint
+        ROUTE_HOST=$(oc get route "$(params.agent-release-name)" \
+          -n "$(params.agent-namespace)" \
+          -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        
+        if [ -z "$ROUTE_HOST" ]; then
+          # Try service endpoint as fallback
+          ROUTE_HOST="$(params.agent-release-name).$(params.agent-namespace).svc.cluster.local"
+          ENDPOINT="http://$ROUTE_HOST:8080"
+        else
+          ENDPOINT="https://$ROUTE_HOST"
+        fi
+        
+        echo "Agent endpoint: $ENDPOINT"
+        echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+        
+        # Wait for agent to be ready
+        echo "Waiting for agent to be ready..."
+        for i in $(seq 1 30); do
+          if curl -sf "$ENDPOINT/health" > /dev/null 2>&1 || \
+             curl -sf "$ENDPOINT/" > /dev/null 2>&1; then
+            echo "Agent is ready!"
+            exit 0
+          fi
+          echo "Attempt $i/30 - waiting 10s..."
+          sleep 10
+        done
+        
+        echo "WARNING: Agent health check timed out, proceeding anyway"
+
+    # Step 11: A2A Agent Evaluation
+    - name: a2a-eval
+      image: registry.access.redhat.com/ubi9/python-312:latest
+      env:
+        - name: LLM_JUDGE_MODEL
+          value: "openai/$(params.llm-model)"
+        - name: LLM_BASE_URL
+          value: "$(params.llm-api-base)"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: api-key
+              optional: true
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          echo "Skipping A2A eval (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+        
+        # Read endpoint from deploy step or param
+        ENDPOINT_FILE="$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+        if [ -f "$ENDPOINT_FILE" ]; then
+          AGENT_ENDPOINT=$(cat "$ENDPOINT_FILE")
+        else
+          AGENT_ENDPOINT="$(params.agent-endpoint)"
+        fi
+        
+        if [ -z "$AGENT_ENDPOINT" ]; then
+          echo "ERROR: No agent endpoint available (deploy failed or not provided)"
+          exit 1
+        fi
+        
+        echo "=== EVALUATE PHASE: A2A Agent Evaluation ==="
+        echo "Agent endpoint: $AGENT_ENDPOINT"
+        echo "Timeout: $(params.agent-timeout)s"
+        
+        # Install Harbor fork with podman support and abevalflow package
+        pip install --quiet --no-cache-dir \
+          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+          pydantic pyyaml aiohttp litellm
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        
+        mkdir -p "$RESULTS_DIR" "$REPORT_DIR"
+        
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        
+        # Read evaluation config from metadata.yaml
+        N_ATTEMPTS=$(python3 -c "
+        import yaml, sys
+        try:
+            meta = yaml.safe_load(open('$SUBMISSION_PATH/metadata.yaml'))
+            exp = meta.get('experiment', {})
+            print(exp.get('n_trials', 5))
+        except:
+            print(5)
+        ")
+        echo "Running $N_ATTEMPTS evaluation attempts"
+        
+        # Find task directory - look for task.toml or use submission as task
+        TASK_DIR=""
+        if [ -f "$SUBMISSION_PATH/task.toml" ]; then
+          TASK_DIR="$SUBMISSION_PATH"
+        elif [ -d "$SUBMISSION_PATH/tasks" ]; then
+          TASK_DIR=$(find "$SUBMISSION_PATH/tasks" -name "task.toml" -type f | head -1 | xargs dirname 2>/dev/null || true)
+        fi
+        
+        if [ -z "$TASK_DIR" ] && [ -f "$SUBMISSION_PATH/instruction.md" ]; then
+          # Create minimal task.toml if instruction.md exists
+          cat > "$SUBMISSION_PATH/task.toml" <<EOF
+        [task]
+        name = "$(params.submission-name)"
+        version = "1.0.0"
+        description = "A2A agent evaluation task"
+        EOF
+          TASK_DIR="$SUBMISSION_PATH"
+        fi
+        
+        if [ -z "$TASK_DIR" ]; then
+          echo "ERROR: No task.toml or instruction.md found in submission"
+          exit 1
+        fi
+        
+        echo "Task directory: $TASK_DIR"
+        
+        # Run Harbor with A2A adapter
+        harbor run \
+          -p "$TASK_DIR" \
+          --agent-import-path abevalflow.harbor_agents.a2a_adapter:A2AAgent \
+          --ak "endpoint=$AGENT_ENDPOINT" \
+          --ak "timeout=$(params.agent-timeout)" \
+          --n-attempts "$N_ATTEMPTS" \
+          --results-dir "$RESULTS_DIR" \
+          -e podman \
+          -y || true
+        
+        # Compute mean reward from Harbor results
+        python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
+        import json
+        import sys
+        from pathlib import Path
+        
+        results_dir = Path(sys.argv[1])
+        output_dir = Path(sys.argv[2])
+        
+        def compute_mean_reward(base_dir: Path) -> float:
+            if not base_dir.is_dir():
+                return 0.0
+            rewards = []
+            for result_file in sorted(base_dir.rglob("result.json")):
+                try:
+                    data = json.loads(result_file.read_text())
+                    vr = data.get("verifier_result") or {}
+                    rw = vr.get("rewards") or {}
+                    reward = rw.get("reward") or vr.get("reward")
+                    if reward is not None:
+                        rewards.append(float(reward))
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+            return sum(rewards) / len(rewards) if rewards else 0.0
+        
+        mean_reward = compute_mean_reward(results_dir)
+        rec = "pass" if mean_reward >= 0.5 else "fail"
+        
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "treatment-reward").write_text(f"{mean_reward:.4f}")
+        (output_dir / "control-reward").write_text("0.0000")
+        (output_dir / "recommendation").write_text(rec)
+        
+        print(f"A2A mean reward: {mean_reward:.4f}")
+        print(f"Recommendation: {rec}")
+        COMPUTE_REWARDS
+
+    # Step 12: Finalize results
     - name: finalize
       image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |

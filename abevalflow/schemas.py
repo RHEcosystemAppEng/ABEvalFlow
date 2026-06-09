@@ -28,6 +28,7 @@ class EvalEngine(StrEnum):
     HARBOR = "harbor"
     ASE = "ase"
     MCPCHECKER = "mcpchecker"
+    A2A = "a2a"
     BOTH = "both"  # Harbor + ASE
 
 

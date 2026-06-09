@@ -539,7 +539,7 @@ def main() -> int:
     parser.add_argument("--results-dir", type=Path, default=None,
                         help="Path to results dir (Harbor or ASE) for debug artifact upload")
     parser.add_argument("--eval-engine", type=str, default="harbor",
-                        choices=["harbor", "ase", "mcpchecker", "both"],
+                        choices=["harbor", "ase", "mcpchecker", "a2a", "both"],
                         help="Evaluation engine used — determines debug artifact layout")
     parser.add_argument("--workspace-root", type=Path, default=None,
                         help="Workspace root for uploading scaffolded configs")
