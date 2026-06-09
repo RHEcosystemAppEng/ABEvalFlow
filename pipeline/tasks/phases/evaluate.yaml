@@ -706,8 +706,8 @@ spec:
         echo "Agent endpoint: $AGENT_ENDPOINT"
         echo "Timeout: $(params.agent-timeout)s"
         
-        # Install Python and dependencies (buildah image doesn't have Python by default)
-        dnf install -y --quiet python3.12 python3.12-pip git
+        # Install Python, podman and dependencies (buildah image needs these)
+        dnf install -y --quiet python3.12 python3.12-pip git podman
         
         # Install Harbor fork and abevalflow package
         python3.12 -m pip install --quiet --no-cache-dir \
@@ -783,7 +783,11 @@ spec:
                     "timeout": int(timeout)
                 }
             }],
-            "tasks": [{"path": task_dir}]
+            "tasks": [{"path": task_dir}],
+            "environment": {
+                "type": "podman",
+                "delete": True
+            }
         }
         
         with open(config_file, "w") as f:
