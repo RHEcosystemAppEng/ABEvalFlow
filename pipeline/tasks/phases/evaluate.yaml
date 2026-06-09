@@ -617,82 +617,45 @@ spec:
         PARSE
 
     # Step 10: A2A - Deploy Agent (if no endpoint provided)
-    - name: a2a-deploy
-      image: registry.access.redhat.com/ubi9/python-312:latest
+    # Step 10: A2A - Wait for sidecar agent to be ready
+    - name: a2a-wait-ready
+      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         EVAL_ENGINE="$(params.eval-engine)"
         if [ "$EVAL_ENGINE" != "a2a" ]; then
-          echo "Skipping A2A deploy (eval-engine=$EVAL_ENGINE)"
+          echo "Skipping A2A wait (eval-engine=$EVAL_ENGINE)"
           exit 0
         fi
 
         AGENT_ENDPOINT="$(params.agent-endpoint)"
         if [ -n "$AGENT_ENDPOINT" ]; then
-          echo "Using provided agent endpoint: $AGENT_ENDPOINT"
+          echo "Using provided external agent endpoint: $AGENT_ENDPOINT"
           echo "$AGENT_ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
           exit 0
         fi
 
-        echo "=== EVALUATE PHASE: A2A Agent Deployment ==="
-        echo "Image: $(params.agent-image):$(params.agent-tag)"
-        echo "Namespace: $(params.agent-namespace)"
-        echo "Release: $(params.agent-release-name)"
-
-        # Install Helm
-        curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-amd64 -o /tmp/helm
-        chmod +x /tmp/helm
-
-        # Clone the agent repo to get Helm chart
-        CHART_DIR="$(workspaces.source.path)/_agent-chart"
-        git clone --depth 1 "$(params.agent-chart-url)" "$CHART_DIR"
-        
-        # Deploy/upgrade the agent
-        /tmp/helm upgrade --install "$(params.agent-release-name)" \
-          "$CHART_DIR/deploy/openshift" \
-          --namespace "$(params.agent-namespace)" \
-          --set agent.image.repository="$(params.agent-image)" \
-          --set agent.image.tag="$(params.agent-tag)" \
-          --set llm.provider=litellm \
-          --set llm.model="openai/$(params.llm-model)" \
-          --set llm.apiBase="$(params.llm-api-base)" \
-          --set secrets.llmApiKey=dummy \
-          --wait --timeout 5m \
-          2>&1 || {
-            echo "Helm upgrade failed, checking if already deployed..."
-          }
-        
-        # Get the route endpoint
-        ROUTE_HOST=$(oc get route "$(params.agent-release-name)" \
-          -n "$(params.agent-namespace)" \
-          -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-        
-        if [ -z "$ROUTE_HOST" ]; then
-          # Try service endpoint as fallback
-          ROUTE_HOST="$(params.agent-release-name).$(params.agent-namespace).svc.cluster.local"
-          ENDPOINT="http://$ROUTE_HOST:8080"
-        else
-          ENDPOINT="https://$ROUTE_HOST"
-        fi
-        
-        echo "Agent endpoint: $ENDPOINT"
+        # Use sidecar agent at localhost
+        ENDPOINT="http://localhost:8080"
+        echo "Using sidecar agent at: $ENDPOINT"
         echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
         
-        # Wait for agent to be ready
-        echo "Waiting for agent to be ready..."
-        for i in $(seq 1 30); do
+        # Wait for sidecar agent to be ready
+        echo "Waiting for sidecar agent to be ready..."
+        for i in $(seq 1 60); do
           if curl -sf "$ENDPOINT/health" > /dev/null 2>&1 || \
              curl -sf "$ENDPOINT/" > /dev/null 2>&1; then
-            echo "Agent is ready!"
+            echo "Agent sidecar is ready!"
             exit 0
           fi
-          echo "Attempt $i/30 - waiting 10s..."
-          sleep 10
+          echo "Attempt $i/60 - waiting 5s..."
+          sleep 5
         done
         
-        echo "WARNING: Agent health check timed out, proceeding anyway"
+        echo "ERROR: Agent sidecar failed to start"
+        exit 1
 
     # Step 11: A2A Agent Evaluation
     - name: a2a-eval
@@ -842,9 +805,9 @@ spec:
         print(f"Recommendation: {rec}")
         COMPUTE_REWARDS
 
-    # Step 12: Finalize results and cleanup
+    # Step 12: Finalize results
     - name: finalize
-      image: registry.access.redhat.com/ubi9/python-312:latest
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -864,17 +827,27 @@ spec:
         echo "Control reward: $C_REWARD"
         echo "Recommendation: $REC"
         echo "Results: $(cat "$(results.results-dir.path)")"
-        
-        # Cleanup A2A agent deployment if it was created
-        EVAL_ENGINE="$(params.eval-engine)"
-        if [ "$EVAL_ENGINE" = "a2a" ]; then
-          AGENT_ENDPOINT_PROVIDED="$(params.agent-endpoint)"
-          if [ -z "$AGENT_ENDPOINT_PROVIDED" ]; then
-            echo "=== Cleaning up A2A agent deployment ==="
-            # Install helm for cleanup
-            curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-amd64 -o /tmp/helm 2>/dev/null
-            chmod +x /tmp/helm
-            /tmp/helm uninstall "$(params.agent-release-name)" -n "$(params.agent-namespace)" 2>/dev/null || echo "Agent cleanup: release not found or already removed"
-            echo "Agent deployment cleaned up"
-          fi
-        fi
+
+  # A2A Agent sidecar - runs alongside steps, auto-cleaned when pod terminates
+  sidecars:
+    - name: a2a-agent
+      image: $(params.agent-image):$(params.agent-tag)
+      ports:
+        - containerPort: 8080
+          name: http
+      env:
+        - name: LLM_PROVIDER
+          value: "litellm"
+        - name: LLM_MODEL
+          value: "openai/$(params.llm-model)"
+        - name: LLM_API_BASE
+          value: "$(params.llm-api-base)"
+        - name: OPENAI_API_KEY
+          value: "dummy"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
