@@ -642,12 +642,10 @@ spec:
         echo "Using sidecar agent at: $ENDPOINT"
         echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
         
-        # Wait for sidecar agent to be ready (probe server on 8002)
+        # Wait for sidecar agent to be ready
         echo "Waiting for sidecar agent to be ready..."
         for i in $(seq 1 60); do
-          if curl -sf "http://localhost:8002/healthz" > /dev/null 2>&1 || \
-             curl -sf "http://localhost:8002/readyz" > /dev/null 2>&1 || \
-             curl -sf "$ENDPOINT/" > /dev/null 2>&1; then
+          if curl -sf "$ENDPOINT/.well-known/agent.json" > /dev/null 2>&1; then
             echo "Agent sidecar is ready!"
             exit 0
           fi
