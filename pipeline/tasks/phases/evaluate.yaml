@@ -763,7 +763,7 @@ spec:
           --ak "endpoint=$AGENT_ENDPOINT" \
           --ak "timeout=$(params.agent-timeout)" \
           --n-attempts "$N_ATTEMPTS" \
-          --results-dir "$RESULTS_DIR" \
+          --jobs-dir "$RESULTS_DIR" \
           -e podman \
           -y || true
         

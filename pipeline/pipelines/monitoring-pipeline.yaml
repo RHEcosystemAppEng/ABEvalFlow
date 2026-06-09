@@ -309,6 +309,10 @@ spec:
     # PHASE 4: STORE (persist results to PostgreSQL)
     # ======================================================================
     - name: store
+      when:
+        - input: $(params.eval-engine)
+          operator: notin
+          values: ["mcpchecker", "a2a"]
       runAfter: ["analyze", "evaluate"]
       taskRef:
         name: store-results
@@ -329,6 +333,10 @@ spec:
     # PHASE 5: CHECK DEGRADATION (compare with previous runs + alert)
     # ======================================================================
     - name: check-degradation
+      when:
+        - input: $(params.eval-engine)
+          operator: notin
+          values: ["mcpchecker", "a2a"]
       runAfter: ["store"]
       taskRef:
         name: check-degradation
