@@ -658,7 +658,10 @@ spec:
 
     # Step 11: A2A Agent Evaluation
     - name: a2a-eval
-      image: registry.access.redhat.com/ubi9/python-312:latest
+      image: registry.access.redhat.com/ubi9/buildah:9.6
+      securityContext:
+        capabilities:
+          add: ["SETFCAP"]
       computeResources:
         requests:
           memory: 256Mi
@@ -703,8 +706,11 @@ spec:
         echo "Agent endpoint: $AGENT_ENDPOINT"
         echo "Timeout: $(params.agent-timeout)s"
         
-        # Install Harbor fork with podman support and abevalflow package
-        pip install --quiet --no-cache-dir \
+        # Install Python and dependencies (buildah image doesn't have Python by default)
+        dnf install -y --quiet python3.12 python3.12-pip git
+        
+        # Install Harbor fork and abevalflow package
+        python3.12 -m pip install --quiet --no-cache-dir \
           "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
           pydantic pyyaml aiohttp litellm
         
@@ -719,7 +725,7 @@ spec:
         export PYTHONPATH="$PIPELINE_DIR"
         
         # Read evaluation config from metadata.yaml
-        N_ATTEMPTS=$(python3 -c "
+        N_ATTEMPTS=$(python3.12 -c "
         import yaml, sys
         try:
             meta = yaml.safe_load(open('$SUBMISSION_PATH/metadata.yaml'))
@@ -760,7 +766,7 @@ spec:
         
         # Generate Harbor config YAML (matching CI flow)
         CONFIG_FILE="$RESULTS_DIR/a2a-config.yaml"
-        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" <<'GENCFG'
+        python3.12 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" <<'GENCFG'
         import sys
         import yaml
         
@@ -777,11 +783,7 @@ spec:
                     "timeout": int(timeout)
                 }
             }],
-            "tasks": [{"path": task_dir}],
-            "environment": {
-                "type": "podman",
-                "delete": True
-            }
+            "tasks": [{"path": task_dir}]
         }
         
         with open(config_file, "w") as f:
@@ -796,7 +798,7 @@ spec:
         harbor run -c "$CONFIG_FILE" -y || true
         
         # Compute mean reward from Harbor results
-        python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
+        python3.12 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
         import json
         import sys
         from pathlib import Path
