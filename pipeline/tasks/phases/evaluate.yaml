@@ -760,24 +760,34 @@ spec:
         
         # Generate Harbor config YAML (matching CI flow)
         CONFIG_FILE="$RESULTS_DIR/a2a-config.yaml"
-        cat > "$CONFIG_FILE" <<YAML_EOF
-job_name: a2a-$(params.submission-name)
-jobs_dir: $RESULTS_DIR
-n_attempts: $N_ATTEMPTS
-
-agents:
-  - import_path: abevalflow.harbor_agents.a2a_adapter:A2AAgent
-    kwargs:
-      endpoint: "$AGENT_ENDPOINT"
-      timeout: $(params.agent-timeout)
-
-tasks:
-  - path: $TASK_DIR
-
-environment:
-  type: podman
-  delete: true
-YAML_EOF
+        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" <<'GENCFG'
+        import sys
+        import yaml
+        
+        config_file, task_dir, results_dir, n_attempts, endpoint, timeout = sys.argv[1:7]
+        
+        config = {
+            "job_name": "a2a-eval",
+            "jobs_dir": results_dir,
+            "n_attempts": int(n_attempts),
+            "agents": [{
+                "import_path": "abevalflow.harbor_agents.a2a_adapter:A2AAgent",
+                "kwargs": {
+                    "endpoint": endpoint,
+                    "timeout": int(timeout)
+                }
+            }],
+            "tasks": [{"path": task_dir}],
+            "environment": {
+                "type": "podman",
+                "delete": True
+            }
+        }
+        
+        with open(config_file, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        print(f"Generated config: {config_file}")
+        GENCFG
         
         echo "Generated Harbor config:"
         cat "$CONFIG_FILE"
