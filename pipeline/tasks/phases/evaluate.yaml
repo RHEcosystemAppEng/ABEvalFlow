@@ -842,9 +842,9 @@ spec:
         print(f"Recommendation: {rec}")
         COMPUTE_REWARDS
 
-    # Step 12: Finalize results
+    # Step 12: Finalize results and cleanup
     - name: finalize
-      image: registry.access.redhat.com/ubi9/python-311:9.6
+      image: registry.access.redhat.com/ubi9/python-312:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -864,3 +864,17 @@ spec:
         echo "Control reward: $C_REWARD"
         echo "Recommendation: $REC"
         echo "Results: $(cat "$(results.results-dir.path)")"
+        
+        # Cleanup A2A agent deployment if it was created
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" = "a2a" ]; then
+          AGENT_ENDPOINT_PROVIDED="$(params.agent-endpoint)"
+          if [ -z "$AGENT_ENDPOINT_PROVIDED" ]; then
+            echo "=== Cleaning up A2A agent deployment ==="
+            # Install helm for cleanup
+            curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-amd64 -o /tmp/helm 2>/dev/null
+            chmod +x /tmp/helm
+            /tmp/helm uninstall "$(params.agent-release-name)" -n "$(params.agent-namespace)" 2>/dev/null || echo "Agent cleanup: release not found or already removed"
+            echo "Agent deployment cleaned up"
+          fi
+        fi
