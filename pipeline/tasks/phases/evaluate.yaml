@@ -730,7 +730,7 @@ spec:
         ")
         echo "Running $N_ATTEMPTS evaluation attempts"
         
-        # Find task directory
+        # Find task directory (look for task.toml)
         echo "Submission path: $SUBMISSION_PATH"
         ls -la "$SUBMISSION_PATH" || true
         
@@ -740,24 +740,50 @@ spec:
         elif [ -d "$SUBMISSION_PATH/tasks" ]; then
           echo "Looking for task.toml in tasks/..."
           ls -la "$SUBMISSION_PATH/tasks" || true
-          TASK_DIR=$(find "$SUBMISSION_PATH/tasks" -name "task.toml" -type f | head -1 | xargs dirname 2>/dev/null || true)
+          for subdir in "$SUBMISSION_PATH/tasks"/*/; do
+            if [ -f "${subdir}task.toml" ]; then
+              TASK_DIR="${subdir%/}"
+              break
+            fi
+          done
+        fi
+        
+        if [ -z "$TASK_DIR" ]; then
+          echo "ERROR: No task.toml found in submission"
+          exit 1
         fi
         
         echo "Task directory: $TASK_DIR"
-        if [ -n "$TASK_DIR" ]; then
-          ls -la "$TASK_DIR" || true
-        fi
+        ls -la "$TASK_DIR" || true
+        echo "task.toml contents:"
+        cat "$TASK_DIR/task.toml" || true
         
-        # Run Harbor with A2A adapter
-        harbor run \
-          -p "${TASK_DIR:-$SUBMISSION_PATH}" \
-          --agent-import-path abevalflow.harbor_agents.a2a_adapter:A2AAgent \
-          --ak "endpoint=$AGENT_ENDPOINT" \
-          --ak "timeout=$(params.agent-timeout)" \
-          --n-attempts "$N_ATTEMPTS" \
-          --jobs-dir "$RESULTS_DIR" \
-          -e podman \
-          -y || true
+        # Generate Harbor config YAML (matching CI flow)
+        CONFIG_FILE="$RESULTS_DIR/a2a-config.yaml"
+        cat > "$CONFIG_FILE" <<YAML_EOF
+job_name: a2a-$(params.submission-name)
+jobs_dir: $RESULTS_DIR
+n_attempts: $N_ATTEMPTS
+
+agents:
+  - import_path: abevalflow.harbor_agents.a2a_adapter:A2AAgent
+    kwargs:
+      endpoint: "$AGENT_ENDPOINT"
+      timeout: $(params.agent-timeout)
+
+tasks:
+  - path: $TASK_DIR
+
+environment:
+  type: podman
+  delete: true
+YAML_EOF
+        
+        echo "Generated Harbor config:"
+        cat "$CONFIG_FILE"
+        
+        # Run Harbor with config file (like CI does)
+        harbor run -c "$CONFIG_FILE" -y || true
         
         # Compute mean reward from Harbor results
         python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
