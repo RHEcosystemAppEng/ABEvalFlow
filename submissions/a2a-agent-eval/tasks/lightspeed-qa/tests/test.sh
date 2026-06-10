@@ -2,23 +2,39 @@
 set -e
 
 # Run LLM judge verifier on the agent's response
-# The A2A adapter writes the response to /logs/agent/a2a_response.txt
+# Supports both container paths (/logs/...) and local environment paths
 
-RESPONSE_FILE="/logs/agent/a2a_response.txt"
-REWARD_FILE="/logs/verifier/reward.txt"
+# Try container paths first, fall back to CWD-relative
+if [ -d "/logs" ]; then
+    LOGS_BASE="/logs"
+    TESTS_BASE="/tests"
+else
+    LOGS_BASE="$(pwd)/logs"
+    TESTS_BASE="$(pwd)/tests"
+fi
 
-# Ensure logs directory exists
-mkdir -p /logs/verifier
+RESPONSE_FILE="${LOGS_BASE}/agent/a2a_response.txt"
+REWARD_FILE="${LOGS_BASE}/verifier/reward.txt"
+
+# Ensure directories exist
+mkdir -p "${LOGS_BASE}/verifier"
+
+echo "Looking for response at: $RESPONSE_FILE"
+echo "Will write reward to: $REWARD_FILE"
 
 # Check if response file exists
 if [ ! -f "$RESPONSE_FILE" ]; then
     echo "ERROR: Agent response file not found at $RESPONSE_FILE"
+    ls -la "${LOGS_BASE}/" 2>/dev/null || echo "Logs base doesn't exist"
+    ls -la "${LOGS_BASE}/agent/" 2>/dev/null || echo "Agent dir doesn't exist"
     echo "0" > "$REWARD_FILE"
-    exit 1
+    exit 0  # Exit success but with 0 reward
 fi
 
-# Run LLM judge
-python3 /tests/llm_judge.py "$RESPONSE_FILE" "$REWARD_FILE"
+echo "Response file found, running LLM judge..."
 
-# Exit with success (reward file contains the score)
+# Run LLM judge
+python3 "${TESTS_BASE}/llm_judge.py" "$RESPONSE_FILE" "$REWARD_FILE"
+
+echo "LLM judge completed"
 exit 0
