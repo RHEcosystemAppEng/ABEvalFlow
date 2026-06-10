@@ -870,8 +870,11 @@ spec:
             yaml.dump(config, f, default_flow_style=False)
         GENCFG
         
-        # Run Harbor evaluation
-        harbor run -c "$CONFIG_FILE" -y || true
+        # Verify A2A adapter can be imported
+        python3 -c "from abevalflow.harbor_agents.a2a_adapter import A2AAgent; print('A2AAgent imported OK')"
+        
+        # Run Harbor evaluation with verbose output
+        harbor run -c "$CONFIG_FILE" -y -v || true
         
         # Compute mean reward from Harbor results
         python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
