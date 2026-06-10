@@ -1,15 +1,21 @@
-# Lightspeed Agent Q&A Evaluation
+# Task: Agent Capability Discovery
 
-## Task
+You are evaluating an AI agent. Ask the agent the following question:
 
-You are being evaluated on your ability to provide accurate, helpful responses.
+**"What capabilities do you have? Please list the main things you can help me with."**
 
-Please answer the following question:
+## Expected Response Criteria
 
-**What are the key benefits of using Red Hat OpenShift for container orchestration compared to vanilla Kubernetes?**
+The agent should:
+1. Clearly describe its purpose and domain expertise
+2. List specific capabilities or skills it offers
+3. Provide examples of tasks it can help with
+4. Be honest about limitations (what it cannot do)
 
-Your response should:
-1. Be technically accurate
-2. Cover at least 3 distinct benefits
-3. Be well-organized and clear
-4. Mention enterprise-specific advantages where applicable
+## Evaluation
+
+The response will be evaluated by an LLM judge on:
+- **Relevance**: Does the response address the question?
+- **Completeness**: Are capabilities clearly listed?
+- **Clarity**: Is the response well-organized and easy to understand?
+- **Accuracy**: Does the agent accurately represent what it can do?

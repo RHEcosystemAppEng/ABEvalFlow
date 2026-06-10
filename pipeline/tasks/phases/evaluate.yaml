@@ -763,13 +763,16 @@ spec:
         echo "task.toml contents:"
         cat "$TASK_DIR/task.toml" || true
         
-        # Generate Harbor config YAML (matching CI flow)
+        # Generate Harbor config YAML
         CONFIG_FILE="$RESULTS_DIR/a2a-config.yaml"
-        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" <<'GENCFG'
+        LLM_API_BASE="$(params.llm-api-base)"
+        LLM_MODEL="openai/$(params.llm-model)"
+        
+        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" "$LLM_API_BASE" "$LLM_MODEL" <<'GENCFG'
         import sys
         import yaml
         
-        config_file, task_dir, results_dir, n_attempts, endpoint, timeout = sys.argv[1:7]
+        config_file, task_dir, results_dir, n_attempts, endpoint, timeout, llm_api_base, llm_model = sys.argv[1:9]
         
         config = {
             "job_name": "a2a-eval",
@@ -788,6 +791,13 @@ spec:
                 "delete": True,
                 "kwargs": {
                     "image_ref": "registry.access.redhat.com/ubi9/python-312:latest"
+                }
+            },
+            "verifier": {
+                "env": {
+                    "LLM_JUDGE_MODEL": llm_model,
+                    "LLM_API_BASE": llm_api_base,
+                    "OPENAI_API_KEY": "sk-dummy"
                 }
             }
         }
@@ -890,9 +900,15 @@ spec:
         - name: LLM_API_BASE
           value: "$(params.llm-api-base)"
         - name: OPENAI_API_KEY
-          value: "dummy"
-        - name: REDIS_URL
-          value: "redis://localhost:6379"
+          value: "sk-dummy"
+        - name: RATE_LIMIT_REDIS_URL
+          value: "redis://localhost:6379/0"
+        - name: SKIP_JWT_VALIDATION
+          value: "true"
+        - name: SKIP_ORDER_VALIDATION
+          value: "true"
+        - name: LOG_LEVEL
+          value: "INFO"
       resources:
         requests:
           cpu: 100m

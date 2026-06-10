@@ -255,25 +255,25 @@ class A2AAgent(BaseAgent):
         response_data: dict[str, Any],
         response_text: str,
     ) -> None:
-        """Write response files to the workspace.
+        """Write response files to the agent logs directory.
 
         Args:
             environment: The Harbor environment.
             response_data: The full JSON response.
             response_text: The extracted text response.
         """
-        if EnvironmentPaths is None:
-            self.logger.warning("Harbor not available, skipping file writes")
-            return
-
-        json_path = str(EnvironmentPaths.agent_dir / A2A_RESPONSE_FILE)
-        text_path = str(EnvironmentPaths.agent_dir / A2A_RESPONSE_TEXT_FILE)
-
         host_json_path = self.logs_dir / A2A_RESPONSE_FILE
         host_text_path = self.logs_dir / A2A_RESPONSE_TEXT_FILE
 
         host_json_path.write_text(json.dumps(response_data, indent=2))
         host_text_path.write_text(response_text)
+
+        if EnvironmentPaths is None:
+            self.logger.warning("Harbor not available, skipping container file writes")
+            return
+
+        json_path_agent = str(EnvironmentPaths.agent_dir / A2A_RESPONSE_FILE)
+        text_path_agent = str(EnvironmentPaths.agent_dir / A2A_RESPONSE_TEXT_FILE)
 
         if environment.is_mounted:
             pass
@@ -281,11 +281,11 @@ class A2AAgent(BaseAgent):
             try:
                 await environment.upload_file(
                     source_path=str(host_json_path),
-                    target_path=json_path,
+                    target_path=json_path_agent,
                 )
                 await environment.upload_file(
                     source_path=str(host_text_path),
-                    target_path=text_path,
+                    target_path=text_path_agent,
                 )
             except Exception as e:
                 self.logger.warning(f"Failed to upload response files: {e}")
