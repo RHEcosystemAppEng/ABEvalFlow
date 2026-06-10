@@ -619,7 +619,7 @@ spec:
     # Step 10: A2A - Deploy Agent (if no endpoint provided)
     # Step 10: A2A - Wait for sidecar agent to be ready
     - name: a2a-wait-ready
-      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+      image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -637,11 +637,8 @@ spec:
           exit 0
         fi
 
-        # Get pod IP so Harbor's OpenShift environment pods can reach the sidecar
-        POD_IP=$(hostname -i 2>/dev/null || cat /etc/hosts | grep $(hostname) | awk '{print $1}' | head -1)
-        if [ -z "$POD_IP" ]; then
-          POD_IP="localhost"
-        fi
+        # Get pod IP from /etc/hosts (works in OpenShift without hostname command)
+        POD_IP=$(python3 -c "import socket; print(socket.gethostbyname(socket.gethostname()))" 2>/dev/null || echo "localhost")
         ENDPOINT="http://${POD_IP}:8000"
         echo "Using sidecar agent at: $ENDPOINT (Pod IP: $POD_IP)"
         echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
