@@ -616,44 +616,122 @@ spec:
         open("$(workspaces.source.path)/_eval_tmp/recommendation", "w").write(rec)
         PARSE
 
-    # Step 10: A2A - Deploy Agent (if no endpoint provided)
-    # Step 10: A2A - Wait for sidecar agent to be ready
-    - name: a2a-wait-ready
-      image: registry.access.redhat.com/ubi9/python-311:9.6
+    # Step 10: A2A - Deploy Agent as Deployment+Service (if no endpoint provided)
+    - name: a2a-deploy-agent
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         EVAL_ENGINE="$(params.eval-engine)"
         if [ "$EVAL_ENGINE" != "a2a" ]; then
-          echo "Skipping A2A wait (eval-engine=$EVAL_ENGINE)"
+          echo "Skipping A2A deploy (eval-engine=$EVAL_ENGINE)"
           exit 0
         fi
 
         AGENT_ENDPOINT="$(params.agent-endpoint)"
         if [ -n "$AGENT_ENDPOINT" ]; then
-          echo "Using provided external agent endpoint: $AGENT_ENDPOINT"
+          echo "Using external agent: $AGENT_ENDPOINT"
           echo "$AGENT_ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+          echo "false" > "$(workspaces.source.path)/_eval_tmp/agent-deployed"
           exit 0
         fi
 
-        # Get pod IP from /etc/hosts (works in OpenShift without hostname command)
-        POD_IP=$(python3 -c "import socket; print(socket.gethostbyname(socket.gethostname()))" 2>/dev/null || echo "localhost")
-        ENDPOINT="http://${POD_IP}:8000"
-        echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+        # Generate unique name for this evaluation
+        RUN_ID=$(echo "$(params.pipeline-run-id)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-20)
+        AGENT_NAME="a2a-agent-${RUN_ID}"
+        NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
         
-        # Wait for sidecar agent to be ready (max 5 min)
-        printf "Waiting for agent sidecar"
+        echo "Deploying agent: $AGENT_NAME"
+        
+        # Create Deployment + Service
+        cat <<YAML | oc apply -f -
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: $AGENT_NAME
+          namespace: $NAMESPACE
+          labels:
+            app: $AGENT_NAME
+            abevalflow/temp: "true"
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: $AGENT_NAME
+          template:
+            metadata:
+              labels:
+                app: $AGENT_NAME
+            spec:
+              containers:
+              - name: redis
+                image: redis:7-alpine
+                ports:
+                - containerPort: 6379
+                resources:
+                  limits:
+                    cpu: 100m
+                    memory: 128Mi
+              - name: agent
+                image: $(params.agent-image):$(params.agent-tag)
+                ports:
+                - containerPort: 8000
+                env:
+                - name: LLM_PROVIDER
+                  value: "litellm"
+                - name: LLM_MODEL
+                  value: "openai/$(params.llm-model)"
+                - name: LLM_API_BASE
+                  value: "$(params.llm-api-base)"
+                - name: OPENAI_API_KEY
+                  value: "sk-dummy"
+                - name: RATE_LIMIT_REDIS_URL
+                  value: "redis://localhost:6379/0"
+                - name: SKIP_JWT_VALIDATION
+                  value: "true"
+                - name: SKIP_ORDER_VALIDATION
+                  value: "true"
+                - name: LOG_LEVEL
+                  value: "INFO"
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 512Mi
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: $AGENT_NAME
+          namespace: $NAMESPACE
+          labels:
+            abevalflow/temp: "true"
+        spec:
+          selector:
+            app: $AGENT_NAME
+          ports:
+          - port: 8000
+            targetPort: 8000
+        YAML
+        
+        # Wait for deployment to be ready
+        printf "Waiting for agent"
         for i in $(seq 1 60); do
-          if curl -sf "$ENDPOINT/.well-known/agent.json" > /dev/null 2>&1; then
-            echo " ready!"
-            exit 0
+          if oc rollout status deployment/$AGENT_NAME --timeout=5s >/dev/null 2>&1; then
+            ENDPOINT="http://${AGENT_NAME}.${NAMESPACE}.svc:8000"
+            if curl -sf "$ENDPOINT/.well-known/agent.json" > /dev/null 2>&1; then
+              echo " ready!"
+              echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+              echo "$AGENT_NAME" > "$(workspaces.source.path)/_eval_tmp/agent-deployed"
+              exit 0
+            fi
           fi
           printf "."
           sleep 5
         done
         
         echo " FAILED"
+        oc delete deployment/$AGENT_NAME service/$AGENT_NAME --ignore-not-found=true
         exit 1
 
     # Step 11: A2A Agent Evaluation
@@ -773,7 +851,11 @@ spec:
             }],
             "tasks": [{"path": task_dir}],
             "environment": {
-                "type": "local"
+                "type": "openshift",
+                "delete": True,
+                "kwargs": {
+                    "image_ref": "registry.access.redhat.com/ubi9/python-312:latest"
+                }
             },
             "verifier": {
                 "env": {
@@ -851,46 +933,24 @@ spec:
         echo "Recommendation: $REC"
         echo "Results: $(cat "$(results.results-dir.path)")"
 
-  # A2A Agent sidecars - run alongside steps, auto-cleaned when pod terminates
-  sidecars:
-    - name: a2a-redis
-      image: redis:7-alpine
-      ports:
-        - containerPort: 6379
-          name: redis
-      resources:
-        requests:
-          cpu: 50m
-          memory: 64Mi
-        limits:
-          cpu: 100m
-          memory: 128Mi
-    - name: a2a-agent
-      image: $(params.agent-image):$(params.agent-tag)
-      ports:
-        - containerPort: 8000
-          name: http
-      env:
-        - name: LLM_PROVIDER
-          value: "litellm"
-        - name: LLM_MODEL
-          value: "openai/$(params.llm-model)"
-        - name: LLM_API_BASE
-          value: "$(params.llm-api-base)"
-        - name: OPENAI_API_KEY
-          value: "sk-dummy"
-        - name: RATE_LIMIT_REDIS_URL
-          value: "redis://localhost:6379/0"
-        - name: SKIP_JWT_VALIDATION
-          value: "true"
-        - name: SKIP_ORDER_VALIDATION
-          value: "true"
-        - name: LOG_LEVEL
-          value: "INFO"
-      resources:
-        requests:
-          cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
+    # Step 13: Cleanup A2A agent deployment (always runs)
+    - name: a2a-cleanup
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/usr/bin/env bash
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          exit 0
+        fi
+        
+        DEPLOYED_FILE="$(workspaces.source.path)/_eval_tmp/agent-deployed"
+        if [ ! -f "$DEPLOYED_FILE" ] || [ "$(cat "$DEPLOYED_FILE")" = "false" ]; then
+          echo "No agent to cleanup (external endpoint used)"
+          exit 0
+        fi
+        
+        AGENT_NAME=$(cat "$DEPLOYED_FILE")
+        echo "Cleaning up agent: $AGENT_NAME"
+        oc delete deployment/$AGENT_NAME service/$AGENT_NAME --ignore-not-found=true
+        echo "Cleanup complete"
