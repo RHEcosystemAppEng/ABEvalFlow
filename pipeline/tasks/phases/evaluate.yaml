@@ -640,21 +640,20 @@ spec:
         # Get pod IP from /etc/hosts (works in OpenShift without hostname command)
         POD_IP=$(python3 -c "import socket; print(socket.gethostbyname(socket.gethostname()))" 2>/dev/null || echo "localhost")
         ENDPOINT="http://${POD_IP}:8000"
-        echo "Using sidecar agent at: $ENDPOINT (Pod IP: $POD_IP)"
         echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
         
-        # Wait for sidecar agent to be ready
-        echo "Waiting for sidecar agent to be ready..."
+        # Wait for sidecar agent to be ready (max 5 min)
+        printf "Waiting for agent sidecar"
         for i in $(seq 1 60); do
           if curl -sf "$ENDPOINT/.well-known/agent.json" > /dev/null 2>&1; then
-            echo "Agent sidecar is ready!"
+            echo " ready!"
             exit 0
           fi
-          echo "Attempt $i/60 - waiting 5s..."
+          printf "."
           sleep 5
         done
         
-        echo "ERROR: Agent sidecar failed to start"
+        echo " FAILED"
         exit 1
 
     # Step 11: A2A Agent Evaluation
@@ -700,15 +699,13 @@ spec:
           exit 1
         fi
         
-        echo "=== EVALUATE PHASE: A2A Agent Evaluation ==="
-        echo "Agent endpoint: $AGENT_ENDPOINT"
-        echo "Timeout: $(params.agent-timeout)s"
+        echo "=== A2A Evaluation ==="
         
-        # Install Harbor fork with OpenShift backend support
+        # Install Harbor fork (quiet)
         pip install --quiet --no-cache-dir \
           "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
           "kubernetes>=32.0.0" \
-          pydantic pyyaml aiohttp litellm
+          pydantic pyyaml aiohttp litellm 2>&1 | grep -v "^\[notice\]" || true
         
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
@@ -730,18 +727,12 @@ spec:
         except:
             print(5)
         ")
-        echo "Running $N_ATTEMPTS evaluation attempts"
         
         # Find task directory (look for task.toml)
-        echo "Submission path: $SUBMISSION_PATH"
-        ls -la "$SUBMISSION_PATH" || true
-        
         TASK_DIR=""
         if [ -f "$SUBMISSION_PATH/task.toml" ]; then
           TASK_DIR="$SUBMISSION_PATH"
         elif [ -d "$SUBMISSION_PATH/tasks" ]; then
-          echo "Looking for task.toml in tasks/..."
-          ls -la "$SUBMISSION_PATH/tasks" || true
           for subdir in "$SUBMISSION_PATH/tasks"/*/; do
             if [ -f "${subdir}task.toml" ]; then
               TASK_DIR="${subdir%/}"
@@ -755,10 +746,8 @@ spec:
           exit 1
         fi
         
-        echo "Task directory: $TASK_DIR"
-        ls -la "$TASK_DIR" || true
-        echo "task.toml contents:"
-        cat "$TASK_DIR/task.toml" || true
+        TASK_NAME=$(basename "$TASK_DIR")
+        echo "Task: $TASK_NAME | Attempts: $N_ATTEMPTS"
         
         # Generate Harbor config YAML
         CONFIG_FILE="$RESULTS_DIR/a2a-config.yaml"
@@ -784,11 +773,7 @@ spec:
             }],
             "tasks": [{"path": task_dir}],
             "environment": {
-                "type": "openshift",
-                "delete": True,
-                "kwargs": {
-                    "image_ref": "registry.access.redhat.com/ubi9/python-312:latest"
-                }
+                "type": "local"
             },
             "verifier": {
                 "env": {
@@ -801,13 +786,9 @@ spec:
         
         with open(config_file, "w") as f:
             yaml.dump(config, f, default_flow_style=False)
-        print(f"Generated config: {config_file}")
         GENCFG
         
-        echo "Generated Harbor config:"
-        cat "$CONFIG_FILE"
-        
-        # Run Harbor with config file (like CI does)
+        # Run Harbor evaluation
         harbor run -c "$CONFIG_FILE" -y || true
         
         # Compute mean reward from Harbor results
