@@ -779,12 +779,6 @@ spec:
         
         echo "=== A2A Evaluation ==="
         
-        # Install Harbor fork (quiet)
-        pip install --quiet --no-cache-dir \
-          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
-          "kubernetes>=32.0.0" \
-          pydantic pyyaml aiohttp litellm 2>&1 | grep -v "^\[notice\]" || true
-        
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
         RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
@@ -792,8 +786,14 @@ spec:
         
         mkdir -p "$RESULTS_DIR" "$REPORT_DIR"
         
+        # Install ABEvalFlow package (for A2A adapter) and Harbor fork
+        pip install --quiet --no-cache-dir \
+          "$PIPELINE_DIR" \
+          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+          "kubernetes>=32.0.0" \
+          aiohttp litellm 2>&1 | grep -v "^\[notice\]" || true
+        
         cd "$PIPELINE_DIR"
-        export PYTHONPATH="$PIPELINE_DIR"
         
         # Read evaluation config from metadata.yaml
         N_ATTEMPTS=$(python3 -c "
