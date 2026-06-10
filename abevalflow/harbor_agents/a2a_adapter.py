@@ -275,7 +275,7 @@ class A2AAgent(BaseAgent):
         json_path_agent = str(EnvironmentPaths.agent_dir / A2A_RESPONSE_FILE)
         text_path_agent = str(EnvironmentPaths.agent_dir / A2A_RESPONSE_TEXT_FILE)
 
-        if environment.is_mounted:
+        if environment.capabilities.mounted:
             pass
         else:
             try:

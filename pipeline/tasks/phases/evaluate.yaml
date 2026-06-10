@@ -115,7 +115,7 @@ spec:
       description: Agent container image for deployment
     - name: agent-tag
       type: string
-      default: "latest"
+      default: "on-pr-b5535de9e1439da87e6610c8e3ae55f2d34231a8"
       description: Agent image tag
     - name: agent-namespace
       type: string
@@ -851,11 +851,7 @@ spec:
             }],
             "tasks": [{"path": task_dir}],
             "environment": {
-                "type": "openshift",
-                "delete": True,
-                "kwargs": {
-                    "image_ref": "registry.access.redhat.com/ubi9/python-312:latest"
-                }
+                "type": "local"
             },
             "verifier": {
                 "env": {
