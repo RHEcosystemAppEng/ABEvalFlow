@@ -873,8 +873,8 @@ spec:
         # Verify A2A adapter can be imported
         python3 -c "from abevalflow.harbor_agents.a2a_adapter import A2AAgent; print('A2AAgent imported OK')"
         
-        # Run Harbor evaluation with verbose output
-        harbor run -c "$CONFIG_FILE" -y -v || true
+        # Run Harbor evaluation
+        harbor run -c "$CONFIG_FILE" -y 2>&1 || true
         
         # Compute mean reward from Harbor results
         python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
