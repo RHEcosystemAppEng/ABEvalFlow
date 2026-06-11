@@ -287,7 +287,7 @@ spec:
         echo "Pipeline Run: $(params.pipeline-run-id)"
         echo "Threshold: $(params.degradation-threshold)"
 
-        pip install --quiet --no-cache-dir sqlalchemy "psycopg[binary]" "tenacity>=8.2"
+        pip install --quiet --no-cache-dir sqlalchemy "psycopg[binary]" "tenacity>=8.2" scipy pydantic pyyaml
 
         cd "$PIPELINE_DIR"
         export PYTHONPATH="$PIPELINE_DIR"
