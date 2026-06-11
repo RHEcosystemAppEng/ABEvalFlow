@@ -272,7 +272,7 @@ spec:
       when:
         - input: $(params.eval-engine)
           operator: notin
-          values: ["mcpchecker", "a2a"]
+          values: ["mcpchecker"]
       runAfter: ["evaluate"]
       taskRef:
         name: analyze-report
@@ -312,7 +312,7 @@ spec:
       when:
         - input: $(params.eval-engine)
           operator: notin
-          values: ["mcpchecker", "a2a"]
+          values: ["mcpchecker"]
       runAfter: ["analyze", "evaluate"]
       taskRef:
         name: store-results

@@ -18,9 +18,9 @@ spec:
       type: string
       default: "harbor"
       description: >-
-        Evaluation engine used: 'harbor', 'ase', or 'both'. Controls which
+        Evaluation engine used: 'harbor', 'ase', 'a2a', or 'both'. Controls which
         analysis path runs. For 'ase', reads pre-generated report from
-        the reports directory. For 'harbor', runs full analysis from raw
+        the reports directory. For 'harbor' and 'a2a', runs full analysis from raw
         trial results.
     - name: commit-sha
       type: string
@@ -139,6 +139,24 @@ spec:
           fi
           python scripts/analyze.py "${ARGS[@]}"
 
+        elif [ "$EVAL_ENGINE" = "a2a" ]; then
+          # A2A: single-variant analysis from flat a2a-eval/ results
+          echo "=== A2A mode: running analysis ==="
+          ARGS=(
+            --results-dir "$RESULTS_DIR"
+            --output-dir "$REPORT_DIR"
+            --submission-name "$(params.submission-name)"
+            --threshold "$(params.uplift-threshold)"
+            --eval-engine a2a
+          )
+          if [ -n "$(params.commit-sha)" ]; then
+            ARGS+=(--commit-sha "$(params.commit-sha)")
+          fi
+          if [ -n "$(params.pipeline-run-id)" ]; then
+            ARGS+=(--pipeline-run-id "$(params.pipeline-run-id)")
+          fi
+          python scripts/analyze.py "${ARGS[@]}"
+
         elif [ "$EVAL_ENGINE" = "both" ]; then
           # Both: run Harbor analysis, then merge with ASE results
           echo "=== Both mode: running Harbor analysis ==="
@@ -185,7 +203,7 @@ spec:
         fi
 
         # --- 5. Regenerate markdown from enriched JSON (ASE/both only) ---
-        if [ "$EVAL_ENGINE" != "harbor" ]; then
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "a2a" ]; then
           echo "Regenerating report.md from enriched JSON..."
           python3 -c "import sys;sys.path.insert(0,'$PIPELINE_DIR');from pathlib import Path;from abevalflow.report import AnalysisResult;from scripts.analyze import render_markdown;d=Path(sys.argv[1]);r=AnalysisResult.model_validate_json((d/'report.json').read_text());(d/'report.md').write_text(render_markdown(r))" "$REPORT_DIR"
         fi
