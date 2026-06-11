@@ -40,6 +40,7 @@ from scipy import stats as sp_stats
 from abevalflow.report import (
     AnalysisResult,
     AnalysisSummary,
+    DegradationResult,
     Provenance,
     Recommendation,
     ScanMode,
@@ -283,6 +284,39 @@ def compute_fisher(treatment_summary: VariantSummary,
 
 
 # ---------------------------------------------------------------------------
+# Degradation merge
+# ---------------------------------------------------------------------------
+
+def degradation_from_monitor(monitor_data: dict) -> DegradationResult:
+    """Build a DegradationResult from monitor.py JSON output."""
+    return DegradationResult(
+        degraded=monitor_data["degraded"],
+        message=monitor_data["message"],
+        threshold=monitor_data.get("threshold"),
+        previous_pass_rate=monitor_data.get("previous_score"),
+        current_pass_rate=monitor_data.get("current_score"),
+    )
+
+
+def merge_degradation_into_report(
+    report_path: Path,
+    monitor_path: Path,
+) -> AnalysisResult:
+    """Merge degradation check results from monitor.py into an existing report.json."""
+    monitor_data = json.loads(monitor_path.read_text())
+    result = AnalysisResult.model_validate_json(report_path.read_text())
+    result.degradation = degradation_from_monitor(monitor_data)
+    report_path.write_text(result.model_dump_json(indent=2))
+    logger.info("Merged degradation results into %s", report_path)
+
+    md_path = report_path.parent / "report.md"
+    md_path.write_text(render_markdown(result))
+    logger.info("Regenerated Markdown report at %s", md_path)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Report generation
 # ---------------------------------------------------------------------------
 
@@ -442,6 +476,19 @@ def render_markdown(result: AnalysisResult) -> str:
     lines.append(f"- **Recommendation:** **{s.recommendation.value.upper()}**")
     lines.append("")
 
+    if result.degradation is not None:
+        d = result.degradation
+        lines.append("## Degradation Check\n")
+        lines.append(f"- **Status:** {'DEGRADED' if d.degraded else 'OK'}")
+        lines.append(f"- **Message:** {d.message}")
+        if d.threshold is not None:
+            lines.append(f"- **Threshold:** {_fmt(d.threshold)}")
+        if d.previous_pass_rate is not None:
+            lines.append(f"- **Previous pass rate:** {_fmt(d.previous_pass_rate)}")
+        if d.current_pass_rate is not None:
+            lines.append(f"- **Current pass rate:** {_fmt(d.current_pass_rate)}")
+        lines.append("")
+
     # --- Provenance ---
     lines.append("## Provenance\n")
     lines.append(f"- Generated at: {prov.generated_at.isoformat()}")
@@ -526,16 +573,24 @@ def main(argv: list[str] | None = None) -> int:
         description="Analyze A/B evaluation results and produce JSON + Markdown reports",
     )
     parser.add_argument(
-        "--results-dir", type=Path, required=True,
+        "--results-dir", type=Path,
         help="Path to the results directory containing treatment/ and control/ subdirs",
     )
     parser.add_argument(
-        "--output-dir", type=Path, required=True,
+        "--output-dir", type=Path,
         help="Directory to write report.json and report.md",
     )
     parser.add_argument(
-        "--submission-name", required=True,
+        "--submission-name",
         help="Name of the submission being analyzed",
+    )
+    parser.add_argument(
+        "--merge-degradation-from", type=Path, default=None,
+        help="Path to monitor.py JSON output to merge into an existing report.json",
+    )
+    parser.add_argument(
+        "--report-json", type=Path, default=None,
+        help="Path to report.json when merging degradation results",
     )
     parser.add_argument(
         "--threshold", type=float, default=0.0,
@@ -574,6 +629,28 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    if args.merge_degradation_from is not None:
+        report_path = args.report_json
+        if report_path is None and args.output_dir is not None:
+            report_path = args.output_dir / "report.json"
+        if report_path is None or not report_path.is_file():
+            logger.error(
+                "report.json not found for degradation merge "
+                "(use --report-json or --output-dir)"
+            )
+            return 1
+        if not args.merge_degradation_from.is_file():
+            logger.error("Monitor output file does not exist: %s", args.merge_degradation_from)
+            return 1
+        merge_degradation_into_report(report_path, args.merge_degradation_from)
+        return 0
+
+    if args.results_dir is None or args.output_dir is None or args.submission_name is None:
+        logger.error(
+            "--results-dir, --output-dir, and --submission-name are required for analysis"
+        )
+        return 1
 
     if not args.results_dir.is_dir():
         logger.error("Results directory does not exist: %s", args.results_dir)

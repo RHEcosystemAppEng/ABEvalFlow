@@ -123,6 +123,16 @@ class Provenance(BaseModel):
     )
 
 
+class DegradationResult(BaseModel):
+    """Historical degradation check against previous evaluation runs."""
+
+    degraded: bool
+    message: str
+    threshold: float | None = None
+    previous_pass_rate: float | None = None
+    current_pass_rate: float | None = None
+
+
 class AnalysisSummary(BaseModel):
     """Comparison statistics between treatment and control."""
 
@@ -164,4 +174,8 @@ class AnalysisResult(BaseModel):
     security_scans: list[SecurityScanResult] = Field(
         default_factory=list,
         description="Results from security scanners. Empty if scanning disabled.",
+    )
+    degradation: DegradationResult | None = Field(
+        default=None,
+        description="Historical degradation check result. Present when monitoring ran.",
     )

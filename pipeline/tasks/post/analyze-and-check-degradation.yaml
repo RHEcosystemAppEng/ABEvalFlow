@@ -263,21 +263,14 @@ spec:
           echo "$1" > "$(results.message.path)"
         }
 
-        EVAL_ENGINE="$(params.eval-engine)"
         if [ "$(params.enable-degradation-check)" != "true" ]; then
           echo "Degradation check disabled (enable-degradation-check != true)"
           write_skip_results "Degradation check disabled"
           exit 0
         fi
 
-        if [ "$EVAL_ENGINE" = "mcpchecker" ] || [ "$EVAL_ENGINE" = "a2a" ]; then
-          echo "Skipping degradation check for eval-engine=$EVAL_ENGINE"
-          write_skip_results "Skipped for eval-engine=$EVAL_ENGINE"
-          exit 0
-        fi
-
         if [ -z "${DATABASE_URL:-}" ]; then
-          echo "DATABASE_URL not configured, skipping degradation check"
+          echo "WARNING: DATABASE_URL not configured, skipping degradation check"
           write_skip_results "DB not configured"
           exit 0
         fi
@@ -312,6 +305,16 @@ spec:
           }
 
         cat "$MONITOR_OUTPUT"
+
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        if [ -f "$REPORT_DIR/report.json" ]; then
+          echo "Merging degradation results into report.json..."
+          python scripts/analyze.py \
+            --merge-degradation-from "$MONITOR_OUTPUT" \
+            --report-json "$REPORT_DIR/report.json"
+        else
+          echo "WARNING: report.json not found at $REPORT_DIR/report.json, skipping merge"
+        fi
 
         DEGRADED=$(python3 -c "import json; print(json.load(open('$MONITOR_OUTPUT'))['degraded'])")
         MESSAGE=$(python3 -c "import json; print(json.load(open('$MONITOR_OUTPUT'))['message'])")
