@@ -330,7 +330,46 @@ spec:
           workspace: shared-workspace
 
     # ======================================================================
-    # PHASE 5: CHECK DEGRADATION (compare with previous runs + alert)
+    # PHASE 5: PUBLISH (artifacts to MinIO for all engines)
+    # Runs after store (harbor/ase) or after evaluate (mcpchecker/a2a)
+    # ======================================================================
+    - name: publish-store
+      runAfter: ["store", "evaluate"]
+      taskRef:
+        name: publish-store
+      params:
+        - name: submission-name
+          value: $(tasks.prepare.results.submission-name)
+        - name: pipeline-run-id
+          value: $(context.pipelineRun.name)
+        - name: report-prefix
+          value: $(tasks.prepare.results.report-prefix)
+        - name: recommendation
+          value: $(tasks.evaluate.results.recommendation)
+        - name: eval-engine
+          value: $(params.eval-engine)
+        - name: commit-sha
+          value: $(params.revision)
+        - name: uplift-threshold
+          value: "-1.0"
+        - name: quay-repo
+          value: ""
+        - name: quay-ttl-days
+          value: "7"
+        - name: repo-name
+          value: ""
+        - name: pr-number
+          value: ""
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ======================================================================
+    # PHASE 6: CHECK DEGRADATION (compare with previous runs + alert)
     # ======================================================================
     - name: check-degradation
       when:
