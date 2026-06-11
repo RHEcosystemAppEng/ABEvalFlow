@@ -9,7 +9,7 @@ metadata:
 spec:
   description: >-
     End-to-end A/B evaluation pipeline for AI skill submissions.
-    Restructured into clean phases: prepare → test → evaluate → analyze → store → publish.
+    Restructured into clean phases: prepare → test → evaluate → analyze → store.
     Supports Harbor (containerized A/B), ASE (LLM-as-judge), and MCPChecker (MCP server testing).
   params:
     # Repository params
@@ -132,22 +132,22 @@ spec:
   results:
     - name: recommendation
       description: "pass or fail based on uplift threshold"
-      value: $(tasks.analyze.results.recommendation)
+      value: $(tasks.analyze-and-check-degradation.results.recommendation)
     - name: treatment-mean-reward
       description: "Treatment variant mean reward (e.g. 0.8500)"
-      value: $(tasks.analyze.results.treatment-mean-reward)
+      value: $(tasks.analyze-and-check-degradation.results.treatment-mean-reward)
     - name: control-mean-reward
       description: "Control variant mean reward (e.g. 0.6000)"
-      value: $(tasks.analyze.results.control-mean-reward)
+      value: $(tasks.analyze-and-check-degradation.results.control-mean-reward)
     - name: mean-reward-gap
       description: "Mean reward gap, treatment - control (e.g. +0.1500)"
-      value: $(tasks.analyze.results.mean-reward-gap)
+      value: $(tasks.analyze-and-check-degradation.results.mean-reward-gap)
     - name: ttest-p-value
       description: "Welch's t-test p-value (e.g. 0.0342)"
-      value: $(tasks.analyze.results.ttest-p-value)
+      value: $(tasks.analyze-and-check-degradation.results.ttest-p-value)
     - name: fisher-p-value
       description: "Fisher's exact test p-value (e.g. 0.0271)"
-      value: $(tasks.analyze.results.fisher-p-value)
+      value: $(tasks.analyze-and-check-degradation.results.fisher-p-value)
 
   workspaces:
     - name: shared-workspace
@@ -306,14 +306,14 @@ spec:
     # PHASE 4: ANALYZE (statistical analysis and report generation)
     # Note: For MCPChecker, evaluate phase produces the final report directly
     # ======================================================================
-    - name: analyze
+    - name: analyze-and-check-degradation
       when:
         - input: $(params.eval-engine)
           operator: notin
           values: ["mcpchecker"]
       runAfter: ["evaluate"]
       taskRef:
-        name: analyze-report
+        name: analyze-and-check-degradation
       params:
         - name: submission-name
           value: $(tasks.prepare.results.submission-name)
@@ -339,37 +339,19 @@ spec:
           value: $(params.repo-name)
         - name: pr-number
           value: $(params.pr-number)
+        - name: enable-degradation-check
+          value: "false"
       workspaces:
         - name: source
           workspace: shared-workspace
 
     # ======================================================================
-    # PHASE 5: STORE (persist results to PostgreSQL)
+    # PHASE 5: STORE (PostgreSQL persistence + MinIO/Quay/PR publish)
     # ======================================================================
     - name: store
-      runAfter: ["analyze", "evaluate"]
+      runAfter: ["analyze-and-check-degradation", "evaluate"]
       taskRef:
-        name: store-results
-      params:
-        - name: submission-name
-          value: $(tasks.prepare.results.submission-name)
-        - name: pipeline-run-id
-          value: $(context.pipelineRun.name)
-        - name: pipeline-repo-url
-          value: $(params.pipeline-repo-url)
-        - name: pipeline-repo-revision
-          value: $(params.pipeline-repo-revision)
-      workspaces:
-        - name: source
-          workspace: shared-workspace
-
-    # ======================================================================
-    # PHASE 6: PUBLISH (artifacts to MinIO, PR comments, Quay promotion)
-    # ======================================================================
-    - name: publish
-      runAfter: ["store"]
-      taskRef:
-        name: publish-store
+        name: store
       params:
         - name: submission-name
           value: $(tasks.prepare.results.submission-name)
