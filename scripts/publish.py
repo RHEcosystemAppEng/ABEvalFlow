@@ -102,7 +102,7 @@ def upload_reports(
                 logger.info("Uploaded %s -> s3://%s/%s", filepath, bucket, object_name)
 
     if uploaded == 0:
-        logger.error("No report files found in %s", report_dir)
+        logger.warning("No report files found in %s", report_dir)
         return None
 
     return prefix
@@ -142,14 +142,13 @@ def upload_debug_artifacts(
     _TRIAL_ROOT_FILES = {"exception.txt", "result.json", "trial.log", "config.json"}
 
     uploaded = 0
-    for variant in ("treatment", "control"):
-        variant_dir = results_dir / variant
-        if not variant_dir.is_dir():
-            continue
-        for fpath in sorted(variant_dir.rglob("*")):
+
+    def _upload_trial_tree(base_dir: Path, rel_root: Path) -> None:
+        nonlocal uploaded
+        for fpath in sorted(base_dir.rglob("*")):
             if not fpath.is_file():
                 continue
-            rel = fpath.relative_to(results_dir)
+            rel = fpath.relative_to(rel_root)
             parts = rel.parts
             is_debug_subdir = any(p in ("agent", "verifier", "artifacts") for p in parts)
             is_trial_root_file = fpath.name in _TRIAL_ROOT_FILES
@@ -161,6 +160,15 @@ def upload_debug_artifacts(
                 uploaded += 1
             except Exception as exc:
                 logger.warning("Failed to upload %s: %s", fpath, exc)
+
+    for variant in ("treatment", "control"):
+        variant_dir = results_dir / variant
+        if variant_dir.is_dir():
+            _upload_trial_tree(variant_dir, results_dir)
+
+    a2a_dir = results_dir / "a2a-eval"
+    if a2a_dir.is_dir():
+        _upload_trial_tree(a2a_dir, results_dir)
 
     logger.info("Uploaded %d debug artifact files to s3://%s/%s/debug/", uploaded, bucket, prefix)
     return uploaded
@@ -539,7 +547,7 @@ def main() -> int:
     parser.add_argument("--results-dir", type=Path, default=None,
                         help="Path to results dir (Harbor or ASE) for debug artifact upload")
     parser.add_argument("--eval-engine", type=str, default="harbor",
-                        choices=["harbor", "ase", "mcpchecker", "both"],
+                        choices=["harbor", "ase", "mcpchecker", "a2a", "both"],
                         help="Evaluation engine used — determines debug artifact layout")
     parser.add_argument("--workspace-root", type=Path, default=None,
                         help="Workspace root for uploading scaffolded configs")
@@ -573,10 +581,11 @@ def main() -> int:
         if prefix:
             logger.info("Reports uploaded to s3://%s/%s/", args.minio_bucket, prefix)
         else:
-            logger.error("Failed to upload reports")
-            upload_ok = False
-            success = False
-        if prefix and args.results_dir:
+            logger.warning("No report files uploaded — continuing with debug artifacts")
+            prefix = args.report_prefix or _build_artifact_prefix(
+                args.submission_name, args.pipeline_run_id,
+            )
+        if args.results_dir:
             if args.eval_engine == "mcpchecker":
                 _upload_fn = upload_mcpchecker_debug_artifacts
             elif args.eval_engine in ("ase", "both"):

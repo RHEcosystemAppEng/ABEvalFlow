@@ -1,0 +1,149 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: abevalflow-monitoring
+  namespace: ab-eval-flow
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: monitoring
+spec:
+  # Run every 10 days at 6:00 AM UTC
+  schedule: "0 6 */10 * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: abevalflow
+            app.kubernetes.io/component: monitoring-job
+        spec:
+          serviceAccountName: pipeline
+          restartPolicy: Never
+          containers:
+            - name: trigger-evaluations
+              image: registry.redhat.io/openshift4/ose-cli:latest
+              envFrom:
+                - secretRef:
+                    name: monitoring-slack-webhook
+                    optional: true
+              env:
+                - name: NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+
+                  echo "=== ABEvalFlow Monitoring CronJob ==="
+                  echo "Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+                  # Read the canary pack config
+                  CONFIG=$(oc get configmap monitoring-canary-pack -o jsonpath='{.data.config\.yaml}')
+
+                  # Parse skills from YAML (simple extraction)
+                  # Note: For production, consider using yq or a proper YAML parser
+                  SKILLS=$(echo "$CONFIG" | grep -A 10 "^skills:" | grep "name:" | sed 's/.*name: //' | tr -d ' ')
+
+                  if [ -z "$SKILLS" ]; then
+                    echo "No skills found in canary pack config"
+                    exit 0
+                  fi
+
+                  echo "Skills to evaluate: $SKILLS"
+
+                  for SKILL in $SKILLS; do
+                    echo ""
+                    echo "--- Triggering evaluation for: $SKILL ---"
+
+                    # Extract skill config
+                    REPO=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "repo:" | head -1 | sed 's/.*repo: //' | tr -d ' ')
+                    PATH_VAL=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "path:" | head -1 | sed 's/.*path: //' | tr -d ' ')
+                    ENGINE=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "eval_engine:" | head -1 | sed 's/.*eval_engine: //' | tr -d ' ')
+                    TRIALS=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "trials:" | head -1 | sed 's/.*trials: //' | tr -d ' ')
+                    THRESHOLD=$(echo "$CONFIG" | grep -A 10 "name: $SKILL" | grep "threshold:" | head -1 | sed 's/.*threshold: //' | tr -d ' ')
+
+                    # Validate required fields
+                    if [ -z "$REPO" ] || [ -z "$PATH_VAL" ] || [ -z "$ENGINE" ]; then
+                      echo "  ERROR: Missing required fields (repo, path, or eval_engine) for $SKILL"
+                      continue
+                    fi
+
+                    echo "  Repo: $REPO"
+                    echo "  Path: $PATH_VAL"
+                    echo "  Engine: $ENGINE"
+                    echo "  Trials: $TRIALS"
+                    echo "  Threshold: $THRESHOLD"
+
+                    # Build repo URL
+                    REPO_URL="https://github.com/${REPO}.git"
+
+                    # Create PipelineRun
+                    PIPELINE_RUN_NAME="monitoring-${SKILL}-$(date +%s)"
+
+                    cat <<EOF | oc create -f -
+                  apiVersion: tekton.dev/v1
+                  kind: PipelineRun
+                  metadata:
+                    name: ${PIPELINE_RUN_NAME}
+                    namespace: ${NAMESPACE}
+                    labels:
+                      abevalflow.monitoring: "true"
+                      abevalflow.skill: "${SKILL}"
+                  spec:
+                    pipelineRef:
+                      name: abevalflow-monitoring-pipeline
+                    params:
+                      - name: repo-url
+                        value: "${REPO_URL}"
+                      - name: revision
+                        value: "main"
+                      - name: submission-dir
+                        value: "${PATH_VAL}"
+                      - name: pipeline-repo-revision
+                        value: "main"
+                      - name: eval-engine
+                        value: "${ENGINE}"
+                      - name: ase-iterations
+                        value: "${TRIALS}"
+                      - name: degradation-threshold
+                        value: "${THRESHOLD}"
+                    timeouts:
+                      pipeline: "2h"
+                      tasks: "1h30m"
+                    taskRunTemplate:
+                      serviceAccountName: pipeline
+                    workspaces:
+                      - name: shared-workspace
+                        volumeClaimTemplate:
+                          spec:
+                            accessModes:
+                              - ReadWriteOnce
+                            resources:
+                              requests:
+                                storage: 1Gi
+                  EOF
+
+                    echo "  Created PipelineRun: $PIPELINE_RUN_NAME"
+                  done
+
+                  echo ""
+                  echo "=== All evaluation PipelineRuns triggered ==="
+                  echo "Note: Degradation checks run as part of each pipeline's publish step"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            - name: config
+              configMap:
+                name: monitoring-canary-pack

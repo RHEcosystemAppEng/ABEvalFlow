@@ -47,6 +47,10 @@ spec:
     - name: enable-quality-review
       type: string
       default: "true"
+    - name: submission-skip-quality-review
+      type: string
+      default: "false"
+      description: Submission's skip_quality_review setting from metadata.yaml
     - name: llm-base-url
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000/v1"
@@ -293,13 +297,15 @@ spec:
         EVAL_ENGINE="$(params.eval-engine)"
         ENABLE_REVIEW="$(params.enable-quality-review)"
         
+        SUBMISSION_SKIP="$(params.submission-skip-quality-review)"
+        
         if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
           echo "MCPChecker mode: quality review skipped"
           exit 0
         fi
         
-        if [ "$ENABLE_REVIEW" != "true" ]; then
-          echo "Quality review disabled"
+        if [ "$ENABLE_REVIEW" != "true" ] || [ "$SUBMISSION_SKIP" = "true" ]; then
+          echo "Quality review disabled (enable=$ENABLE_REVIEW, submission_skip=$SUBMISSION_SKIP)"
           echo -n "true" > "$(results.quality-passed.path)"
           exit 0
         fi

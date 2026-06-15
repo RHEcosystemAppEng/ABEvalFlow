@@ -10,11 +10,19 @@ spec:
   description: >-
     Evaluation phase: dispatches to the appropriate evaluation engine based on
     eval-engine parameter. Handles Harbor (scaffold+build+eval), ASE (LLM-as-judge),
-    and MCPChecker (MCP server testing) in a single composite task.
+    MCPChecker (MCP server testing), and A2A (agent evaluation) in a single composite task.
+  stepTemplate:
+    computeResources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 256Mi
   params:
     - name: eval-engine
       type: string
-      description: Evaluation engine (harbor, ase, mcpchecker, both)
+      description: Evaluation engine (harbor, ase, mcpchecker, a2a, both)
     - name: submission-dir
       type: string
       description: Submission directory name under submissions/
@@ -92,6 +100,35 @@ spec:
     - name: mcpchecker-task-timeout
       type: string
       default: "10m"
+    # A2A params
+    - name: agent-endpoint
+      type: string
+      default: ""
+      description: A2A agent endpoint URL (if empty, deploys agent from agent-image)
+    - name: agent-timeout
+      type: string
+      default: "120"
+      description: A2A agent request timeout in seconds
+    - name: agent-image
+      type: string
+      default: "quay.io/ecosystem-appeng/google-lightspeed-agent"
+      description: Agent container image for deployment
+    - name: agent-tag
+      type: string
+      default: "on-pr-b5535de9e1439da87e6610c8e3ae55f2d34231a8"
+      description: Agent image tag
+    - name: agent-namespace
+      type: string
+      default: "ab-eval-flow"
+      description: Namespace to deploy agent
+    - name: agent-release-name
+      type: string
+      default: "eval-agent"
+      description: Helm release name for agent deployment
+    - name: agent-chart-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/google-lightspeed-agent.git"
+      description: Agent Helm chart Git URL
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions repository
@@ -164,12 +201,9 @@ spec:
         echo "Treatment: $OUTPUT_DIR/tasks-treatment/$(params.submission-name)"
         echo "Control: $OUTPUT_DIR/tasks-control/$(params.submission-name)"
 
-    # Step 3: Harbor - Build Treatment
+    # Step 3: Harbor - Build Treatment (using crane - instant layer append, no extraction)
     - name: harbor-build-treatment
-      image: registry.access.redhat.com/ubi9/buildah:9.6
-      securityContext:
-        capabilities:
-          add: ["SETFCAP"]
+      image: registry.access.redhat.com/ubi9/python-311:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -180,8 +214,12 @@ spec:
           exit 0
         fi
         
-        echo "=== EVALUATE PHASE: Harbor Build Treatment ==="
-        BASE_IMAGE="$(params.base-image)"
+        echo "=== EVALUATE PHASE: Harbor Build Treatment (crane) ==="
+        
+        # Install crane (lightweight tool that appends layers without extracting)
+        curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.1/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /tmp crane
+        
+        LOCAL_BASE_IMAGE="local-registry.ab-eval-flow.svc.cluster.local:5000/eval-base:latest"
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
@@ -189,25 +227,34 @@ spec:
         IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:treatment-${SHA}"
         CONTEXT="$(workspaces.source.path)/tasks-treatment/${NAME}/environment"
         
-        buildah login --tls-verify=false -u serviceaccount \
-          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" "$REGISTRY"
+        # Create tar layer from scaffolded files
+        echo "Creating layer from: $CONTEXT"
+        tar -cvf /tmp/layer.tar -C "$CONTEXT" .
         
-        buildah build --storage-driver=vfs --tls-verify=false \
-          --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE_TAG" "$CONTEXT"
+        # Login to destination registry (crane uses docker config)
+        mkdir -p ~/.docker
+        TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+        AUTH=$(echo -n "serviceaccount:${TOKEN}" | base64 -w0)
+        cat > ~/.docker/config.json <<DOCKERCFG
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        DOCKERCFG
         
-        buildah push --storage-driver=vfs --tls-verify=false \
-          --digestfile /tmp/treatment-digest "$IMAGE_TAG" "docker://$IMAGE_TAG"
+        # Append layer to base image and push (instant - no extraction needed)
+        echo "Appending layer to base image..."
+        /tmp/crane append \
+          --base="${LOCAL_BASE_IMAGE}" \
+          --new_layer=/tmp/layer.tar \
+          --new_tag="${IMAGE_TAG}" \
+          --insecure 2>&1 | tee /tmp/crane-output.txt
         
-        DIGEST=$(tr -d '\n' < /tmp/treatment-digest)
-        echo "${REGISTRY}/${NS}/${NAME}@${DIGEST}" > "$(workspaces.source.path)/_eval_tmp/treatment-image-ref"
-        echo "Treatment image: $(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref")"
+        # Get digest from crane output
+        FULL_REF=$(tail -1 /tmp/crane-output.txt)
+        echo "$FULL_REF" > "$(workspaces.source.path)/_eval_tmp/treatment-image-ref"
+        echo "Treatment image: $FULL_REF"
 
-    # Step 4: Harbor - Build Control
+    # Step 4: Harbor - Build Control (using crane - instant layer append, no extraction)
     - name: harbor-build-control
-      image: registry.access.redhat.com/ubi9/buildah:9.6
-      securityContext:
-        capabilities:
-          add: ["SETFCAP"]
+      image: registry.access.redhat.com/ubi9/python-311:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -217,8 +264,12 @@ spec:
           exit 0
         fi
         
-        echo "=== EVALUATE PHASE: Harbor Build Control ==="
-        BASE_IMAGE="$(params.base-image)"
+        echo "=== EVALUATE PHASE: Harbor Build Control (crane) ==="
+        
+        # Install crane
+        curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.1/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /tmp crane
+        
+        LOCAL_BASE_IMAGE="local-registry.ab-eval-flow.svc.cluster.local:5000/eval-base:latest"
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
@@ -226,22 +277,41 @@ spec:
         IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:control-${SHA}"
         CONTEXT="$(workspaces.source.path)/tasks-control/${NAME}/environment"
         
-        buildah login --tls-verify=false -u serviceaccount \
-          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" "$REGISTRY"
+        # Create tar layer from scaffolded files
+        echo "Creating layer from: $CONTEXT"
+        tar -cvf /tmp/layer.tar -C "$CONTEXT" .
         
-        buildah build --storage-driver=vfs --tls-verify=false \
-          --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE_TAG" "$CONTEXT"
+        # Login to destination registry
+        mkdir -p ~/.docker
+        TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+        AUTH=$(echo -n "serviceaccount:${TOKEN}" | base64 -w0)
+        cat > ~/.docker/config.json <<DOCKERCFG
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        DOCKERCFG
         
-        buildah push --storage-driver=vfs --tls-verify=false \
-          --digestfile /tmp/control-digest "$IMAGE_TAG" "docker://$IMAGE_TAG"
+        # Append layer and push
+        echo "Appending layer to base image..."
+        /tmp/crane append \
+          --base="${LOCAL_BASE_IMAGE}" \
+          --new_layer=/tmp/layer.tar \
+          --new_tag="${IMAGE_TAG}" \
+          --insecure 2>&1 | tee /tmp/crane-output.txt
         
-        DIGEST=$(tr -d '\n' < /tmp/control-digest)
-        echo "${REGISTRY}/${NS}/${NAME}@${DIGEST}" > "$(workspaces.source.path)/_eval_tmp/control-image-ref"
-        echo "Control image: $(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref")"
+        FULL_REF=$(tail -1 /tmp/crane-output.txt)
+        echo "$FULL_REF" > "$(workspaces.source.path)/_eval_tmp/control-image-ref"
+        echo "Control image: $FULL_REF"
 
-    # Step 5: Harbor - Run Evaluation
+    # Step 5: Harbor - Run Evaluation (uses pre-built image with Harbor installed)
     - name: harbor-eval
-      image: registry.access.redhat.com/ubi9/python-312:latest
+      image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env
+      computeResources:
+        requests:
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      env:
+        - name: HOME
+          value: /tmp
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -252,9 +322,17 @@ spec:
         fi
         
         echo "=== EVALUATE PHASE: Harbor Evaluation ==="
-        pip install --quiet --no-cache-dir \
-          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
-          "kubernetes>=32.0.0"
+        
+        # Check if Harbor is pre-installed (saves ~10 min)
+        if python -c "import harbor" 2>/dev/null; then
+          echo "Harbor already installed in base image"
+        else
+          echo "Installing Harbor from git..."
+          pip install --quiet --no-cache-dir \
+            "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+            "kubernetes>=32.0.0" \
+            pydantic pyyaml
+        fi
         
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
@@ -264,7 +342,6 @@ spec:
         
         cd "$PIPELINE_DIR"
         export PYTHONPATH="$PIPELINE_DIR"
-        pip install --quiet --no-cache-dir pydantic pyyaml
         
         TREATMENT_REF=$(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref" 2>/dev/null || echo "")
         CONTROL_REF=$(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref" 2>/dev/null || echo "")
@@ -283,6 +360,10 @@ spec:
           --llm-api-key "$(params.llm-api-key)"
         
         mkdir -p "$RESULTS_DIR/treatment" "$RESULTS_DIR/control"
+        
+        # Export LLM config for claude-code agent (Harbor reads from os.environ)
+        export ANTHROPIC_API_KEY="$(params.llm-api-key)"
+        export ANTHROPIC_BASE_URL="$(params.llm-api-base)"
         
         echo "=== Running treatment evaluation ==="
         harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
@@ -579,7 +660,304 @@ spec:
         open("$(workspaces.source.path)/_eval_tmp/recommendation", "w").write(rec)
         PARSE
 
-    # Step 10: Finalize results
+    # Step 10: A2A - Deploy Agent as Deployment+Service (if no endpoint provided)
+    - name: a2a-deploy-agent
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          echo "Skipping A2A deploy (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+
+        AGENT_ENDPOINT="$(params.agent-endpoint)"
+        if [ -n "$AGENT_ENDPOINT" ]; then
+          echo "Using external agent: $AGENT_ENDPOINT"
+          echo "$AGENT_ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+          echo "false" > "$(workspaces.source.path)/_eval_tmp/agent-deployed"
+          exit 0
+        fi
+
+        # Generate unique name for this evaluation
+        RUN_ID=$(echo "$(params.pipeline-run-id)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-20)
+        AGENT_NAME="a2a-agent-${RUN_ID}"
+        NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+        
+        echo "Deploying agent: $AGENT_NAME"
+        
+        # Create Deployment + Service
+        cat <<YAML | oc apply -f -
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: $AGENT_NAME
+          namespace: $NAMESPACE
+          labels:
+            app: $AGENT_NAME
+            abevalflow/temp: "true"
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: $AGENT_NAME
+          template:
+            metadata:
+              labels:
+                app: $AGENT_NAME
+            spec:
+              containers:
+              - name: redis
+                image: redis:7-alpine
+                ports:
+                - containerPort: 6379
+                resources:
+                  limits:
+                    cpu: 100m
+                    memory: 128Mi
+              - name: agent
+                image: $(params.agent-image):$(params.agent-tag)
+                ports:
+                - containerPort: 8000
+                env:
+                - name: LLM_PROVIDER
+                  value: "litellm"
+                - name: LLM_MODEL
+                  value: "openai/$(params.llm-model)"
+                - name: LLM_API_BASE
+                  value: "$(params.llm-api-base)"
+                - name: OPENAI_API_KEY
+                  value: "sk-dummy"
+                - name: RATE_LIMIT_REDIS_URL
+                  value: "redis://localhost:6379/0"
+                - name: SKIP_JWT_VALIDATION
+                  value: "true"
+                - name: SKIP_ORDER_VALIDATION
+                  value: "true"
+                - name: LOG_LEVEL
+                  value: "INFO"
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 512Mi
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: $AGENT_NAME
+          namespace: $NAMESPACE
+          labels:
+            abevalflow/temp: "true"
+        spec:
+          selector:
+            app: $AGENT_NAME
+          ports:
+          - port: 8000
+            targetPort: 8000
+        YAML
+        
+        # Wait for deployment to be ready
+        printf "Waiting for agent"
+        for i in $(seq 1 60); do
+          if oc rollout status deployment/$AGENT_NAME --timeout=5s >/dev/null 2>&1; then
+            ENDPOINT="http://${AGENT_NAME}.${NAMESPACE}.svc:8000"
+            if curl -sf "$ENDPOINT/.well-known/agent.json" > /dev/null 2>&1; then
+              echo " ready!"
+              echo "$ENDPOINT" > "$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+              echo "$AGENT_NAME" > "$(workspaces.source.path)/_eval_tmp/agent-deployed"
+              exit 0
+            fi
+          fi
+          printf "."
+          sleep 5
+        done
+        
+        echo " FAILED"
+        oc delete deployment/$AGENT_NAME service/$AGENT_NAME --ignore-not-found=true
+        exit 1
+
+    # Step 11: A2A Agent Evaluation
+    - name: a2a-eval
+      image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env
+      computeResources:
+        requests:
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+      env:
+        - name: HOME
+          value: /tmp
+        - name: LLM_JUDGE_MODEL
+          value: "openai/$(params.llm-model)"
+        - name: LLM_BASE_URL
+          value: "$(params.llm-api-base)"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: api-key
+              optional: true
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          echo "Skipping A2A eval (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+        
+        # Read endpoint from deploy step or param
+        ENDPOINT_FILE="$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+        if [ -f "$ENDPOINT_FILE" ]; then
+          AGENT_ENDPOINT=$(cat "$ENDPOINT_FILE")
+        else
+          AGENT_ENDPOINT="$(params.agent-endpoint)"
+        fi
+        
+        if [ -z "$AGENT_ENDPOINT" ]; then
+          echo "ERROR: No agent endpoint available (deploy failed or not provided)"
+          exit 1
+        fi
+        
+        echo "=== A2A Evaluation ==="
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        
+        mkdir -p "$RESULTS_DIR" "$REPORT_DIR"
+        
+        # Harbor (with LocalEnvironment) is pre-installed in eval-base:local-env.
+        # Expose abevalflow (A2AAgent adapter) via PYTHONPATH — no install needed,
+        # avoids virtualenv --user restrictions and permission conflicts.
+        export PYTHONPATH="$PIPELINE_DIR:${PYTHONPATH:-}"
+        
+        cd "$PIPELINE_DIR"
+        
+        # Read evaluation config from metadata.yaml
+        N_ATTEMPTS=$(python3 -c "
+        import yaml, sys
+        try:
+            meta = yaml.safe_load(open('$SUBMISSION_PATH/metadata.yaml'))
+            exp = meta.get('experiment', {})
+            print(exp.get('n_trials', 5))
+        except:
+            print(5)
+        ")
+        
+        # Find task directory (look for task.toml)
+        TASK_DIR=""
+        if [ -f "$SUBMISSION_PATH/task.toml" ]; then
+          TASK_DIR="$SUBMISSION_PATH"
+        elif [ -d "$SUBMISSION_PATH/tasks" ]; then
+          for subdir in "$SUBMISSION_PATH/tasks"/*/; do
+            if [ -f "${subdir}task.toml" ]; then
+              TASK_DIR="${subdir%/}"
+              break
+            fi
+          done
+        fi
+        
+        if [ -z "$TASK_DIR" ]; then
+          echo "ERROR: No task.toml found in submission"
+          exit 1
+        fi
+        
+        TASK_NAME=$(basename "$TASK_DIR")
+        echo "Task: $TASK_NAME | Attempts: $N_ATTEMPTS"
+        
+        # Generate Harbor config YAML
+        CONFIG_FILE="$RESULTS_DIR/a2a-config.yaml"
+        LLM_API_BASE="$(params.llm-api-base)"
+        LLM_MODEL="openai/$(params.llm-model)"
+        
+        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" "$LLM_API_BASE" "$LLM_MODEL" <<'GENCFG'
+        import sys
+        import yaml
+        
+        config_file, task_dir, results_dir, n_attempts, endpoint, timeout, llm_api_base, llm_model = sys.argv[1:9]
+        
+        config = {
+            "job_name": "a2a-eval",
+            "jobs_dir": results_dir,
+            "n_attempts": int(n_attempts),
+            "agents": [{
+                "import_path": "abevalflow.harbor_agents.a2a_adapter:A2AAgent",
+                "kwargs": {
+                    "endpoint": endpoint,
+                    "timeout": int(timeout)
+                }
+            }],
+            "tasks": [{"path": task_dir}],
+            "environment": {
+                "type": "local"
+            },
+            "verifier": {
+                "env": {
+                    "LLM_JUDGE_MODEL": llm_model,
+                    "LLM_API_BASE": llm_api_base,
+                    "OPENAI_API_KEY": "sk-dummy"
+                }
+            }
+        }
+        
+        with open(config_file, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        GENCFG
+        
+        # Verify A2A adapter can be imported
+        python3 -c "from abevalflow.harbor_agents.a2a_adapter import A2AAgent; print('A2AAgent imported OK')"
+        
+        # Run Harbor evaluation and capture any errors
+        harbor run -c "$CONFIG_FILE" -y 2>&1 || true
+        
+        # Show exception details if any
+        echo "=== Exception details ==="
+        find "$RESULTS_DIR" -name "exception.txt" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null || echo "No exception files"
+        
+        # Compute mean reward from Harbor results
+        python3 - "$RESULTS_DIR" "$(workspaces.source.path)/_eval_tmp" <<'COMPUTE_REWARDS'
+        import json
+        import sys
+        from pathlib import Path
+        
+        results_dir = Path(sys.argv[1])
+        output_dir = Path(sys.argv[2])
+        
+        def compute_mean_reward(base_dir: Path) -> float:
+            if not base_dir.is_dir():
+                return 0.0
+            rewards = []
+            for result_file in sorted(base_dir.rglob("result.json")):
+                try:
+                    data = json.loads(result_file.read_text())
+                    vr = data.get("verifier_result") or {}
+                    rw = vr.get("rewards") or {}
+                    reward = rw.get("reward") or vr.get("reward")
+                    if reward is not None:
+                        rewards.append(float(reward))
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+            return sum(rewards) / len(rewards) if rewards else 0.0
+        
+        mean_reward = compute_mean_reward(results_dir)
+        rec = "pass" if mean_reward >= 0.5 else "fail"
+        
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "treatment-reward").write_text(f"{mean_reward:.4f}")
+        (output_dir / "control-reward").write_text("0.0000")
+        (output_dir / "recommendation").write_text(rec)
+        
+        print(f"A2A mean reward: {mean_reward:.4f}")
+        print(f"Recommendation: {rec}")
+        COMPUTE_REWARDS
+
+    # Step 12: Finalize results
     - name: finalize
       image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
@@ -601,3 +979,25 @@ spec:
         echo "Control reward: $C_REWARD"
         echo "Recommendation: $REC"
         echo "Results: $(cat "$(results.results-dir.path)")"
+
+    # Step 13: Cleanup A2A agent deployment (always runs)
+    - name: a2a-cleanup
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/usr/bin/env bash
+        
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          exit 0
+        fi
+        
+        DEPLOYED_FILE="$(workspaces.source.path)/_eval_tmp/agent-deployed"
+        if [ ! -f "$DEPLOYED_FILE" ] || [ "$(cat "$DEPLOYED_FILE")" = "false" ]; then
+          echo "No agent to cleanup (external endpoint used)"
+          exit 0
+        fi
+        
+        AGENT_NAME=$(cat "$DEPLOYED_FILE")
+        echo "Cleaning up agent: $AGENT_NAME"
+        oc delete deployment/$AGENT_NAME service/$AGENT_NAME --ignore-not-found=true
+        echo "Cleanup complete"

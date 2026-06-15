@@ -40,6 +40,7 @@ from scipy import stats as sp_stats
 from abevalflow.report import (
     AnalysisResult,
     AnalysisSummary,
+    DegradationResult,
     Provenance,
     Recommendation,
     ScanMode,
@@ -154,6 +155,74 @@ def parse_variant_trials(variant_dir: Path) -> list[TrialResult]:
     return trials
 
 
+def is_a2a_results(results_dir: Path) -> bool:
+    """Return True when results use the flat A2A layout (a2a-eval/ only)."""
+    a2a_dir = results_dir / "a2a-eval"
+    if not a2a_dir.is_dir():
+        return False
+    has_ab_variants = (
+        (results_dir / "treatment").is_dir()
+        or (results_dir / "control").is_dir()
+    )
+    return not has_ab_variants
+
+
+def parse_a2a_trials(a2a_dir: Path) -> list[TrialResult]:
+    """Parse trial result.json files from the flat a2a-eval/ directory."""
+    return parse_variant_trials(a2a_dir)
+
+
+def build_a2a_analysis(
+    results_dir: Path,
+    submission_name: str,
+    threshold: float = 0.0,
+    provenance: Provenance | None = None,
+    related_pr: str | None = None,
+    llm_label: str | None = None,
+) -> AnalysisResult:
+    """Parse A2A single-variant results and assemble an analysis model."""
+    a2a_trials = parse_a2a_trials(results_dir / "a2a-eval")
+    summary = compute_variant_summary(a2a_trials)
+    empty_control = VariantSummary()
+
+    _MIN_TRIALS_FOR_RELIABLE_STATS = 15
+    if 0 < summary.n_trials < _MIN_TRIALS_FOR_RELIABLE_STATS:
+        logger.warning(
+            "A2A has only %d trials (< %d) — statistics may be unreliable",
+            summary.n_trials, _MIN_TRIALS_FOR_RELIABLE_STATS,
+        )
+
+    if summary.n_trials == 0:
+        logger.warning("No A2A trial data — defaulting to FAIL")
+        recommendation = Recommendation.FAIL
+    elif summary.n_passed == 0:
+        logger.warning("Zero passes in A2A evaluation — defaulting to FAIL")
+        recommendation = Recommendation.FAIL
+    else:
+        pass_threshold = threshold if threshold > 0 else 0.5
+        mean_r = summary.mean_reward or 0.0
+        recommendation = (
+            Recommendation.PASS if mean_r >= pass_threshold else Recommendation.FAIL
+        )
+
+    return AnalysisResult(
+        submission_name=submission_name,
+        provenance=provenance or Provenance(),
+        summary=AnalysisSummary(
+            related_pr=related_pr,
+            llm=llm_label,
+            treatment=summary,
+            control=empty_control,
+            uplift=summary.pass_rate,
+            mean_reward_gap=summary.mean_reward,
+            ttest_p_value=None,
+            fisher_p_value=None,
+            recommendation=recommendation,
+        ),
+        trials={"treatment": a2a_trials, "control": []},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
@@ -215,6 +284,39 @@ def compute_fisher(treatment_summary: VariantSummary,
 
 
 # ---------------------------------------------------------------------------
+# Degradation merge
+# ---------------------------------------------------------------------------
+
+def degradation_from_monitor(monitor_data: dict) -> DegradationResult:
+    """Build a DegradationResult from monitor.py JSON output."""
+    return DegradationResult(
+        degraded=monitor_data["degraded"],
+        message=monitor_data["message"],
+        threshold=monitor_data.get("threshold"),
+        previous_pass_rate=monitor_data.get("previous_score"),
+        current_pass_rate=monitor_data.get("current_score"),
+    )
+
+
+def merge_degradation_into_report(
+    report_path: Path,
+    monitor_path: Path,
+) -> AnalysisResult:
+    """Merge degradation check results from monitor.py into an existing report.json."""
+    monitor_data = json.loads(monitor_path.read_text())
+    result = AnalysisResult.model_validate_json(report_path.read_text())
+    result.degradation = degradation_from_monitor(monitor_data)
+    report_path.write_text(result.model_dump_json(indent=2))
+    logger.info("Merged degradation results into %s", report_path)
+
+    md_path = report_path.parent / "report.md"
+    md_path.write_text(render_markdown(result))
+    logger.info("Regenerated Markdown report at %s", md_path)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Report generation
 # ---------------------------------------------------------------------------
 
@@ -225,8 +327,19 @@ def build_analysis(
     provenance: Provenance | None = None,
     related_pr: str | None = None,
     llm_label: str | None = None,
+    eval_engine: str | None = None,
 ) -> AnalysisResult:
     """Parse results, compute stats, and assemble the full analysis model."""
+    if eval_engine == "a2a" or is_a2a_results(results_dir):
+        return build_a2a_analysis(
+            results_dir=results_dir,
+            submission_name=submission_name,
+            threshold=threshold,
+            provenance=provenance,
+            related_pr=related_pr,
+            llm_label=llm_label,
+        )
+
     treatment_trials = parse_variant_trials(results_dir / "treatment")
     control_trials = parse_variant_trials(results_dir / "control")
 
@@ -303,9 +416,13 @@ def render_markdown(result: AnalysisResult) -> str:
     t = s.treatment
     c = s.control
     prov = result.provenance
+    is_a2a = prov.eval_engine == "a2a"
 
     lines: list[str] = []
-    lines.append(f"# A/B Evaluation Report: {result.submission_name}\n")
+    if is_a2a:
+        lines.append(f"# A2A Evaluation Report: {result.submission_name}\n")
+    else:
+        lines.append(f"# A/B Evaluation Report: {result.submission_name}\n")
 
     # --- Summary table ---
     lines.append("## Summary\n")
@@ -315,32 +432,62 @@ def render_markdown(result: AnalysisResult) -> str:
         lines.append(f"* LLM: {s.llm}")
     if s.related_pr or s.llm:
         lines.append("")
-    lines.append("| Metric | Treatment | Control |")
-    lines.append("|--------|-----------|---------|")
-    lines.append(f"| Trials | {t.n_trials} | {c.n_trials} |")
-    lines.append(f"| Passed | {t.n_passed} | {c.n_passed} |")
-    lines.append(f"| Failed | {t.n_failed} | {c.n_failed} |")
-    lines.append(f"| Errors | {t.n_errors} | {c.n_errors} |")
-    lines.append(f"| Pass Rate | {_fmt(t.pass_rate)} | {_fmt(c.pass_rate)} |")
-    lines.append(f"| Mean Reward | {_fmt(t.mean_reward)} | {_fmt(c.mean_reward)} |")
-    lines.append(f"| Median Reward | {_fmt(t.median_reward)} | {_fmt(c.median_reward)} |")
-    lines.append(f"| Std Reward | {_fmt(t.std_reward)} | {_fmt(c.std_reward)} |")
+    if is_a2a:
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.append(f"| Trials | {t.n_trials} |")
+        lines.append(f"| Passed | {t.n_passed} |")
+        lines.append(f"| Failed | {t.n_failed} |")
+        lines.append(f"| Errors | {t.n_errors} |")
+        lines.append(f"| Pass Rate | {_fmt(t.pass_rate)} |")
+        lines.append(f"| Mean Reward | {_fmt(t.mean_reward)} |")
+        lines.append(f"| Median Reward | {_fmt(t.median_reward)} |")
+        lines.append(f"| Std Reward | {_fmt(t.std_reward)} |")
+    else:
+        lines.append("| Metric | Treatment | Control |")
+        lines.append("|--------|-----------|---------|")
+        lines.append(f"| Trials | {t.n_trials} | {c.n_trials} |")
+        lines.append(f"| Passed | {t.n_passed} | {c.n_passed} |")
+        lines.append(f"| Failed | {t.n_failed} | {c.n_failed} |")
+        lines.append(f"| Errors | {t.n_errors} | {c.n_errors} |")
+        lines.append(f"| Pass Rate | {_fmt(t.pass_rate)} | {_fmt(c.pass_rate)} |")
+        lines.append(f"| Mean Reward | {_fmt(t.mean_reward)} | {_fmt(c.mean_reward)} |")
+        lines.append(f"| Median Reward | {_fmt(t.median_reward)} | {_fmt(c.median_reward)} |")
+        lines.append(f"| Std Reward | {_fmt(t.std_reward)} | {_fmt(c.std_reward)} |")
     lines.append("")
 
     # --- Comparison ---
-    lines.append("## Comparison\n")
-    if s.mean_reward_gap is not None:
-        lines.append(f"- **Mean reward gap (Uplift):** {s.mean_reward_gap:+.4f}")
+    if is_a2a:
+        lines.append("## Results\n")
+        lines.append(f"- **Mean reward:** {_fmt(t.mean_reward)}")
+        lines.append(f"- **Pass rate:** {_fmt(t.pass_rate)}")
     else:
-        lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
-    lines.append(
-        f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}"
-    )
-    lines.append(
-        f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}"
-    )
+        lines.append("## Comparison\n")
+        if s.mean_reward_gap is not None:
+            lines.append(f"- **Mean reward gap (Uplift):** {s.mean_reward_gap:+.4f}")
+        else:
+            lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
+        lines.append(
+            f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}"
+        )
+        lines.append(
+            f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}"
+        )
     lines.append(f"- **Recommendation:** **{s.recommendation.value.upper()}**")
     lines.append("")
+
+    if result.degradation is not None:
+        d = result.degradation
+        lines.append("## Degradation Check\n")
+        lines.append(f"- **Status:** {'DEGRADED' if d.degraded else 'OK'}")
+        lines.append(f"- **Message:** {d.message}")
+        if d.threshold is not None:
+            lines.append(f"- **Threshold:** {_fmt(d.threshold)}")
+        if d.previous_pass_rate is not None:
+            lines.append(f"- **Previous pass rate:** {_fmt(d.previous_pass_rate)}")
+        if d.current_pass_rate is not None:
+            lines.append(f"- **Current pass rate:** {_fmt(d.current_pass_rate)}")
+        lines.append("")
 
     # --- Provenance ---
     lines.append("## Provenance\n")
@@ -390,9 +537,9 @@ def render_markdown(result: AnalysisResult) -> str:
 
     # --- Per-trial details ---
     lines.append("## Trial Details\n")
-    for variant in VARIANTS:
-        trials = result.trials.get(variant, [])
-        lines.append(f"<details>\n<summary>{variant.capitalize()} ({len(trials)} trials)</summary>\n")
+    if is_a2a:
+        trials = result.trials.get("treatment", [])
+        lines.append(f"<details>\n<summary>A2A ({len(trials)} trials)</summary>\n")
         lines.append("| # | Trial | Reward | Passed |")
         lines.append("|---|-------|--------|--------|")
         for i, tr in enumerate(trials, 1):
@@ -400,6 +547,17 @@ def render_markdown(result: AnalysisResult) -> str:
             p_str = "PASS" if tr.passed else "FAIL"
             lines.append(f"| {i} | {tr.trial_name} | {r_str} | {p_str} |")
         lines.append("\n</details>\n")
+    else:
+        for variant in VARIANTS:
+            trials = result.trials.get(variant, [])
+            lines.append(f"<details>\n<summary>{variant.capitalize()} ({len(trials)} trials)</summary>\n")
+            lines.append("| # | Trial | Reward | Passed |")
+            lines.append("|---|-------|--------|--------|")
+            for i, tr in enumerate(trials, 1):
+                r_str = _fmt(tr.reward) if tr.reward is not None else "ERROR"
+                p_str = "PASS" if tr.passed else "FAIL"
+                lines.append(f"| {i} | {tr.trial_name} | {r_str} | {p_str} |")
+            lines.append("\n</details>\n")
 
     return "\n".join(lines)
 
@@ -415,16 +573,24 @@ def main(argv: list[str] | None = None) -> int:
         description="Analyze A/B evaluation results and produce JSON + Markdown reports",
     )
     parser.add_argument(
-        "--results-dir", type=Path, required=True,
+        "--results-dir", type=Path,
         help="Path to the results directory containing treatment/ and control/ subdirs",
     )
     parser.add_argument(
-        "--output-dir", type=Path, required=True,
+        "--output-dir", type=Path,
         help="Directory to write report.json and report.md",
     )
     parser.add_argument(
-        "--submission-name", required=True,
+        "--submission-name",
         help="Name of the submission being analyzed",
+    )
+    parser.add_argument(
+        "--merge-degradation-from", type=Path, default=None,
+        help="Path to monitor.py JSON output to merge into an existing report.json",
+    )
+    parser.add_argument(
+        "--report-json", type=Path, default=None,
+        help="Path to report.json when merging degradation results",
     )
     parser.add_argument(
         "--threshold", type=float, default=0.0,
@@ -438,9 +604,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--eval-engine",
         type=str,
-        choices=["harbor", "ase", "both"],
+        choices=["harbor", "ase", "both", "a2a"],
         default="harbor",
-        help="Evaluation engine used (for provenance tagging)",
+        help="Evaluation engine used (for provenance tagging and analysis path)",
     )
     parser.add_argument(
         "--security-scan-mode",
@@ -464,6 +630,28 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    if args.merge_degradation_from is not None:
+        report_path = args.report_json
+        if report_path is None and args.output_dir is not None:
+            report_path = args.output_dir / "report.json"
+        if report_path is None or not report_path.is_file():
+            logger.error(
+                "report.json not found for degradation merge "
+                "(use --report-json or --output-dir)"
+            )
+            return 1
+        if not args.merge_degradation_from.is_file():
+            logger.error("Monitor output file does not exist: %s", args.merge_degradation_from)
+            return 1
+        merge_degradation_into_report(report_path, args.merge_degradation_from)
+        return 0
+
+    if args.results_dir is None or args.output_dir is None or args.submission_name is None:
+        logger.error(
+            "--results-dir, --output-dir, and --submission-name are required for analysis"
+        )
+        return 1
+
     if not args.results_dir.is_dir():
         logger.error("Results directory does not exist: %s", args.results_dir)
         return 1
@@ -484,6 +672,7 @@ def main(argv: list[str] | None = None) -> int:
         provenance=provenance,
         related_pr=args.pr_url,
         llm_label=args.llm_label,
+        eval_engine=args.eval_engine,
     )
 
     # Include security scan results if available

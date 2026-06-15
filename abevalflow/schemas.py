@@ -28,6 +28,7 @@ class EvalEngine(StrEnum):
     HARBOR = "harbor"
     ASE = "ase"
     MCPCHECKER = "mcpchecker"
+    A2A = "a2a"
     BOTH = "both"  # Harbor + ASE
 
 
@@ -259,6 +260,14 @@ class SubmissionMetadata(BaseModel):
             "skips all security scanning, 'warn' reports findings but continues, "
             "'block' fails the pipeline on HIGH/CRITICAL findings. "
             "Pipeline param takes precedence if set."
+        ),
+    )
+
+    skip_quality_review: bool = Field(
+        default=False,
+        description=(
+            "Skip the LLM-based test quality review step. "
+            "Useful for A2A evaluations or when quality review is not needed."
         ),
     )
 

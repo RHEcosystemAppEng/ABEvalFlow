@@ -314,13 +314,14 @@ def validate_submission(
     run_harbor = eval_engine in (EvalEngine.HARBOR, EvalEngine.BOTH)
     run_ase = eval_engine in (EvalEngine.ASE, EvalEngine.BOTH)
     run_mcpchecker = eval_engine == EvalEngine.MCPCHECKER
+    run_a2a = eval_engine == EvalEngine.A2A
 
     # Common: metadata.yaml is always required
     metadata_errors, metadata = _check_metadata_yaml(submission_dir)
     errors.extend(metadata_errors)
 
-    # MCPChecker has its own structure - skip skills/ check
-    if not run_mcpchecker:
+    # MCPChecker and A2A have their own structure - skip skills/ check
+    if not run_mcpchecker and not run_a2a:
         errors.extend(_check_skills_dir(submission_dir))
 
     if run_harbor:
@@ -344,8 +345,18 @@ def validate_submission(
         elif metadata and metadata.mcp and not metadata.mcp.credentials_secret:
             errors.append("mcp.credentials_secret must not be empty")
 
-    # Common: supportive/ size check (skip for mcpchecker)
-    if not run_mcpchecker:
+    if run_a2a:
+        # A2A requires either instruction.md or task.toml
+        has_instruction = (submission_dir / "instruction.md").is_file()
+        has_task_toml = (submission_dir / "task.toml").is_file()
+        has_tasks_dir = (submission_dir / "tasks").is_dir()
+        if not has_instruction and not has_task_toml and not has_tasks_dir:
+            errors.append(
+                "A2A evaluation requires instruction.md, task.toml, or tasks/ directory"
+            )
+
+    # Common: supportive/ size check (skip for mcpchecker and a2a)
+    if not run_mcpchecker and not run_a2a:
         errors.extend(_check_supportive_size(submission_dir))
 
     if errors:
@@ -361,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--eval-engine",
         type=str,
-        choices=["harbor", "ase", "mcpchecker", "both"],
+        choices=["harbor", "ase", "mcpchecker", "a2a", "both"],
         default="harbor",
         help="Evaluation engine (controls which checks run)",
     )

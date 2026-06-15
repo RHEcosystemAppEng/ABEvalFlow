@@ -9,7 +9,7 @@ metadata:
 spec:
   description: >-
     End-to-end A/B evaluation pipeline for AI skill submissions.
-    Restructured into clean phases: prepare → test → evaluate → analyze → store → publish.
+    Restructured into clean phases: prepare → test → evaluate → analyze → store.
     Supports Harbor (containerized A/B), ASE (LLM-as-judge), and MCPChecker (MCP server testing).
   params:
     # Repository params
@@ -39,7 +39,7 @@ spec:
       default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
     - name: harbor-fork-revision
       type: string
-      default: "main"
+      default: "feature/local-environment"
     - name: eval-mode
       type: string
       default: "prebuilt"
@@ -51,7 +51,7 @@ spec:
       default: "ab-eval-flow"
     - name: base-image
       type: string
-      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:latest"
+      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env"
     # LLM params
     - name: llm-model
       type: string
@@ -111,6 +111,29 @@ spec:
     - name: mcpchecker-task-timeout
       type: string
       default: "10m"
+    # A2A agent params
+    - name: agent-endpoint
+      type: string
+      default: ""
+      description: A2A agent endpoint URL
+    - name: agent-timeout
+      type: string
+      default: "120"
+    - name: agent-image
+      type: string
+      default: "quay.io/ecosystem-appeng/google-lightspeed-agent"
+    - name: agent-tag
+      type: string
+      default: "latest"
+    - name: agent-namespace
+      type: string
+      default: "ab-eval-flow"
+    - name: agent-release-name
+      type: string
+      default: "eval-lightspeed-agent"
+    - name: agent-chart-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/google-lightspeed-agent.git"
     # Security scanning
     - name: security-scan
       type: string
@@ -219,6 +242,8 @@ spec:
           value: $(params.security-scan)
         - name: submission-security-scan
           value: $(tasks.prepare.results.security-scan)
+        - name: submission-skip-quality-review
+          value: $(tasks.prepare.results.skip-quality-review)
         - name: security-scan-use-llm
           value: $(tasks.prepare.results.security-scan-use-llm)
         - name: enable-quality-review
@@ -296,6 +321,21 @@ spec:
           value: $(params.mcpchecker-judge-model)
         - name: mcpchecker-task-timeout
           value: $(params.mcpchecker-task-timeout)
+        # A2A params
+        - name: agent-endpoint
+          value: $(params.agent-endpoint)
+        - name: agent-timeout
+          value: $(params.agent-timeout)
+        - name: agent-image
+          value: $(params.agent-image)
+        - name: agent-tag
+          value: $(params.agent-tag)
+        - name: agent-namespace
+          value: $(params.agent-namespace)
+        - name: agent-release-name
+          value: $(params.agent-release-name)
+        - name: agent-chart-url
+          value: $(params.agent-chart-url)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -311,7 +351,7 @@ spec:
           values: ["mcpchecker"]
       runAfter: ["evaluate"]
       taskRef:
-        name: analyze-report
+        name: analyze-and-check-degradation
       params:
         - name: submission-name
           value: $(tasks.prepare.results.submission-name)
@@ -337,37 +377,19 @@ spec:
           value: $(params.repo-name)
         - name: pr-number
           value: $(params.pr-number)
+        - name: enable-degradation-check
+          value: "false"
       workspaces:
         - name: source
           workspace: shared-workspace
 
     # ======================================================================
-    # PHASE 5: STORE (persist results to PostgreSQL)
+    # PHASE 5: STORE (PostgreSQL persistence + MinIO/Quay/PR publish)
     # ======================================================================
     - name: store
       runAfter: ["analyze", "evaluate"]
       taskRef:
-        name: store-results
-      params:
-        - name: submission-name
-          value: $(tasks.prepare.results.submission-name)
-        - name: pipeline-run-id
-          value: $(context.pipelineRun.name)
-        - name: pipeline-repo-url
-          value: $(params.pipeline-repo-url)
-        - name: pipeline-repo-revision
-          value: $(params.pipeline-repo-revision)
-      workspaces:
-        - name: source
-          workspace: shared-workspace
-
-    # ======================================================================
-    # PHASE 6: PUBLISH (artifacts to MinIO, PR comments, Quay promotion)
-    # ======================================================================
-    - name: publish
-      runAfter: ["store"]
-      taskRef:
-        name: publish-store
+        name: store
       params:
         - name: submission-name
           value: $(tasks.prepare.results.submission-name)
@@ -400,7 +422,7 @@ spec:
           workspace: shared-workspace
 
   # ========================================================================
-  # PHASE 7: CLEANUP (finally - always runs)
+  # CLEANUP (finally - always runs)
   # ========================================================================
   finally:
     - name: cleanup
