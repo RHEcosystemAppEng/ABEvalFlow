@@ -27,7 +27,7 @@ spec:
       default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
     - name: pipeline-repo-revision
       type: string
-      default: "APPENG-4911/monitoring"
+      default: "main"
     # Evaluation engine selection
     - name: eval-engine
       type: string
