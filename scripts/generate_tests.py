@@ -40,6 +40,7 @@ from abevalflow.generation_validator import (
     check_markdown,
     check_python,
     content_check,
+    final_review,
     multi_reviewer_check,
     pytest_collect_check,
     scenario_coherence_check,
@@ -1182,6 +1183,13 @@ def generate(
                         f"{max_retries} attempts: {post_errors}"
                     )
                 continue
+
+            final = final_review(submission_dir)
+            if not final["passed"]:
+                logger.warning(
+                    "Final review found issues after correction: %s",
+                    final["issues"],
+                )
         else:
             logger.info("Attempt %d: reviewers passed, no corrections needed", attempt)
 
