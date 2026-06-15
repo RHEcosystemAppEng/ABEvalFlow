@@ -55,7 +55,13 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        BASE_IMAGE="$(params.base-image)"
+        # Configure native overlay (no fuse required)
+        mkdir -p /tmp/containers
+        printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = ""\n' > /tmp/containers/storage.conf
+        export CONTAINERS_STORAGE_CONF=/tmp/containers/storage.conf
+
+        # Use local registry for faster pulls
+        LOCAL_BASE_IMAGE="local-registry.ab-eval-flow.svc:5000/eval-base:latest"
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
@@ -69,16 +75,14 @@ spec:
           -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
           "$REGISTRY"
 
-        echo "=== Building treatment (FROM ${BASE_IMAGE}) ==="
+        echo "=== Building treatment (FROM ${LOCAL_BASE_IMAGE}) ==="
         buildah build \
-          --storage-driver=vfs \
           --tls-verify=false \
-          --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+          --build-arg "BASE_IMAGE=${LOCAL_BASE_IMAGE}" \
           -t "$IMAGE_TAG" \
           "$CONTEXT"
 
         buildah push \
-          --storage-driver=vfs \
           --tls-verify=false \
           --digestfile /tmp/treatment-digest \
           "$IMAGE_TAG" \
@@ -98,7 +102,13 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        BASE_IMAGE="$(params.base-image)"
+        # Configure native overlay (no fuse required)
+        mkdir -p /tmp/containers
+        printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = ""\n' > /tmp/containers/storage.conf
+        export CONTAINERS_STORAGE_CONF=/tmp/containers/storage.conf
+
+        # Use local registry for faster pulls
+        LOCAL_BASE_IMAGE="local-registry.ab-eval-flow.svc:5000/eval-base:latest"
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
@@ -112,16 +122,14 @@ spec:
           -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
           "$REGISTRY"
 
-        echo "=== Building control (FROM ${BASE_IMAGE}) ==="
+        echo "=== Building control (FROM ${LOCAL_BASE_IMAGE}) ==="
         buildah build \
-          --storage-driver=vfs \
           --tls-verify=false \
-          --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+          --build-arg "BASE_IMAGE=${LOCAL_BASE_IMAGE}" \
           -t "$IMAGE_TAG" \
           "$CONTEXT"
 
         buildah push \
-          --storage-driver=vfs \
           --tls-verify=false \
           --digestfile /tmp/control-digest \
           "$IMAGE_TAG" \
