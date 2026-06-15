@@ -27,7 +27,7 @@ spec:
       default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
     - name: pipeline-repo-revision
       type: string
-      default: "main"
+      default: "APPENG-4911/monitoring"
     # Evaluation engine selection
     - name: eval-engine
       type: string
@@ -39,7 +39,7 @@ spec:
       default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
     - name: harbor-fork-revision
       type: string
-      default: "main"
+      default: "feature/local-environment"
     - name: eval-mode
       type: string
       default: "prebuilt"
@@ -51,7 +51,7 @@ spec:
       default: "ab-eval-flow"
     - name: base-image
       type: string
-      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:latest"
+      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env"
     # LLM params
     - name: llm-model
       type: string
@@ -132,22 +132,22 @@ spec:
   results:
     - name: recommendation
       description: "pass or fail based on uplift threshold"
-      value: $(tasks.analyze-and-check-degradation.results.recommendation)
+      value: $(tasks.analyze.results.recommendation)
     - name: treatment-mean-reward
       description: "Treatment variant mean reward (e.g. 0.8500)"
-      value: $(tasks.analyze-and-check-degradation.results.treatment-mean-reward)
+      value: $(tasks.analyze.results.treatment-mean-reward)
     - name: control-mean-reward
       description: "Control variant mean reward (e.g. 0.6000)"
-      value: $(tasks.analyze-and-check-degradation.results.control-mean-reward)
+      value: $(tasks.analyze.results.control-mean-reward)
     - name: mean-reward-gap
       description: "Mean reward gap, treatment - control (e.g. +0.1500)"
-      value: $(tasks.analyze-and-check-degradation.results.mean-reward-gap)
+      value: $(tasks.analyze.results.mean-reward-gap)
     - name: ttest-p-value
       description: "Welch's t-test p-value (e.g. 0.0342)"
-      value: $(tasks.analyze-and-check-degradation.results.ttest-p-value)
+      value: $(tasks.analyze.results.ttest-p-value)
     - name: fisher-p-value
       description: "Fisher's exact test p-value (e.g. 0.0271)"
-      value: $(tasks.analyze-and-check-degradation.results.fisher-p-value)
+      value: $(tasks.analyze.results.fisher-p-value)
 
   workspaces:
     - name: shared-workspace
@@ -306,7 +306,7 @@ spec:
     # PHASE 4: ANALYZE (statistical analysis and report generation)
     # Note: For MCPChecker, evaluate phase produces the final report directly
     # ======================================================================
-    - name: analyze-and-check-degradation
+    - name: analyze
       when:
         - input: $(params.eval-engine)
           operator: notin
@@ -349,7 +349,7 @@ spec:
     # PHASE 5: STORE (PostgreSQL persistence + MinIO/Quay/PR publish)
     # ======================================================================
     - name: store
-      runAfter: ["analyze-and-check-degradation", "evaluate"]
+      runAfter: ["analyze", "evaluate"]
       taskRef:
         name: store
       params:
