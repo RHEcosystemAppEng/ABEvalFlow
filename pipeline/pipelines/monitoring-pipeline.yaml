@@ -326,6 +326,8 @@ spec:
           value: $(tasks.prepare.results.report-prefix)
         - name: recommendation
           value: $(tasks.evaluate.results.recommendation)
+        - name: results-dir
+          value: $(tasks.evaluate.results.results-dir)
         - name: eval-engine
           value: $(params.eval-engine)
         - name: commit-sha
