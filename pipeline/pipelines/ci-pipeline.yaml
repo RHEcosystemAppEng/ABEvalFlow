@@ -111,6 +111,29 @@ spec:
     - name: mcpchecker-task-timeout
       type: string
       default: "10m"
+    # A2A agent params
+    - name: agent-endpoint
+      type: string
+      default: ""
+      description: A2A agent endpoint URL
+    - name: agent-timeout
+      type: string
+      default: "120"
+    - name: agent-image
+      type: string
+      default: "quay.io/ecosystem-appeng/google-lightspeed-agent"
+    - name: agent-tag
+      type: string
+      default: "latest"
+    - name: agent-namespace
+      type: string
+      default: "ab-eval-flow"
+    - name: agent-release-name
+      type: string
+      default: "eval-lightspeed-agent"
+    - name: agent-chart-url
+      type: string
+      default: "https://github.com/RHEcosystemAppEng/google-lightspeed-agent.git"
     # Security scanning
     - name: security-scan
       type: string
@@ -298,6 +321,21 @@ spec:
           value: $(params.mcpchecker-judge-model)
         - name: mcpchecker-task-timeout
           value: $(params.mcpchecker-task-timeout)
+        # A2A params
+        - name: agent-endpoint
+          value: $(params.agent-endpoint)
+        - name: agent-timeout
+          value: $(params.agent-timeout)
+        - name: agent-image
+          value: $(params.agent-image)
+        - name: agent-tag
+          value: $(params.agent-tag)
+        - name: agent-namespace
+          value: $(params.agent-namespace)
+        - name: agent-release-name
+          value: $(params.agent-release-name)
+        - name: agent-chart-url
+          value: $(params.agent-chart-url)
       workspaces:
         - name: source
           workspace: shared-workspace
