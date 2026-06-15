@@ -138,6 +138,19 @@ def scenario_coherence_check(
             f"{missing_in_tests}"
         )
 
+    missing_in_instruction_outputs = []
+    for field, value in expected.items():
+        val_str = str(value)
+        if val_str.lower() in ("null", "none", "n/a", ""):
+            continue
+        if val_str not in instruction:
+            missing_in_instruction_outputs.append(f"{field}={val_str}")
+    if missing_in_instruction_outputs:
+        errors.append(
+            f"Instruction is missing expected_outputs from scenario brief: "
+            f"{missing_in_instruction_outputs}"
+        )
+
     return errors
 
 

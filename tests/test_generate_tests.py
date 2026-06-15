@@ -513,6 +513,7 @@ class TestRetryLoop:
         assert "instruction.md" in generated
         assert mock_chat.call_count == 10
 
+    @patch("scripts.generate_tests.final_review", return_value={"passed": True, "issues": []})
     @patch("scripts.generate_tests.scenario_coherence_check", return_value=[])
     @patch("scripts.generate_tests.multi_reviewer_check")
     @patch("scripts.generate_tests.pytest_collect_check", return_value=[])
@@ -527,6 +528,7 @@ class TestRetryLoop:
         mock_collect: MagicMock,
         mock_review: MagicMock,
         mock_coherence: MagicMock,
+        mock_final: MagicMock,
         ai_submission: Path,
         tmp_path: Path,
     ) -> None:
@@ -541,6 +543,7 @@ class TestRetryLoop:
         generated = generate(ai_submission, tmp_path, agent_type="api", max_retries=1)
         assert "instruction.md" in generated
         assert mock_chat.call_count == 7
+        mock_final.assert_called_once()
 
     @patch("scripts.generate_tests.scenario_coherence_check", return_value=[])
     @patch("scripts.generate_tests.multi_reviewer_check", return_value=REVIEW_PASS)

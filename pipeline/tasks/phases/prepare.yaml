@@ -173,8 +173,14 @@ spec:
         if [ "$EVAL_ENGINE" = "ase" ] || [ "$EVAL_ENGINE" = "both" ]; then
           if [ ! -f "$SUBMISSION_PATH/evals/evals.json" ]; then
             echo "ASE mode: generating evals.json from SKILL.md..."
-            if python3 scripts/generate_ase_evals.py "$SUBMISSION_PATH" > /tmp/ase-output.json 2>&1; then
-              GENERATED=$(python3 -c "import json; print(json.dumps(json.load(open('/tmp/ase-output.json')).get('generated', [])))" 2>/dev/null || echo "[]")
+            if python3 scripts/generate_ase_evals.py "$SUBMISSION_PATH" \
+                > /tmp/ase-stdout.json 2>/tmp/ase-stderr.txt; then
+              cat /tmp/ase-stdout.json
+              GENERATED=$(python3 -c "import json; print(json.dumps(json.load(open('/tmp/ase-stdout.json')).get('generated', [])))" 2>/dev/null || echo "[]")
+            else
+              echo "WARNING: ASE evals.json generation failed:"
+              cat /tmp/ase-stderr.txt || true
+              cat /tmp/ase-stdout.json || true
             fi
           else
             echo "ASE mode: evals.json exists, skipping generation"
@@ -186,9 +192,15 @@ spec:
           if python scripts/generate_tests.py "$SUBMISSION_PATH" \
               --workspace-dir "$WORKSPACE_DIR" \
               --agent-type "$(params.agent-type)" \
-              --max-retries "$(params.max-generation-retries)" > /tmp/generate-output.json 2>&1; then
-            HARBOR_GENERATED=$(python3 -c "import json; print(json.dumps(json.load(open('/tmp/generate-output.json')).get('generated', [])))" 2>/dev/null || echo "[]")
+              --max-retries "$(params.max-generation-retries)" \
+              > /tmp/harbor-stdout.json 2>/tmp/harbor-stderr.txt; then
+            cat /tmp/harbor-stdout.json
+            HARBOR_GENERATED=$(python3 -c "import json; print(json.dumps(json.load(open('/tmp/harbor-stdout.json')).get('generated', [])))" 2>/dev/null || echo "[]")
             GENERATED=$(python3 -c "import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); print(json.dumps(list(set(a+b))))" "$GENERATED" "$HARBOR_GENERATED")
+          else
+            echo "WARNING: Harbor test generation failed:"
+            cat /tmp/harbor-stderr.txt || true
+            cat /tmp/harbor-stdout.json || true
           fi
         fi
         
