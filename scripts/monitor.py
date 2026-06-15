@@ -52,6 +52,8 @@ def check_degradation(
     engine: Engine,
     submission_name: str,
     threshold: float = 0.85,
+    current_score: float | None = None,
+    eval_engine: str | None = None,
 ) -> MonitorResult:
     """Check if the most recent run shows degradation vs the previous run.
 
@@ -60,37 +62,57 @@ def check_degradation(
         submission_name: The skill/submission name to check.
         threshold: Ratio threshold below which degradation is flagged.
             E.g., 0.85 means current score must be at least 85% of previous.
+        current_score: Optional score for the current run (not yet in DB).
+            When provided, only the most recent historical run is queried.
+        eval_engine: Optional engine filter (e.g. ``harbor``, ``a2a``).
 
     Returns:
         MonitorResult with degradation status and scores.
     """
     from abevalflow.db.models import EvaluationRun
 
+    external_current_score = current_score is not None
+    limit = 1 if external_current_score else 2
+    min_runs = 1 if external_current_score else 2
+
     with Session(engine) as session:
-        stmt = (
-            select(EvaluationRun)
-            .where(EvaluationRun.submission_name == submission_name)
-            .order_by(EvaluationRun.created_at.desc())
-            .limit(2)
+        stmt = select(EvaluationRun).where(
+            EvaluationRun.submission_name == submission_name
         )
+        if eval_engine is not None:
+            stmt = stmt.where(EvaluationRun.eval_engine == eval_engine)
+        stmt = stmt.order_by(EvaluationRun.created_at.desc()).limit(limit)
         runs = list(session.execute(stmt).scalars().all())
 
-    if len(runs) < 2:
+    if len(runs) < min_runs:
         return MonitorResult(
             submission_name=submission_name,
             degraded=False,
-            current_score=runs[0].treatment_pass_rate if runs else None,
+            current_score=(
+                current_score
+                if current_score is not None
+                else (runs[0].treatment_pass_rate if runs else None)
+            ),
             previous_score=None,
             ratio=None,
             threshold=threshold,
-            message=f"Not enough data: found {len(runs)} run(s), need at least 2",
-            current_run_id=runs[0].pipeline_run_id if runs else None,
+            message=(
+                f"Not enough data: found {len(runs)} run(s), "
+                f"need at least {min_runs}"
+            ),
+            current_run_id=None if external_current_score else (
+                runs[0].pipeline_run_id if runs else None
+            ),
             previous_run_id=None,
         )
 
-    current_run, previous_run = runs[0], runs[1]
-    current_score = current_run.treatment_pass_rate
-    previous_score = previous_run.treatment_pass_rate
+    if external_current_score:
+        previous_run = runs[0]
+        previous_score = previous_run.treatment_pass_rate
+    else:
+        current_run, previous_run = runs[0], runs[1]
+        current_score = current_run.treatment_pass_rate
+        previous_score = previous_run.treatment_pass_rate
 
     if previous_score == 0:
         ratio = 0.0 if current_score == 0 else float("inf")
@@ -118,7 +140,7 @@ def check_degradation(
         ratio=ratio,
         threshold=threshold,
         message=message,
-        current_run_id=current_run.pipeline_run_id,
+        current_run_id=None if external_current_score else current_run.pipeline_run_id,
         previous_run_id=previous_run.pipeline_run_id,
     )
 
@@ -149,6 +171,20 @@ def main() -> int:
         default="-",
         help="Output file path (default: stdout)",
     )
+    parser.add_argument(
+        "--current-score",
+        type=float,
+        default=None,
+        help=(
+            "Current run score (not yet in DB). When set, only the most "
+            "recent historical run is queried for comparison."
+        ),
+    )
+    parser.add_argument(
+        "--eval-engine",
+        default=None,
+        help="Filter historical runs by eval engine (e.g. harbor, a2a)",
+    )
 
     args = parser.parse_args()
 
@@ -158,6 +194,8 @@ def main() -> int:
             engine=engine,
             submission_name=args.submission_name,
             threshold=args.threshold,
+            current_score=args.current_score,
+            eval_engine=args.eval_engine,
         )
     except Exception as e:
         logger.exception("Error during monitoring check")

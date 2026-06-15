@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Send Slack notifications for monitoring alerts.
+"""Send Slack notifications for monitoring run results.
 
 Reads a MonitorResult JSON payload and sends a formatted Slack message
-if degradation was detected.
+for every completed monitoring run (pass or degradation).
 
 Exit codes:
-    0: Success (notification sent or not needed)
+    0: Success (notification sent)
     1: Error sending notification
 """
 
@@ -30,12 +30,14 @@ logger = logging.getLogger(__name__)
 def format_slack_message(
     monitor_result: dict[str, Any],
     pipeline_run_url: str | None = None,
+    eval_engine: str | None = None,
 ) -> dict[str, Any]:
     """Format a MonitorResult as a Slack Block Kit message.
 
     Args:
         monitor_result: Parsed JSON from monitor.py output.
         pipeline_run_url: Optional URL to the pipeline run in OpenShift console.
+        eval_engine: Evaluation engine used (harbor, ase, a2a).
 
     Returns:
         Slack message payload with blocks.
@@ -47,30 +49,43 @@ def format_slack_message(
     threshold = monitor_result.get("threshold", 0.85)
     message = monitor_result.get("message", "")
     current_run_id = monitor_result.get("current_run_id", "N/A")
+    degraded = monitor_result.get("degraded", False)
 
     current_pct = f"{current:.1%}" if current is not None else "N/A"
     previous_pct = f"{previous:.1%}" if previous is not None else "N/A"
     ratio_str = f"{ratio:.2f}" if ratio is not None else "N/A"
+    engine_label = (eval_engine or "unknown").upper()
+
+    if degraded:
+        header_text = f"🚨 [{engine_label}] Performance Degradation Detected"
+    else:
+        header_text = f"✅ [{engine_label}] Monitoring Pass"
+
+    fields = [
+        {"type": "mrkdwn", "text": f"*Skill:*\n{submission}"},
+        {"type": "mrkdwn", "text": f"*Run ID:*\n{current_run_id}"},
+        {"type": "mrkdwn", "text": f"*Current Score:*\n{current_pct}"},
+    ]
+
+    if previous is not None:
+        fields += [
+            {"type": "mrkdwn", "text": f"*Previous Score:*\n{previous_pct}"},
+            {"type": "mrkdwn", "text": f"*Ratio:*\n{ratio_str}"},
+            {"type": "mrkdwn", "text": f"*Threshold:*\n{threshold}"},
+        ]
 
     blocks = [
         {
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": "🚨 Performance Degradation Detected",
+                "text": header_text,
                 "emoji": True,
             },
         },
         {
             "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*Skill:*\n{submission}"},
-                {"type": "mrkdwn", "text": f"*Run ID:*\n{current_run_id}"},
-                {"type": "mrkdwn", "text": f"*Current Score:*\n{current_pct}"},
-                {"type": "mrkdwn", "text": f"*Previous Score:*\n{previous_pct}"},
-                {"type": "mrkdwn", "text": f"*Ratio:*\n{ratio_str}"},
-                {"type": "mrkdwn", "text": f"*Threshold:*\n{threshold}"},
-            ],
+            "fields": fields,
         },
         {
             "type": "context",
@@ -137,7 +152,7 @@ def send_slack_notification(
 def main() -> int:
     """CLI entrypoint."""
     parser = argparse.ArgumentParser(
-        description="Send Slack notification for monitoring alerts",
+        description="Send Slack notification for monitoring run results",
     )
     parser.add_argument(
         "--payload",
@@ -153,6 +168,11 @@ def main() -> int:
         "--pipeline-run-url",
         default=None,
         help="Optional URL to the pipeline run in OpenShift console",
+    )
+    parser.add_argument(
+        "--eval-engine",
+        default=None,
+        help="Evaluation engine used (harbor, ase, a2a)",
     )
     parser.add_argument(
         "--dry-run",
@@ -172,13 +192,10 @@ def main() -> int:
         logger.error("Failed to read payload: %s", e)
         return 1
 
-    if not payload_data.get("degraded", False):
-        logger.info("No degradation detected, skipping notification")
-        return 0
-
     slack_message = format_slack_message(
         payload_data,
         pipeline_run_url=args.pipeline_run_url,
+        eval_engine=args.eval_engine,
     )
 
     if args.dry_run:

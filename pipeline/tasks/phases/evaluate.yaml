@@ -201,12 +201,9 @@ spec:
         echo "Treatment: $OUTPUT_DIR/tasks-treatment/$(params.submission-name)"
         echo "Control: $OUTPUT_DIR/tasks-control/$(params.submission-name)"
 
-    # Step 3: Harbor - Build Treatment
+    # Step 3: Harbor - Build Treatment (using crane - instant layer append, no extraction)
     - name: harbor-build-treatment
-      image: registry.access.redhat.com/ubi9/buildah:9.6
-      securityContext:
-        capabilities:
-          add: ["SETFCAP"]
+      image: registry.access.redhat.com/ubi9/python-311:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -217,8 +214,12 @@ spec:
           exit 0
         fi
         
-        echo "=== EVALUATE PHASE: Harbor Build Treatment ==="
-        BASE_IMAGE="$(params.base-image)"
+        echo "=== EVALUATE PHASE: Harbor Build Treatment (crane) ==="
+        
+        # Install crane (lightweight tool that appends layers without extracting)
+        curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.1/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /tmp crane
+        
+        LOCAL_BASE_IMAGE="local-registry.ab-eval-flow.svc.cluster.local:5000/eval-base:latest"
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
@@ -226,25 +227,34 @@ spec:
         IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:treatment-${SHA}"
         CONTEXT="$(workspaces.source.path)/tasks-treatment/${NAME}/environment"
         
-        buildah login --tls-verify=false -u serviceaccount \
-          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" "$REGISTRY"
+        # Create tar layer from scaffolded files
+        echo "Creating layer from: $CONTEXT"
+        tar -cvf /tmp/layer.tar -C "$CONTEXT" .
         
-        buildah build --storage-driver=vfs --tls-verify=false \
-          --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE_TAG" "$CONTEXT"
+        # Login to destination registry (crane uses docker config)
+        mkdir -p ~/.docker
+        TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+        AUTH=$(echo -n "serviceaccount:${TOKEN}" | base64 -w0)
+        cat > ~/.docker/config.json <<DOCKERCFG
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        DOCKERCFG
         
-        buildah push --storage-driver=vfs --tls-verify=false \
-          --digestfile /tmp/treatment-digest "$IMAGE_TAG" "docker://$IMAGE_TAG"
+        # Append layer to base image and push (instant - no extraction needed)
+        echo "Appending layer to base image..."
+        /tmp/crane append \
+          --base="${LOCAL_BASE_IMAGE}" \
+          --new_layer=/tmp/layer.tar \
+          --new_tag="${IMAGE_TAG}" \
+          --insecure 2>&1 | tee /tmp/crane-output.txt
         
-        DIGEST=$(tr -d '\n' < /tmp/treatment-digest)
-        echo "${REGISTRY}/${NS}/${NAME}@${DIGEST}" > "$(workspaces.source.path)/_eval_tmp/treatment-image-ref"
-        echo "Treatment image: $(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref")"
+        # Get digest from crane output
+        FULL_REF=$(tail -1 /tmp/crane-output.txt)
+        echo "$FULL_REF" > "$(workspaces.source.path)/_eval_tmp/treatment-image-ref"
+        echo "Treatment image: $FULL_REF"
 
-    # Step 4: Harbor - Build Control
+    # Step 4: Harbor - Build Control (using crane - instant layer append, no extraction)
     - name: harbor-build-control
-      image: registry.access.redhat.com/ubi9/buildah:9.6
-      securityContext:
-        capabilities:
-          add: ["SETFCAP"]
+      image: registry.access.redhat.com/ubi9/python-311:latest
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -254,8 +264,12 @@ spec:
           exit 0
         fi
         
-        echo "=== EVALUATE PHASE: Harbor Build Control ==="
-        BASE_IMAGE="$(params.base-image)"
+        echo "=== EVALUATE PHASE: Harbor Build Control (crane) ==="
+        
+        # Install crane
+        curl -sL https://github.com/google/go-containerregistry/releases/download/v0.20.1/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /tmp crane
+        
+        LOCAL_BASE_IMAGE="local-registry.ab-eval-flow.svc.cluster.local:5000/eval-base:latest"
         REGISTRY="$(params.registry-url)"
         NS="$(params.registry-namespace)"
         NAME="$(params.submission-name)"
@@ -263,22 +277,41 @@ spec:
         IMAGE_TAG="${REGISTRY}/${NS}/${NAME}:control-${SHA}"
         CONTEXT="$(workspaces.source.path)/tasks-control/${NAME}/environment"
         
-        buildah login --tls-verify=false -u serviceaccount \
-          -p "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" "$REGISTRY"
+        # Create tar layer from scaffolded files
+        echo "Creating layer from: $CONTEXT"
+        tar -cvf /tmp/layer.tar -C "$CONTEXT" .
         
-        buildah build --storage-driver=vfs --tls-verify=false \
-          --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "$IMAGE_TAG" "$CONTEXT"
+        # Login to destination registry
+        mkdir -p ~/.docker
+        TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+        AUTH=$(echo -n "serviceaccount:${TOKEN}" | base64 -w0)
+        cat > ~/.docker/config.json <<DOCKERCFG
+        {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+        DOCKERCFG
         
-        buildah push --storage-driver=vfs --tls-verify=false \
-          --digestfile /tmp/control-digest "$IMAGE_TAG" "docker://$IMAGE_TAG"
+        # Append layer and push
+        echo "Appending layer to base image..."
+        /tmp/crane append \
+          --base="${LOCAL_BASE_IMAGE}" \
+          --new_layer=/tmp/layer.tar \
+          --new_tag="${IMAGE_TAG}" \
+          --insecure 2>&1 | tee /tmp/crane-output.txt
         
-        DIGEST=$(tr -d '\n' < /tmp/control-digest)
-        echo "${REGISTRY}/${NS}/${NAME}@${DIGEST}" > "$(workspaces.source.path)/_eval_tmp/control-image-ref"
-        echo "Control image: $(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref")"
+        FULL_REF=$(tail -1 /tmp/crane-output.txt)
+        echo "$FULL_REF" > "$(workspaces.source.path)/_eval_tmp/control-image-ref"
+        echo "Control image: $FULL_REF"
 
-    # Step 5: Harbor - Run Evaluation
+    # Step 5: Harbor - Run Evaluation (uses pre-built image with Harbor installed)
     - name: harbor-eval
-      image: registry.access.redhat.com/ubi9/python-312:latest
+      image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env
+      computeResources:
+        requests:
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      env:
+        - name: HOME
+          value: /tmp
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -289,9 +322,17 @@ spec:
         fi
         
         echo "=== EVALUATE PHASE: Harbor Evaluation ==="
-        pip install --quiet --no-cache-dir \
-          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
-          "kubernetes>=32.0.0"
+        
+        # Check if Harbor is pre-installed (saves ~10 min)
+        if python -c "import harbor" 2>/dev/null; then
+          echo "Harbor already installed in base image"
+        else
+          echo "Installing Harbor from git..."
+          pip install --quiet --no-cache-dir \
+            "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+            "kubernetes>=32.0.0" \
+            pydantic pyyaml
+        fi
         
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
@@ -301,7 +342,6 @@ spec:
         
         cd "$PIPELINE_DIR"
         export PYTHONPATH="$PIPELINE_DIR"
-        pip install --quiet --no-cache-dir pydantic pyyaml
         
         TREATMENT_REF=$(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref" 2>/dev/null || echo "")
         CONTROL_REF=$(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref" 2>/dev/null || echo "")
@@ -320,6 +360,10 @@ spec:
           --llm-api-key "$(params.llm-api-key)"
         
         mkdir -p "$RESULTS_DIR/treatment" "$RESULTS_DIR/control"
+        
+        # Export LLM config for claude-code agent (Harbor reads from os.environ)
+        export ANTHROPIC_API_KEY="$(params.llm-api-key)"
+        export ANTHROPIC_BASE_URL="$(params.llm-api-base)"
         
         echo "=== Running treatment evaluation ==="
         harbor run -c "$CONFIG_DIR/treatment-config.yaml" -y
@@ -736,7 +780,7 @@ spec:
 
     # Step 11: A2A Agent Evaluation
     - name: a2a-eval
-      image: registry.access.redhat.com/ubi9/python-312:latest
+      image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env
       computeResources:
         requests:
           memory: 256Mi
@@ -744,6 +788,8 @@ spec:
           cpu: 500m
           memory: 1Gi
       env:
+        - name: HOME
+          value: /tmp
         - name: LLM_JUDGE_MODEL
           value: "openai/$(params.llm-model)"
         - name: LLM_BASE_URL
@@ -786,12 +832,10 @@ spec:
         
         mkdir -p "$RESULTS_DIR" "$REPORT_DIR"
         
-        # Install ABEvalFlow package (for A2A adapter) and Harbor fork
-        pip install --quiet --no-cache-dir \
-          "$PIPELINE_DIR" \
-          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
-          "kubernetes>=32.0.0" \
-          aiohttp litellm 2>&1 | grep -v "^\[notice\]" || true
+        # Harbor (with LocalEnvironment) is pre-installed in eval-base:local-env.
+        # Expose abevalflow (A2AAgent adapter) via PYTHONPATH — no install needed,
+        # avoids virtualenv --user restrictions and permission conflicts.
+        export PYTHONPATH="$PIPELINE_DIR:${PYTHONPATH:-}"
         
         cd "$PIPELINE_DIR"
         

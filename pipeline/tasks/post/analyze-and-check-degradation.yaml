@@ -294,19 +294,25 @@ spec:
 
         MONITOR_OUTPUT=/tmp/monitor_result.json
 
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        CURRENT_SCORE=$(python3 -c "import json,sys;r=json.load(open(sys.argv[1]));s=r.get('summary',{});t=s.get('treatment',{}).get('mean_reward');print(t if t is not None else s.get('treatment_pass_rate',0.0))" "$REPORT_DIR/report.json" 2>/dev/null || echo "0.0")
+
+        MONITOR_EXIT=0
         python scripts/monitor.py \
           --submission-name "$(params.submission-name)" \
           --threshold "$(params.degradation-threshold)" \
           --db-url "$DATABASE_URL" \
-          --output "$MONITOR_OUTPUT" || {
-            echo "Monitor check failed, but continuing (non-blocking)"
-            write_skip_results "Monitor check failed"
-            exit 0
-          }
+          --current-score "$CURRENT_SCORE" \
+          --eval-engine "$(params.eval-engine)" \
+          --output "$MONITOR_OUTPUT" || MONITOR_EXIT=$?
+        if [ "$MONITOR_EXIT" -eq 2 ]; then
+          echo "Monitor errored (non-blocking), continuing"
+          write_skip_results "Monitor errored"
+          exit 0
+        fi
 
         cat "$MONITOR_OUTPUT"
 
-        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
         if [ -f "$REPORT_DIR/report.json" ]; then
           echo "Merging degradation results into report.json..."
           python scripts/analyze.py \
@@ -326,20 +332,23 @@ spec:
           echo ""
           echo "!!! DEGRADATION DETECTED !!!"
           echo ""
+        fi
 
-          if [ -n "${SLACK_WEBHOOK_URL:-}" ] && [ "$SLACK_WEBHOOK_URL" != "https://hooks.slack.com/services/REPLACE/WITH/ACTUAL_WEBHOOK" ]; then
-            PIPELINE_RUN_URL="$(params.openshift-console-url)/k8s/ns/ab-eval-flow/tekton.dev~v1~PipelineRun/$(params.pipeline-run-id)"
+        if [ -n "${SLACK_WEBHOOK_URL:-}" ] && [ "$SLACK_WEBHOOK_URL" != "https://hooks.slack.com/services/REPLACE/WITH/ACTUAL_WEBHOOK" ]; then
+          PIPELINE_RUN_URL="$(params.openshift-console-url)/k8s/ns/ab-eval-flow/tekton.dev~v1~PipelineRun/$(params.pipeline-run-id)"
 
-            python scripts/alert.py \
-              --payload "$MONITOR_OUTPUT" \
-              --webhook-url "$SLACK_WEBHOOK_URL" \
-              --pipeline-run-url "$PIPELINE_RUN_URL" || {
-                echo "Failed to send Slack alert (continuing anyway)"
-              }
-          else
-            echo "Slack webhook not configured, skipping alert"
-          fi
+          python scripts/alert.py \
+            --payload "$MONITOR_OUTPUT" \
+            --webhook-url "$SLACK_WEBHOOK_URL" \
+            --pipeline-run-url "$PIPELINE_RUN_URL" \
+            --eval-engine "$(params.eval-engine)" || {
+              echo "Failed to send Slack alert (continuing anyway)"
+            }
         else
+          echo "Slack webhook not configured, skipping alert"
+        fi
+
+        if [ "$DEGRADED" != "True" ]; then
           echo "No degradation detected"
         fi
 
