@@ -48,7 +48,7 @@ def format_slack_message(
     ratio = monitor_result.get("ratio")
     threshold = monitor_result.get("threshold", 0.85)
     message = monitor_result.get("message", "")
-    current_run_id = monitor_result.get("current_run_id", "N/A")
+    current_run_id = monitor_result.get("current_run_id") or "N/A"
     degraded = monitor_result.get("degraded", False)
 
     current_pct = f"{current:.1%}" if current is not None else "N/A"
@@ -61,15 +61,21 @@ def format_slack_message(
     else:
         header_text = f"✅ [{engine_label}] Monitoring Pass"
 
+    run_id_text = (
+        f"<{pipeline_run_url}|{current_run_id}>"
+        if pipeline_run_url and current_run_id != "N/A"
+        else current_run_id
+    )
+
     fields = [
         {"type": "mrkdwn", "text": f"*Skill:*\n{submission}"},
-        {"type": "mrkdwn", "text": f"*Run ID:*\n{current_run_id}"},
-        {"type": "mrkdwn", "text": f"*Current Score:*\n{current_pct}"},
+        {"type": "mrkdwn", "text": f"*Run ID:*\n{run_id_text}"},
+        {"type": "mrkdwn", "text": f"*Score:*\n{current_pct}"},
     ]
 
     if previous is not None:
         fields += [
-            {"type": "mrkdwn", "text": f"*Previous Score:*\n{previous_pct}"},
+            {"type": "mrkdwn", "text": f"*Baseline:*\n{previous_pct}"},
             {"type": "mrkdwn", "text": f"*Ratio:*\n{ratio_str}"},
             {"type": "mrkdwn", "text": f"*Threshold:*\n{threshold}"},
         ]

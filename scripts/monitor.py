@@ -54,6 +54,7 @@ def check_degradation(
     threshold: float = 0.85,
     current_score: float | None = None,
     eval_engine: str | None = None,
+    run_id: str | None = None,
 ) -> MonitorResult:
     """Check if the most recent run shows degradation vs the previous run.
 
@@ -140,7 +141,7 @@ def check_degradation(
         ratio=ratio,
         threshold=threshold,
         message=message,
-        current_run_id=None if external_current_score else current_run.pipeline_run_id,
+        current_run_id=run_id if external_current_score else current_run.pipeline_run_id,
         previous_run_id=previous_run.pipeline_run_id,
     )
 
@@ -185,6 +186,11 @@ def main() -> int:
         default=None,
         help="Filter historical runs by eval engine (e.g. harbor, a2a)",
     )
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Current pipeline run ID (used as current_run_id in output when --current-score is set)",
+    )
 
     args = parser.parse_args()
 
@@ -196,6 +202,7 @@ def main() -> int:
             threshold=args.threshold,
             current_score=args.current_score,
             eval_engine=args.eval_engine,
+            run_id=args.run_id,
         )
     except Exception as e:
         logger.exception("Error during monitoring check")

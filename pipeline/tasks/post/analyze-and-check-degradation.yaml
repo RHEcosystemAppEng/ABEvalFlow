@@ -304,6 +304,7 @@ spec:
           --db-url "$DATABASE_URL" \
           --current-score "$CURRENT_SCORE" \
           --eval-engine "$(params.eval-engine)" \
+          --run-id "$(params.pipeline-run-id)" \
           --output "$MONITOR_OUTPUT" || MONITOR_EXIT=$?
         if [ "$MONITOR_EXIT" -eq 2 ]; then
           echo "Monitor errored (non-blocking), continuing"
