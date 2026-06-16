@@ -289,7 +289,7 @@ spec:
         if [ -f "$REPORT_DIR/scorecard.json" ]; then
           echo ""
           echo "Scorecard written to $REPORT_DIR/scorecard.json"
-          cat "$REPORT_DIR/scorecard.json" | python3 -m json.tool | head -30
+          python3 -m json.tool "$REPORT_DIR/scorecard.json" 2>/dev/null | head -30 || true
           echo "..."
           
           python3 -c "import json,sys;sc=json.load(open(sys.argv[1]));open(sys.argv[2],'w').write(sc['recommendation']);open(sys.argv[3],'w').write(str(sc['gates_passed']));open(sys.argv[4],'w').write(str(sc['gates_failed']))" \
