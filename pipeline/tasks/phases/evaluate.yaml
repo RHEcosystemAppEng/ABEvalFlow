@@ -778,6 +778,46 @@ spec:
         oc delete deployment/$AGENT_NAME service/$AGENT_NAME --ignore-not-found=true
         exit 1
 
+    # Step 10.5: A2A - Pre-flight health check
+    - name: a2a-pre-flight
+      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "a2a" ]; then
+          echo "Skipping A2A pre-flight (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+
+        ENDPOINT_FILE="$(workspaces.source.path)/_eval_tmp/agent-endpoint"
+        if [ ! -f "$ENDPOINT_FILE" ]; then
+          echo "ERROR: No agent endpoint file found — deploy step may have failed"
+          exit 1
+        fi
+
+        AGENT_ENDPOINT=$(cat "$ENDPOINT_FILE")
+        if [ -z "$AGENT_ENDPOINT" ]; then
+          echo "ERROR: Agent endpoint is empty"
+          exit 1
+        fi
+
+        echo "=== A2A Pre-flight Health Check ==="
+        echo "Endpoint: $AGENT_ENDPOINT"
+
+        HEALTH_URL="${AGENT_ENDPOINT}/.well-known/agent.json"
+        HTTP_STATUS=$(curl -sf --max-time 15 -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
+
+        if [ "$HTTP_STATUS" != "200" ]; then
+          echo "ERROR: Agent unreachable — /.well-known/agent.json returned HTTP $HTTP_STATUS"
+          echo "Agent endpoint: $AGENT_ENDPOINT"
+          echo "This will cause the evaluation to fail. Check that the agent is running and accessible."
+          exit 1
+        fi
+
+        echo "Agent is healthy (HTTP $HTTP_STATUS)"
+
     # Step 11: A2A Agent Evaluation
     - name: a2a-eval
       image: image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env
