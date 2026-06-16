@@ -96,7 +96,7 @@ def upload_reports(
     uploaded = 0
     # Core report files (required)
     # Support both A/B reports and MCPChecker reports
-    core_files = ["report.json", "report.md", "mcpchecker-report.json"]
+    core_files = ["report.json", "report.md", "mcpchecker-report.json", "scorecard.json"]
     for filename in core_files:
         filepath = report_dir / filename
         if not filepath.exists():
