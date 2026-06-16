@@ -53,7 +53,7 @@ spec:
       default: "ab-eval-flow"
     - name: base-image
       type: string
-      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:latest"
+      default: "image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:local-env"
     # LLM params
     - name: llm-model
       type: string
