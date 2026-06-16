@@ -632,3 +632,35 @@ A single evaluation run consumes N × 2 LLM sessions (default N=20, 40 total). C
 | Platform update degrades skills silently | Regression goes undetected | Phase 9 monitoring (thresholds + optional CUSUM) with automated alerting |
 | `metadata.yaml` schema evolution | Breaks old submissions | `schema_version` field in Pydantic model |
 | `docker buildx` incompatible with OpenShift CRI-O | Build step fails in unprivileged Tekton pods | Reconcile ADR Decision #5 with Buildah; document chosen approach |
+
+---
+
+## Additional Features (Post-Plan)
+
+### Unified Scorecard (2026-06-16)
+
+Consolidated evaluation results from all engines, security gates, and quality gates into a single `scorecard.json` with configurable policy.
+
+**Components:**
+- `abevalflow/gates/base.py` — `GateResult` schema with normalized scores
+- `abevalflow/scorecard.py` — `Scorecard` model and combination logic
+- `abevalflow/engines/` — Registry + adapters for Harbor, ASE, A2A, MCPChecker
+- `abevalflow/gates/security/` — Registry + CiscoGate adapter
+- `abevalflow/gates/quality/` — Registry + LLMReviewGate adapter
+- `scripts/aggregate_scorecard.py` — Aggregation script
+- `pipeline/tasks/post/analyze-and-check-degradation.yaml` — `aggregate-scorecard` step
+
+**Configuration:** `gate_policy` in `metadata.yaml`:
+```yaml
+gate_policy:
+  default_mode: warn      # disabled | warn | block
+  combination: all_pass   # all_pass | any_pass | weighted
+  gates:
+    harbor:
+      mode: block
+      threshold: 0.0
+```
+
+**Output:** `scorecard.json` in MinIO with `recommendation: pass | warn | fail`.
+
+See `Docs/trigger_guide.md` for full configuration reference.
