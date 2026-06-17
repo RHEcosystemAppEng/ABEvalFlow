@@ -482,12 +482,13 @@ def post_pr_comment(
                 gate_lines.append(f"| {name} | {status} | {score:.2f} | {mode} |")
             
             if gate_lines:
+                gate_table = "\n".join(gate_lines)
                 scorecard_section = (
                     f"\n### Unified Scorecard\n\n"
                     f"**Recommendation:** {sc_recommendation} ({sc_reason})\n\n"
                     f"| Gate | Status | Score | Mode |\n"
                     f"|------|--------|-------|------|\n"
-                    f"{'\n'.join(gate_lines)}\n\n"
+                    f"{gate_table}\n\n"
                     f"**Gates:** {gates_passed} passed, {gates_failed} failed\n"
                 )
         except (json.JSONDecodeError, OSError) as exc:
