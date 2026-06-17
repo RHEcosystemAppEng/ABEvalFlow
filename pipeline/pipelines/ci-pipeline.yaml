@@ -78,6 +78,10 @@ spec:
     - name: enable-test-quality-review
       type: string
       default: "true"
+    - name: enable-scorecard
+      type: string
+      default: "true"
+      description: Enable unified scorecard aggregation
     - name: agent-type
       type: string
       default: "api"
@@ -171,6 +175,9 @@ spec:
     - name: fisher-p-value
       description: "Fisher's exact test p-value (e.g. 0.0271)"
       value: $(tasks.analyze.results.fisher-p-value)
+    - name: scorecard-recommendation
+      description: "Unified scorecard recommendation (pass/warn/fail)"
+      value: $(tasks.analyze.results.scorecard-recommendation)
 
   workspaces:
     - name: shared-workspace
@@ -379,6 +386,8 @@ spec:
           value: $(params.pr-number)
         - name: enable-degradation-check
           value: "false"
+        - name: enable-scorecard
+          value: $(params.enable-scorecard)
       workspaces:
         - name: source
           workspace: shared-workspace

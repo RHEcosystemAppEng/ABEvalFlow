@@ -38,6 +38,83 @@ class SecurityScanMode(StrEnum):
     BLOCK = "block"
 
 
+# Import GateMode from canonical location to avoid duplication
+from abevalflow.gates.base import GateMode  # noqa: E402
+
+
+class CombinationMode(StrEnum):
+    """How to combine multiple gate results in the scorecard."""
+
+    ALL_PASS = "all_pass"
+    ANY_PASS = "any_pass"
+    WEIGHTED = "weighted"
+
+
+class GatePolicyItem(BaseModel):
+    """Policy configuration for a single gate."""
+
+    mode: GateMode = Field(
+        default=GateMode.WARN,
+        description="Enforcement mode: disabled, warn, or block",
+    )
+    threshold: float | None = Field(
+        default=None,
+        description="Score threshold for pass/fail (gate-specific default if None)",
+    )
+    weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Weight for weighted combination mode",
+    )
+
+
+class GatePolicy(BaseModel):
+    """Policy for gate evaluation and combination.
+
+    Can be embedded in metadata.yaml under 'gate_policy' key.
+    When not specified, defaults are applied.
+
+    Example in metadata.yaml:
+
+        gate_policy:
+          default_mode: warn
+          combination: all_pass
+          gates:
+            harbor:
+              mode: block
+              threshold: 0.0
+            cisco:
+              mode: block
+            llm-review:
+              mode: warn
+              threshold: 0.6
+    """
+
+    default_mode: GateMode = Field(
+        default=GateMode.WARN,
+        description="Default mode for gates not explicitly configured",
+    )
+    combination: CombinationMode = Field(
+        default=CombinationMode.ALL_PASS,
+        description="How to combine gate results into final recommendation",
+    )
+    gates: dict[str, GatePolicyItem] = Field(
+        default_factory=dict,
+        description="Per-gate policy overrides keyed by gate name",
+    )
+
+    def get_gate_policy(self, gate_name: str) -> GatePolicyItem:
+        """Get policy for a specific gate, falling back to defaults."""
+        if gate_name in self.gates:
+            return self.gates[gate_name]
+        return GatePolicyItem(mode=self.default_mode)
+
+    def is_enabled(self, gate_name: str) -> bool:
+        """Check if a gate is enabled (not disabled)."""
+        policy = self.get_gate_policy(gate_name)
+        return policy.mode != GateMode.DISABLED
+
+
 class LlmConfig(BaseModel):
     """Optional per-submission LLM overrides.
 
@@ -294,5 +371,14 @@ class SubmissionMetadata(BaseModel):
             "MCP server configuration for MCPChecker evaluations. "
             "Required when eval_engine is 'mcpchecker'. The referenced secret "
             "must be created by the user in the ab-eval-flow namespace."
+        ),
+    )
+
+    gate_policy: GatePolicy | None = Field(
+        default=None,
+        description=(
+            "Optional policy for unified scorecard gate evaluation. "
+            "Configures which gates are blocking vs warning, thresholds, "
+            "and how results are combined. Defaults are applied when not set."
         ),
     )

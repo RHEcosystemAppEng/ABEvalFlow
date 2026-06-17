@@ -1,18 +1,16 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: abevalflow-monitoring-pipeline
+  name: abevalflow-pipeline-dev
   namespace: ab-eval-flow
   labels:
     app.kubernetes.io/name: abevalflow
-    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/version: "2.0"
 spec:
   description: >-
-    Scheduled monitoring pipeline for skill performance regression detection.
-    Runs evaluations on canary skills, compares with historical baselines,
-    and sends Slack alerts on degradation.
-    
-    Triggered by CronJob, not by PR events.
+    End-to-end A/B evaluation pipeline for AI skill submissions.
+    Restructured into clean phases: prepare → test → evaluate → analyze → store.
+    Supports Harbor (containerized A/B), ASE (LLM-as-judge), and MCPChecker (MCP server testing).
   params:
     # Repository params
     - name: repo-url
@@ -34,14 +32,14 @@ spec:
     - name: eval-engine
       type: string
       default: "harbor"
-      description: Evaluation engine (harbor, ase, mcpchecker, a2a)
+      description: Evaluation engine (harbor, ase, mcpchecker, both)
     # Harbor params
     - name: harbor-fork-url
       type: string
       default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
     - name: harbor-fork-revision
       type: string
-      default: "main"
+      default: "feature/local-environment"
     - name: eval-mode
       type: string
       default: "prebuilt"
@@ -67,9 +65,36 @@ spec:
     - name: llm-base-url
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000/v1"
+    - name: llm-generation-model
+      type: string
+      default: "claude-sonnet"
     - name: llm-agent-wrapper
       type: string
       default: ""
+    # Feature flags
+    - name: enable-ai-generation
+      type: string
+      default: "true"
+    - name: enable-test-quality-review
+      type: string
+      default: "true"
+    - name: enable-scorecard
+      type: string
+      default: "true"
+      description: Enable unified scorecard aggregation in analyze phase
+    - name: agent-type
+      type: string
+      default: "api"
+    - name: max-generation-retries
+      type: string
+      default: "3"
+    # Thresholds
+    - name: uplift-threshold
+      type: string
+      default: "0.0"
+    - name: quay-uplift-threshold
+      type: string
+      default: "-1.0"
     # ASE params
     - name: ase-iterations
       type: string
@@ -94,7 +119,7 @@ spec:
     - name: agent-endpoint
       type: string
       default: ""
-      description: A2A agent endpoint URL (if empty, deploys agent from agent-image)
+      description: A2A agent endpoint URL
     - name: agent-timeout
       type: string
       default: "120"
@@ -113,50 +138,58 @@ spec:
     - name: agent-chart-url
       type: string
       default: "https://github.com/RHEcosystemAppEng/google-lightspeed-agent.git"
-    # Thresholds
-    - name: uplift-threshold
+    # Security scanning
+    - name: security-scan
       type: string
-      default: "0.0"
-    # Monitoring params
-    - name: degradation-threshold
+      default: ""
+    # Publishing
+    - name: quay-repo
       type: string
-      default: "0.85"
-      description: >-
-        Degradation threshold as a ratio. Alert if current/previous < threshold.
-        Default 0.85 means a 15% drop triggers an alert.
-    - name: enable-scorecard
+      default: ""
+    - name: quay-ttl-days
       type: string
-      default: "true"
-      description: Enable unified scorecard aggregation
+      default: "7"
+    - name: repo-name
+      type: string
+      default: ""
+    - name: pr-number
+      type: string
+      default: ""
 
   results:
     - name: recommendation
       description: "pass or fail based on uplift threshold"
-      value: $(tasks.analyze-and-check-degradation.results.recommendation)
+      value: $(tasks.analyze.results.recommendation)
     - name: treatment-mean-reward
-      description: "Treatment variant mean reward"
-      value: $(tasks.analyze-and-check-degradation.results.treatment-mean-reward)
+      description: "Treatment variant mean reward (e.g. 0.8500)"
+      value: $(tasks.analyze.results.treatment-mean-reward)
     - name: control-mean-reward
-      description: "Control variant mean reward"
-      value: $(tasks.analyze-and-check-degradation.results.control-mean-reward)
-    - name: degraded
-      description: "true if performance degraded beyond threshold"
-      value: $(tasks.analyze-and-check-degradation.results.degraded)
+      description: "Control variant mean reward (e.g. 0.6000)"
+      value: $(tasks.analyze.results.control-mean-reward)
+    - name: mean-reward-gap
+      description: "Mean reward gap, treatment - control (e.g. +0.1500)"
+      value: $(tasks.analyze.results.mean-reward-gap)
+    - name: ttest-p-value
+      description: "Welch's t-test p-value (e.g. 0.0342)"
+      value: $(tasks.analyze.results.ttest-p-value)
+    - name: fisher-p-value
+      description: "Fisher's exact test p-value (e.g. 0.0271)"
+      value: $(tasks.analyze.results.fisher-p-value)
     - name: scorecard-recommendation
       description: "Unified scorecard recommendation (pass/warn/fail)"
-      value: $(tasks.analyze-and-check-degradation.results.scorecard-recommendation)
+      value: $(tasks.analyze.results.scorecard-recommendation)
 
   workspaces:
     - name: shared-workspace
       description: Shared PVC for all pipeline artifacts
 
   timeouts:
-    pipeline: "2h"
-    tasks: "1h30m"
+    pipeline: "4h"
+    tasks: "3h"
 
   tasks:
     # ======================================================================
-    # PHASE 1: PREPARE (clone + validate, skip generation)
+    # PHASE 1: PREPARE (clone + generate + validate)
     # ======================================================================
     - name: prepare
       taskRef:
@@ -177,25 +210,67 @@ spec:
         - name: pipeline-run-name
           value: $(context.pipelineRun.name)
         - name: enable-generation
-          value: "false"
+          value: $(params.enable-ai-generation)
         - name: llm-base-url
           value: $(params.llm-base-url)
         - name: llm-model
-          value: $(params.llm-model)
+          value: $(params.llm-generation-model)
         - name: agent-type
-          value: "api"
+          value: $(params.agent-type)
         - name: max-generation-retries
-          value: "0"
+          value: $(params.max-generation-retries)
       workspaces:
         - name: source
           workspace: shared-workspace
 
     # ======================================================================
-    # PHASE 2: EVALUATE (dispatches to harbor/ase/mcpchecker)
+    # PHASE 2: TEST (security scan + quality review, with immediate persistence)
+    # ======================================================================
+    - name: test
+      runAfter: ["prepare"]
+      taskRef:
+        name: test
+      params:
+        - name: submission-dir
+          value: $(params.submission-dir)
+        - name: submission-name
+          value: $(tasks.prepare.results.submission-name)
+        - name: eval-engine
+          value: $(params.eval-engine)
+        - name: report-prefix
+          value: $(tasks.prepare.results.report-prefix)
+        - name: pipeline-run-name
+          value: $(context.pipelineRun.name)
+        - name: pipeline-repo-url
+          value: $(params.pipeline-repo-url)
+        - name: pipeline-repo-revision
+          value: $(params.pipeline-repo-revision)
+        - name: security-scan-mode
+          value: $(params.security-scan)
+        - name: submission-security-scan
+          value: $(tasks.prepare.results.security-scan)
+        - name: submission-skip-quality-review
+          value: $(tasks.prepare.results.skip-quality-review)
+        - name: security-scan-use-llm
+          value: $(tasks.prepare.results.security-scan-use-llm)
+        - name: enable-quality-review
+          value: $(params.enable-test-quality-review)
+        - name: llm-base-url
+          value: $(params.llm-base-url)
+        - name: llm-model
+          value: $(params.llm-generation-model)
+        - name: llm-api-key
+          value: $(params.llm-api-key)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ======================================================================
+    # PHASE 3: EVALUATE (dispatches to harbor/ase/mcpchecker)
     # ======================================================================
     - name: evaluate
-      runAfter: ["prepare"]
-      timeout: "1h30m"
+      runAfter: ["test"]
+      timeout: "3h"
       taskRef:
         name: evaluate
       params:
@@ -273,9 +348,10 @@ spec:
           workspace: shared-workspace
 
     # ======================================================================
-    # PHASE 3: ANALYZE + DEGRADATION CHECK
+    # PHASE 4: ANALYZE (statistical analysis and report generation)
+    # Note: For MCPChecker, evaluate phase produces the final report directly
     # ======================================================================
-    - name: analyze-and-check-degradation
+    - name: analyze
       when:
         - input: $(params.eval-engine)
           operator: notin
@@ -297,7 +373,7 @@ spec:
         - name: uplift-threshold
           value: $(params.uplift-threshold)
         - name: security-scan-mode
-          value: "disabled"
+          value: $(tasks.test.results.security-mode)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision
@@ -305,13 +381,11 @@ spec:
         - name: llm-model
           value: $(params.llm-model)
         - name: repo-name
-          value: ""
+          value: $(params.repo-name)
         - name: pr-number
-          value: ""
+          value: $(params.pr-number)
         - name: enable-degradation-check
-          value: "true"
-        - name: degradation-threshold
-          value: $(params.degradation-threshold)
+          value: "false"
         - name: enable-scorecard
           value: $(params.enable-scorecard)
       workspaces:
@@ -319,11 +393,10 @@ spec:
           workspace: shared-workspace
 
     # ======================================================================
-    # PHASE 4: STORE (PostgreSQL persistence + MinIO artifact upload)
-    # Runs after analyze (harbor/ase) or after evaluate (mcpchecker/a2a)
+    # PHASE 5: STORE (PostgreSQL persistence + MinIO/Quay/PR publish)
     # ======================================================================
     - name: store
-      runAfter: ["analyze-and-check-degradation", "evaluate"]
+      runAfter: ["analyze", "evaluate"]
       taskRef:
         name: store
       params:
@@ -342,15 +415,15 @@ spec:
         - name: commit-sha
           value: $(params.revision)
         - name: uplift-threshold
-          value: "-1.0"
+          value: $(params.quay-uplift-threshold)
         - name: quay-repo
-          value: ""
+          value: $(params.quay-repo)
         - name: quay-ttl-days
-          value: "7"
+          value: $(params.quay-ttl-days)
         - name: repo-name
-          value: ""
+          value: $(params.repo-name)
         - name: pr-number
-          value: ""
+          value: $(params.pr-number)
         - name: pipeline-repo-url
           value: $(params.pipeline-repo-url)
         - name: pipeline-repo-revision

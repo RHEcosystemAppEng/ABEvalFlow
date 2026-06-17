@@ -1,7 +1,7 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: abevalflow-monitoring-pipeline
+  name: abevalflow-monitoring-pipeline-dev
   namespace: ab-eval-flow
   labels:
     app.kubernetes.io/name: abevalflow
@@ -127,7 +127,7 @@ spec:
     - name: enable-scorecard
       type: string
       default: "true"
-      description: Enable unified scorecard aggregation
+      description: Enable unified scorecard aggregation in analyze phase
 
   results:
     - name: recommendation

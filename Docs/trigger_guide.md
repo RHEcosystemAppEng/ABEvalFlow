@@ -275,6 +275,34 @@ name: my-skill
 security_scan: warn  # Options: disabled, warn (default), block
 ```
 
+For gate policy configuration (controls how evaluation gates combine):
+
+```yaml
+name: my-skill
+gate_policy:
+  default_mode: warn          # disabled | warn | block (default: warn)
+  combination: all_pass       # all_pass | any_pass | weighted (default: all_pass)
+  gates:
+    harbor:
+      mode: block             # Engine gate must pass for approval
+      threshold: 0.0          # Minimum uplift threshold
+    cisco:
+      mode: warn              # Security findings are advisory
+    llm-review:
+      mode: warn              # Quality review is advisory
+      threshold: 0.6          # Minimum quality score
+```
+
+Gate modes:
+- `disabled` — Gate is skipped entirely
+- `warn` — Gate runs but failures don't block the pipeline
+- `block` — Gate failures cause the scorecard to fail
+
+Combination modes:
+- `all_pass` — All blocking gates must pass (default)
+- `any_pass` — At least one blocking gate must pass
+- `weighted` — Weighted average of scores (≥0.7 pass, 0.5-0.7 warn, <0.5 fail)
+
 **Name rules:** lowercase letters, numbers, hyphens, dots, and underscores
 only. Must start with a letter or number. Examples: `my-skill`,
 `k8s-manifest-gen`, `ocp.admin.tool`.
@@ -399,6 +427,7 @@ Typical runtime: **5-30 minutes** depending on evaluation engine and task comple
 
 **MinIO (S3 object storage):**
 - `report.json` / `report.md` — evaluation report with pass rates, uplift, p-values
+- `scorecard.json` — unified verdict combining all evaluation gates (see below)
 - `security-scan.json` / `security-scan.sarif` — security scan findings
 - `generated/` — AI-generated files (instruction.md, test_outputs.py, evals.json)
 - `debug/` — trial logs, agent outputs, error traces
@@ -407,6 +436,44 @@ Typical runtime: **5-30 minutes** depending on evaluation engine and task comple
 - `analysis_results` table — evaluation summaries (pass rates, uplift, p-values)
 - `security_scans` table — security scan results per pipeline run
 - Historical results queryable via `scripts/query_results.py`
+
+### Understanding the Scorecard
+
+The pipeline evaluates your submission through multiple **gates**, each checking
+a different aspect:
+
+| Gate Type | Gate Name | What it checks |
+|-----------|-----------|----------------|
+| **Engine** | `harbor`, `ase`, `a2a`, `mcpchecker` | A/B evaluation results (uplift, pass rate) |
+| **Security** | `cisco` | Security vulnerabilities in skill code |
+| **Quality** | `llm-review` | Test coherence, coverage, clarity, feasibility |
+
+Each gate produces:
+- `passed`: boolean (did it meet its threshold?)
+- `score`: 0.0-1.0 normalized score
+- `findings`: list of issues found (for security/quality gates)
+
+The `scorecard.json` combines all gate results into a single recommendation:
+- **pass** — All blocking gates passed
+- **warn** — Warning gates failed but no blocking gates failed
+- **fail** — One or more blocking gates failed
+
+Example scorecard output:
+```json
+{
+  "recommendation": "pass",
+  "recommendation_reason": "All gates passed",
+  "gates_passed": 3,
+  "gates_failed": 0,
+  "gates": [
+    {"gate_name": "harbor", "passed": true, "score": 0.85},
+    {"gate_name": "cisco", "passed": true, "score": 1.0},
+    {"gate_name": "llm-review", "passed": true, "score": 0.78}
+  ]
+}
+```
+
+Configure gate behavior via `gate_policy` in your `metadata.yaml` (see above).
 
 ---
 

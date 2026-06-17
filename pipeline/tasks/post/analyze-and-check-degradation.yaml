@@ -79,6 +79,12 @@ spec:
       type: string
       default: "https://console-openshift-console.apps.cn-ai-lab.2vn8.p1.openshiftapps.com"
       description: Base URL for OpenShift console (for Slack message links)
+    - name: enable-scorecard
+      type: string
+      default: "false"
+      description: >-
+        When 'true', aggregate all gates into a unified scorecard after analysis.
+        Produces scorecard.json with combined engine, security, and quality gates.
   workspaces:
     - name: source
       description: Workspace containing the evaluation results and report output
@@ -101,6 +107,12 @@ spec:
       description: Whether degradation was detected (true or false)
     - name: message
       description: Human-readable degradation check result message
+    - name: scorecard-recommendation
+      description: Unified scorecard recommendation (pass/warn/fail)
+    - name: scorecard-gates-passed
+      description: Number of gates that passed
+    - name: scorecard-gates-failed
+      description: Number of gates that failed
   steps:
     - name: analyze
       image: registry.access.redhat.com/ubi9/python-311:9.6
@@ -238,6 +250,61 @@ spec:
         echo "=== Analysis complete ==="
         echo "Report: $REPORT_DIR"
         cat "$REPORT_DIR/report.md"
+
+    - name: aggregate-scorecard
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        ENABLE_SCORECARD="$(params.enable-scorecard)"
+        if [ "$ENABLE_SCORECARD" != "true" ]; then
+          echo "Scorecard aggregation disabled, skipping"
+          echo -n "skipped" > "$(results.scorecard-recommendation.path)"
+          echo -n "0" > "$(results.scorecard-gates-passed.path)"
+          echo -n "0" > "$(results.scorecard-gates-failed.path)"
+          exit 0
+        fi
+
+        echo "=== Aggregating Unified Scorecard ==="
+
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pydantic pyyaml
+
+        SUBMISSION_DIR="$(workspaces.source.path)/submissions/$(params.submission-name)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        WORKSPACE_ROOT="$(workspaces.source.path)"
+
+        python scripts/aggregate_scorecard.py \
+          --submission-dir "$SUBMISSION_DIR" \
+          --results-dir "$RESULTS_DIR" \
+          --reports-dir "$REPORT_DIR" \
+          --workspace-root "$WORKSPACE_ROOT" \
+          --eval-engine "$(params.eval-engine)" \
+          --pipeline-run-id "$(params.pipeline-run-id)"
+
+        if [ -f "$REPORT_DIR/scorecard.json" ]; then
+          echo ""
+          echo "Scorecard written to $REPORT_DIR/scorecard.json"
+          python3 -m json.tool "$REPORT_DIR/scorecard.json" 2>/dev/null | head -30 || true
+          echo "..."
+          
+          python3 -c "import json,sys;sc=json.load(open(sys.argv[1]));open(sys.argv[2],'w').write(sc['recommendation']);open(sys.argv[3],'w').write(str(sc['gates_passed']));open(sys.argv[4],'w').write(str(sc['gates_failed']))" \
+            "$REPORT_DIR/scorecard.json" \
+            "$(results.scorecard-recommendation.path)" \
+            "$(results.scorecard-gates-passed.path)" \
+            "$(results.scorecard-gates-failed.path)"
+        else
+          echo "WARNING: scorecard.json not created"
+          echo -n "error" > "$(results.scorecard-recommendation.path)"
+          echo -n "0" > "$(results.scorecard-gates-passed.path)"
+          echo -n "0" > "$(results.scorecard-gates-failed.path)"
+        fi
+
+        echo "=== Scorecard aggregation complete ==="
 
     - name: check-degradation
       image: registry.access.redhat.com/ubi9/python-311:9.6

@@ -19,7 +19,8 @@ Automated Tekton-orchestrated pipeline on OpenShift for evaluating AI skill subm
    - **ASE** — Lightweight LLM-as-judge evaluation using `evals.json` assertions (no containers, A/B comparison)
    - **MCPChecker** — MCP server/agent evaluation (single-agent, task-based verification with LLM judge)
 7. **Analyze** — Computes pass rates, uplift (gap), statistical significance (p-value).
-8. **Publish** — Stores reports to MinIO, records results to PostgreSQL.
+8. **Scorecard** — Aggregates engine, security, and quality gate results into a unified verdict (`pass`/`warn`/`fail`).
+9. **Publish** — Stores reports and `scorecard.json` to MinIO, records results to PostgreSQL.
 
 ## Repository Structure
 
@@ -67,7 +68,7 @@ my-skill-name/
 │   └── llm_judge.py     # LLM-based judge (optional)
 ├── docs/                # Reference documentation (optional)
 ├── supportive/          # Mock MCPs, data files (optional, <50MB)
-└── metadata.yaml        # Name, persona, etc. (required)
+└── metadata.yaml        # Name, persona, gate_policy, etc. (required)
 ```
 
 ### ASE Format (lightweight LLM-as-judge)
@@ -119,7 +120,7 @@ The pipeline is LLM-agnostic. Three modes are supported:
 
 ## Documentation
 
-- [Trigger Guide](Docs/trigger_guide.md) — How to submit skills for evaluation
+- [Trigger Guide](Docs/trigger_guide.md) — How to submit skills, configure gate policies, and interpret scorecard results
 - [ADR: Skill Evaluation Pipeline](Docs/ADR_Skill_Evaluation_Pipeline_and_Harbor_Execution_Strategy.txt)
 
 ## License
