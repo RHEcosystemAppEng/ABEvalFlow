@@ -110,19 +110,23 @@ def aggregate_scorecard(
     submission_name = submission_dir.name
     gates: list[GateResult] = []
 
-    # Determine which engines to process
+    # Determine which engines to process and their report directories
+    # In 'both' mode, Harbor reports are in reports_dir/harbor/, ASE in reports_dir/
     if eval_engine == "both":
-        engine_names = ["harbor", "ase"]
+        engine_configs = [
+            ("harbor", reports_dir / "harbor"),
+            ("ase", reports_dir),
+        ]
         logger.info("'both' engine mode: processing Harbor and ASE")
     else:
-        engine_names = [eval_engine]
+        engine_configs = [(eval_engine, reports_dir)]
 
     # Process all requested engines
-    for engine_name in engine_names:
+    for engine_name, engine_reports_dir in engine_configs:
         engine = get_engine(engine_name)
-        logger.info("Processing engine gate: %s", engine.name)
+        logger.info("Processing engine gate: %s (reports: %s)", engine.name, engine_reports_dir)
 
-        raw_result = engine.read_result(reports_dir)
+        raw_result = engine.read_result(engine_reports_dir)
         if raw_result:
             engine_gate = engine.to_gate_result(raw_result, policy)
             gates.append(engine_gate)
@@ -131,7 +135,7 @@ def aggregate_scorecard(
                 engine.name, engine_gate.passed, engine_gate.score
             )
         else:
-            logger.warning("No result found for engine %s", engine.name)
+            logger.warning("No result found for engine %s at %s", engine.name, engine_reports_dir)
 
     for security_gate in get_all_security_gates():
         if not policy.is_enabled(security_gate.name):

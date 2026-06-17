@@ -44,7 +44,15 @@ class A2AEngine(EvalEngine):
         raw_result: dict[str, Any],
         policy: GatePolicy,
     ) -> GateResult:
-        """Convert A2A AnalysisResult to GateResult."""
+        """Convert A2A AnalysisResult to GateResult.
+
+        Note:
+            Pass/fail is determined by comparing mean_reward against the
+            policy threshold. This is a simple numeric gate and does NOT
+            replicate the full statistical logic of analyze.py. The upstream
+            recommendation is included in the message for transparency but
+            does not affect the gate decision.
+        """
         gate_policy = policy.get_gate_policy(self.name)
         threshold = gate_policy.threshold if gate_policy.threshold is not None else 0.5
 

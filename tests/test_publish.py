@@ -286,6 +286,71 @@ class TestPostPrComment:
 
         assert ok is False
 
+    @patch("scripts.publish.urllib.request.urlopen")
+    def test_scorecard_overrides_recommendation(self, mock_urlopen, report_dir):
+        """Scorecard recommendation takes precedence over report.json."""
+        # Add scorecard with 'warn' recommendation
+        scorecard = {
+            "recommendation": "warn",
+            "recommendation_reason": "Quality gate below threshold",
+            "gates_passed": 2,
+            "gates_failed": 1,
+            "gates": [
+                {"gate_name": "harbor", "passed": True, "score": 0.85, "mode": "block"},
+                {"gate_name": "cisco", "passed": True, "score": 1.0, "mode": "warn"},
+                {"gate_name": "llm-review", "passed": False, "score": 0.55, "mode": "warn"},
+            ],
+        }
+        (report_dir / "scorecard.json").write_text(json.dumps(scorecard))
+
+        mock_resp = MagicMock()
+        mock_resp.status = 201
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        ok = post_pr_comment(
+            repo_name="org/repo",
+            pr_number="42",
+            submission_name="hello-world",
+            report_dir=report_dir,
+            github_token="ghp_test",
+        )
+
+        assert ok is True
+        # Check that the comment body contains scorecard info
+        req = mock_urlopen.call_args[0][0]
+        body = json.loads(req.data.decode())["body"]
+        assert "WARN" in body  # Scorecard recommendation overrides 'pass'
+        assert "Unified Scorecard" in body
+        assert "harbor" in body
+        assert "2 passed, 1 failed" in body
+
+    @patch("scripts.publish.urllib.request.urlopen")
+    def test_scorecard_malformed_json_handled(self, mock_urlopen, report_dir):
+        """Malformed scorecard.json is handled gracefully."""
+        (report_dir / "scorecard.json").write_text("not valid json {")
+
+        mock_resp = MagicMock()
+        mock_resp.status = 201
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        ok = post_pr_comment(
+            repo_name="org/repo",
+            pr_number="42",
+            submission_name="hello-world",
+            report_dir=report_dir,
+            github_token="ghp_test",
+        )
+
+        # Should still succeed using report.json
+        assert ok is True
+        req = mock_urlopen.call_args[0][0]
+        body = json.loads(req.data.decode())["body"]
+        assert "PASS" in body  # Falls back to report.json recommendation
+
 
 class TestCleanupImages:
     @patch("scripts.publish.subprocess.run")

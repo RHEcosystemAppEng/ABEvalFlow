@@ -487,7 +487,7 @@ def post_pr_comment(
                     f"**Recommendation:** {sc_recommendation} ({sc_reason})\n\n"
                     f"| Gate | Status | Score | Mode |\n"
                     f"|------|--------|-------|------|\n"
-                    f"{chr(10).join(gate_lines)}\n\n"
+                    f"{'\n'.join(gate_lines)}\n\n"
                     f"**Gates:** {gates_passed} passed, {gates_failed} failed\n"
                 )
         except (json.JSONDecodeError, OSError) as exc:

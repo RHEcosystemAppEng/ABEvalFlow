@@ -284,3 +284,85 @@ class TestLLMReviewGate:
 
         # In warn mode, warn recommendation passes
         assert result.passed is True
+
+    def test_block_mode_fail_recommendation_high_score(self, tmp_path):
+        """In BLOCK mode, score threshold is authoritative - fail recommendation can be overridden."""
+        review_data = {
+            "dimensions": {
+                "coherence": {"score": 0.7, "finding": "Good"},
+                "coverage": {"score": 0.65, "finding": "Acceptable"},
+            },
+            "overall_score": 0.65,  # Above default threshold of 0.6
+            "recommendation": "fail",  # LLM says fail
+            "summary": "Some concerns",
+        }
+        (tmp_path / "_ai_review.json").write_text(json.dumps(review_data))
+
+        policy = GatePolicy(
+            gates={"llm-review": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)}
+        )
+        gate = LLMReviewGate()
+        result = gate.evaluate(tmp_path, policy)
+
+        # In BLOCK mode, 0.65 >= 0.6 threshold means PASS despite fail recommendation
+        assert result.passed is True
+        assert "upstream: fail" in result.message
+
+    def test_block_mode_pass_recommendation_low_score(self, tmp_path):
+        """In BLOCK mode, score below threshold fails even if recommendation is pass."""
+        review_data = {
+            "dimensions": {
+                "coherence": {"score": 0.5, "finding": "OK"},
+            },
+            "overall_score": 0.5,  # Below threshold
+            "recommendation": "pass",  # LLM says pass
+            "summary": "Looks fine",
+        }
+        (tmp_path / "_ai_review.json").write_text(json.dumps(review_data))
+
+        policy = GatePolicy(
+            gates={"llm-review": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)}
+        )
+        gate = LLMReviewGate()
+        result = gate.evaluate(tmp_path, policy)
+
+        # In BLOCK mode, 0.5 < 0.6 threshold means FAIL despite pass recommendation
+        assert result.passed is False
+        assert "upstream: pass" in result.message
+
+    def test_block_mode_missing_artifact_fails(self, tmp_path):
+        """In BLOCK mode, missing _ai_review.json fails the gate."""
+        policy = GatePolicy(
+            gates={"llm-review": GatePolicyItem(mode=GateMode.BLOCK)}
+        )
+        gate = LLMReviewGate()
+        result = gate.evaluate(tmp_path, policy)
+
+        assert result.passed is False
+        assert "required in block mode" in result.message
+
+
+class TestCiscoGateBlockMode:
+    """Tests for CiscoGate fail-closed behavior in BLOCK mode."""
+
+    def test_block_mode_missing_artifact_fails(self, tmp_path):
+        """In BLOCK mode, missing security-scan.json fails the gate."""
+        policy = GatePolicy(
+            gates={"cisco": GatePolicyItem(mode=GateMode.BLOCK)}
+        )
+        gate = CiscoGate()
+        result = gate.evaluate(tmp_path, policy)
+
+        assert result.passed is False
+        assert "required in block mode" in result.message
+
+    def test_warn_mode_missing_artifact_passes(self, tmp_path):
+        """In WARN mode, missing security-scan.json passes the gate."""
+        policy = GatePolicy(
+            gates={"cisco": GatePolicyItem(mode=GateMode.WARN)}
+        )
+        gate = CiscoGate()
+        result = gate.evaluate(tmp_path, policy)
+
+        assert result.passed is True
+        assert "scan may have been skipped" in result.message

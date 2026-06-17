@@ -29,7 +29,21 @@ class LLMReviewGate(QualityGate):
         workspace_root: Path,
         policy: GatePolicy,
     ) -> GateResult:
-        """Evaluate LLM quality review results."""
+        """Evaluate LLM quality review results.
+
+        Mode behavior:
+            - DISABLED: Gate is skipped, returns passed=True.
+            - WARN: Gate passes unless upstream recommendation is "fail".
+            - BLOCK: Gate passes only if overall_score >= threshold.
+              In BLOCK mode, the numeric threshold is authoritative — even if
+              the LLM reviewer returns recommendation="fail", the gate can
+              still pass if the score meets the threshold. This allows
+              operators to enforce a strict numeric standard.
+
+        Missing artifact behavior:
+            - WARN mode: Returns passed=True (review may have been skipped).
+            - BLOCK mode: Returns passed=False (artifact required).
+        """
         gate_policy = policy.get_gate_policy(self.name)
         threshold = gate_policy.threshold if gate_policy.threshold is not None else 0.6
 

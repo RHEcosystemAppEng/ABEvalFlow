@@ -233,3 +233,76 @@ class TestMCPCheckerEngine:
     def test_default_threshold(self):
         engine = MCPCheckerEngine()
         assert engine.get_default_threshold() == 0.7
+
+
+class TestThresholdOverridesUpstreamRecommendation:
+    """Tests verifying that policy threshold is authoritative, not upstream recommendation."""
+
+    def test_harbor_threshold_overrides_pass_recommendation(self):
+        """Upstream says pass but gap is below custom threshold -> gate fails."""
+        report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.7, "pass_rate": 0.8},
+                "control": {"mean_reward": 0.6, "pass_rate": 0.7},
+                "mean_reward_gap": 0.1,  # Gap is 0.1
+                "recommendation": "pass",  # Upstream says pass
+            }
+        }
+        # But policy threshold is 0.2, so 0.1 < 0.2 should fail
+        policy = GatePolicy(gates={"harbor": GatePolicyItem(threshold=0.2)})
+        engine = HarborEngine()
+        gate_result = engine.to_gate_result(report, policy)
+
+        assert gate_result.passed is False  # Threshold wins
+        assert "upstream: pass" in gate_result.message
+
+    def test_harbor_threshold_overrides_fail_recommendation(self):
+        """Upstream says fail but gap meets threshold -> gate passes."""
+        report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.7, "pass_rate": 0.8},
+                "control": {"mean_reward": 0.6, "pass_rate": 0.7},
+                "mean_reward_gap": 0.1,  # Gap is 0.1
+                "recommendation": "fail",  # Upstream says fail (maybe p-value issue)
+            }
+        }
+        # Policy threshold is 0.0 (default), so 0.1 >= 0.0 should pass
+        policy = GatePolicy()
+        engine = HarborEngine()
+        gate_result = engine.to_gate_result(report, policy)
+
+        assert gate_result.passed is True  # Threshold wins
+        assert "upstream: fail" in gate_result.message
+
+    def test_ase_threshold_overrides_upstream(self):
+        """ASE engine also uses threshold, not upstream recommendation."""
+        report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.6},
+                "control": {"mean_reward": 0.5},
+                "mean_reward_gap": 0.1,
+                "recommendation": "fail",  # Upstream says fail
+            }
+        }
+        policy = GatePolicy()  # Default threshold is 0.0
+        engine = ASEEngine()
+        gate_result = engine.to_gate_result(report, policy)
+
+        assert gate_result.passed is True  # 0.1 >= 0.0
+        assert "upstream: fail" in gate_result.message
+
+    def test_a2a_threshold_overrides_upstream(self):
+        """A2A engine uses mean_reward against threshold."""
+        report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.6, "pass_rate": 0.7},
+                "recommendation": "pass",  # Upstream says pass
+            }
+        }
+        # A2A default threshold is 0.5, but set higher
+        policy = GatePolicy(gates={"a2a": GatePolicyItem(threshold=0.7)})
+        engine = A2AEngine()
+        gate_result = engine.to_gate_result(report, policy)
+
+        assert gate_result.passed is False  # 0.6 < 0.7
+        assert "upstream: pass" in gate_result.message
