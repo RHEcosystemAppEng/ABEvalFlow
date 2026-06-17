@@ -255,3 +255,71 @@ class TestScorecard:
         assert data["recommendation"] == "pass"
         assert data["gates_passed"] == 1
         assert len(data["gates"]) == 1
+
+
+class TestBothModeAggregation:
+    """Tests for 'both' engine mode in aggregate_scorecard."""
+
+    def test_both_mode_reads_correct_reports(self, tmp_path):
+        """In 'both' mode, Harbor reads from harbor/ subdir, ASE from root."""
+        from scripts.aggregate_scorecard import aggregate_scorecard
+
+        # Setup submission dir with metadata
+        submission_dir = tmp_path / "submissions" / "test-skill"
+        submission_dir.mkdir(parents=True)
+        (submission_dir / "metadata.yaml").write_text("name: test-skill\n")
+
+        # Setup reports dir with distinct Harbor and ASE reports
+        reports_dir = tmp_path / "reports" / "test-skill"
+        reports_dir.mkdir(parents=True)
+
+        # Harbor report in harbor/ subdir with gap=0.3
+        harbor_dir = reports_dir / "harbor"
+        harbor_dir.mkdir()
+        harbor_report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.9},
+                "control": {"mean_reward": 0.6},
+                "mean_reward_gap": 0.3,
+                "recommendation": "pass",
+            }
+        }
+        (harbor_dir / "report.json").write_text(json.dumps(harbor_report))
+
+        # ASE report in root with gap=0.1
+        ase_report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.7},
+                "control": {"mean_reward": 0.6},
+                "mean_reward_gap": 0.1,
+                "recommendation": "pass",
+            }
+        }
+        (reports_dir / "report.json").write_text(json.dumps(ase_report))
+
+        # Run aggregation in 'both' mode
+        scorecard = aggregate_scorecard(
+            submission_dir=submission_dir,
+            results_dir=tmp_path / "results",
+            reports_dir=reports_dir,
+            workspace_root=tmp_path,
+            eval_engine="both",
+            pipeline_run_id="test-run",
+        )
+
+        # Should have 2 engine gates
+        engine_gates = [g for g in scorecard.gates if g.gate_type == GateType.ENGINE]
+        assert len(engine_gates) == 2
+
+        # Find each engine's gate
+        harbor_gate = next(g for g in engine_gates if g.gate_name == "harbor")
+        ase_gate = next(g for g in engine_gates if g.gate_name == "ase")
+
+        # Verify each read the correct report (different gaps)
+        # Harbor should have 0.9 treatment mean (score), ASE should have 0.7
+        assert harbor_gate.score == 0.9  # Harbor's treatment mean_reward
+        assert ase_gate.score == 0.7  # ASE's treatment mean_reward
+
+        # Both should pass with default threshold 0.0
+        assert harbor_gate.passed is True  # gap 0.3 >= 0.0
+        assert ase_gate.passed is True  # gap 0.1 >= 0.0
