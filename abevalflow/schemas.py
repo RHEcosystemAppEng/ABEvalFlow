@@ -38,12 +38,8 @@ class SecurityScanMode(StrEnum):
     BLOCK = "block"
 
 
-class GateMode(StrEnum):
-    """Gate enforcement mode for unified scorecard."""
-
-    DISABLED = "disabled"
-    WARN = "warn"
-    BLOCK = "block"
+# Import GateMode from canonical location to avoid duplication
+from abevalflow.gates.base import GateMode  # noqa: E402
 
 
 class CombinationMode(StrEnum):

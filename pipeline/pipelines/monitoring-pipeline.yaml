@@ -124,6 +124,10 @@ spec:
       description: >-
         Degradation threshold as a ratio. Alert if current/previous < threshold.
         Default 0.85 means a 15% drop triggers an alert.
+    - name: enable-scorecard
+      type: string
+      default: "true"
+      description: Enable unified scorecard aggregation
 
   results:
     - name: recommendation
@@ -138,6 +142,9 @@ spec:
     - name: degraded
       description: "true if performance degraded beyond threshold"
       value: $(tasks.analyze-and-check-degradation.results.degraded)
+    - name: scorecard-recommendation
+      description: "Unified scorecard recommendation (pass/warn/fail)"
+      value: $(tasks.analyze-and-check-degradation.results.scorecard-recommendation)
 
   workspaces:
     - name: shared-workspace
@@ -305,6 +312,8 @@ spec:
           value: "true"
         - name: degradation-threshold
           value: $(params.degradation-threshold)
+        - name: enable-scorecard
+          value: $(params.enable-scorecard)
       workspaces:
         - name: source
           workspace: shared-workspace

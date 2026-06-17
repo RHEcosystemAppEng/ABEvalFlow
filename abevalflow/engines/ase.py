@@ -9,7 +9,7 @@ from typing import Any
 
 from abevalflow.engines import register_engine
 from abevalflow.engines.base import EvalEngine
-from abevalflow.gates.base import GateMode, GateResult, GateType
+from abevalflow.gates.base import GateResult, GateType
 from abevalflow.schemas import GatePolicy
 
 logger = logging.getLogger(__name__)
@@ -54,15 +54,16 @@ class ASEEngine(EvalEngine):
         if mean_reward_gap is None:
             mean_reward_gap = summary.get("uplift", 0.0)
 
-        recommendation = summary.get("recommendation", "fail")
-        passed = recommendation == "pass"
-
         treatment_mean = treatment.get("mean_reward", 0.0) or 0.0
         score = min(1.0, max(0.0, treatment_mean))
 
+        # Compute pass/fail from policy threshold, not upstream recommendation
+        passed = mean_reward_gap >= threshold
+
+        upstream_recommendation = summary.get("recommendation", "unknown")
         message = (
-            f"ASE A/B: treatment mean_reward={treatment_mean:.3f}, "
-            f"gap={mean_reward_gap:.3f}, threshold={threshold:.3f}"
+            f"ASE A/B: gap={mean_reward_gap:.3f} >= threshold={threshold:.3f} -> "
+            f"{'PASS' if passed else 'FAIL'} (upstream: {upstream_recommendation})"
         )
 
         return GateResult(

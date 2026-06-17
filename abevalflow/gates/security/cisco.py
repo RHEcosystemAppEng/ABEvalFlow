@@ -48,6 +48,19 @@ class CiscoGate(SecurityGate):
 
         scan_path = reports_dir / "security-scan.json"
         if not scan_path.exists():
+            # In BLOCK mode, missing artifacts fail closed for security
+            if gate_policy.mode == GateMode.BLOCK:
+                return GateResult(
+                    gate_type=GateType.SECURITY,
+                    gate_name=self.name,
+                    passed=False,
+                    score=0.0,
+                    mode=gate_policy.mode,
+                    findings=[],
+                    details={"scan_path": str(scan_path), "status": "not_found"},
+                    message="FAIL: security-scan.json missing (required in block mode)",
+                )
+            # In WARN mode, missing artifacts pass (scan may have been skipped)
             return GateResult(
                 gate_type=GateType.SECURITY,
                 gate_name=self.name,

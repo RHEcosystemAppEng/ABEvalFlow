@@ -428,6 +428,8 @@ def post_pr_comment(
 
     Uses the GitHub REST API via ``urllib`` (no ``gh`` CLI required).
     ``github_token`` falls back to the ``GITHUB_TOKEN`` environment variable.
+    
+    If scorecard.json exists, its recommendation takes precedence over report.json.
     """
     import os
 
@@ -454,6 +456,43 @@ def post_pr_comment(
     uplift = summary.get("uplift", 0.0)
     provenance = report.get("provenance", {})
 
+    # Check for scorecard and use its recommendation if available
+    scorecard_section = ""
+    scorecard_path = report_dir / "scorecard.json"
+    if scorecard_path.exists():
+        try:
+            scorecard = json.loads(scorecard_path.read_text())
+            sc_recommendation = scorecard.get("recommendation", "").upper()
+            sc_reason = scorecard.get("recommendation_reason", "")
+            gates_passed = scorecard.get("gates_passed", 0)
+            gates_failed = scorecard.get("gates_failed", 0)
+            
+            # Scorecard recommendation takes precedence
+            if sc_recommendation:
+                recommendation = sc_recommendation
+            
+            # Build gate summary
+            gates = scorecard.get("gates", [])
+            gate_lines = []
+            for gate in gates:
+                status = "✅" if gate.get("passed") else "❌"
+                name = gate.get("gate_name", "unknown")
+                score = gate.get("score", 0.0)
+                mode = gate.get("mode", "warn")
+                gate_lines.append(f"| {name} | {status} | {score:.2f} | {mode} |")
+            
+            if gate_lines:
+                scorecard_section = (
+                    f"\n### Unified Scorecard\n\n"
+                    f"**Recommendation:** {sc_recommendation} ({sc_reason})\n\n"
+                    f"| Gate | Status | Score | Mode |\n"
+                    f"|------|--------|-------|------|\n"
+                    f"{chr(10).join(gate_lines)}\n\n"
+                    f"**Gates:** {gates_passed} passed, {gates_failed} failed\n"
+                )
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read scorecard.json: %s", exc)
+
     comment_body = (
         f"## AB Evaluation Results: `{submission_name}`\n\n"
         f"| Metric | Treatment | Control |\n"
@@ -466,6 +505,7 @@ def post_pr_comment(
         f"**Recommendation:** {recommendation}  \n"
         f"**Pipeline Run:** `{provenance.get('pipeline_run_id', 'N/A')}`  \n"
         f"**Commit:** `{provenance.get('commit_sha', 'N/A')[:12] if provenance.get('commit_sha') else 'N/A'}`\n"
+        f"{scorecard_section}"
     )
 
     url = f"https://api.github.com/repos/{repo_name}/issues/{pr_number}/comments"

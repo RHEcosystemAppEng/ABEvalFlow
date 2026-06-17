@@ -9,7 +9,7 @@ from typing import Any
 
 from abevalflow.engines import register_engine
 from abevalflow.engines.base import EvalEngine
-from abevalflow.gates.base import GateMode, GateResult, GateType
+from abevalflow.gates.base import GateResult, GateType
 from abevalflow.schemas import GatePolicy
 
 logger = logging.getLogger(__name__)
@@ -54,14 +54,15 @@ class A2AEngine(EvalEngine):
         mean_reward = treatment.get("mean_reward", 0.0) or 0.0
         pass_rate = treatment.get("pass_rate", 0.0) or 0.0
 
-        recommendation = summary.get("recommendation", "fail")
-        passed = recommendation == "pass"
-
         score = min(1.0, max(0.0, mean_reward))
 
+        # Compute pass/fail from policy threshold, not upstream recommendation
+        passed = mean_reward >= threshold
+
+        upstream_recommendation = summary.get("recommendation", "unknown")
         message = (
-            f"A2A: mean_reward={mean_reward:.3f}, "
-            f"pass_rate={pass_rate:.3f}, threshold={threshold:.3f}"
+            f"A2A: mean_reward={mean_reward:.3f} >= threshold={threshold:.3f} -> "
+            f"{'PASS' if passed else 'FAIL'} (upstream: {upstream_recommendation}, pass_rate={pass_rate:.3f})"
         )
 
         return GateResult(

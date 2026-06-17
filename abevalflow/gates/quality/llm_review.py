@@ -47,6 +47,19 @@ class LLMReviewGate(QualityGate):
 
         review_path = workspace_root / "_ai_review.json"
         if not review_path.exists():
+            # In BLOCK mode, missing artifacts fail closed for quality
+            if gate_policy.mode == GateMode.BLOCK:
+                return GateResult(
+                    gate_type=GateType.QUALITY,
+                    gate_name=self.name,
+                    passed=False,
+                    score=0.0,
+                    mode=gate_policy.mode,
+                    findings=[],
+                    details={"review_path": str(review_path), "status": "not_found"},
+                    message="FAIL: _ai_review.json missing (required in block mode)",
+                )
+            # In WARN mode, missing artifacts pass (review may have been skipped)
             return GateResult(
                 gate_type=GateType.QUALITY,
                 gate_name=self.name,
@@ -103,12 +116,13 @@ class LLMReviewGate(QualityGate):
                     details={"score": dim_score},
                 ))
 
-        if recommendation == "fail":
-            passed = False
-        elif recommendation == "warn" and gate_policy.mode == GateMode.BLOCK:
+        # In BLOCK mode, threshold is authoritative for pass/fail
+        # In WARN mode, only hard "fail" recommendations fail the gate
+        if gate_policy.mode == GateMode.BLOCK:
             passed = overall_score >= threshold
         else:
-            passed = True
+            # WARN mode: pass unless explicit "fail" recommendation
+            passed = recommendation != "fail"
 
         summary = review_data.get("summary", "")
         dimension_scores = {
@@ -116,9 +130,10 @@ class LLMReviewGate(QualityGate):
             for name, data in dimensions.items()
         }
 
+        comparison = ">=" if passed else "<"
         message = (
-            f"LLM review: overall_score={overall_score:.2f}, "
-            f"recommendation={recommendation}, threshold={threshold:.2f}"
+            f"LLM review: score={overall_score:.2f} {comparison} threshold={threshold:.2f} -> "
+            f"{'PASS' if passed else 'FAIL'} (upstream: {recommendation})"
         )
         if low_scores:
             message += f" (low: {', '.join(low_scores)})"

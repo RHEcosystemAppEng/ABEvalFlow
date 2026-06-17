@@ -4,6 +4,12 @@
 Collects results from the evaluation engine, security gates, and quality gates,
 then applies the configured policy to produce a single recommendation.
 
+Note:
+    Currently, MCPChecker submissions do not produce a scorecard because the
+    analyze task (which runs this script) is skipped for MCPChecker. This is
+    a known limitation. To fix it, the scorecard step would need to be
+    extracted into a standalone task that runs after evaluate for all engines.
+
 Usage::
 
     python scripts/aggregate_scorecard.py \\
@@ -92,7 +98,7 @@ def aggregate_scorecard(
         results_dir: Path to eval-results/{submission-name}/
         reports_dir: Path to reports/{submission-name}/
         workspace_root: Path to workspace root (for _ai_review.json)
-        eval_engine: Primary evaluation engine name
+        eval_engine: Primary evaluation engine name (or "both" for Harbor+ASE)
         pipeline_run_id: Tekton PipelineRun ID
 
     Returns:
@@ -104,19 +110,28 @@ def aggregate_scorecard(
     submission_name = submission_dir.name
     gates: list[GateResult] = []
 
-    engine = get_engine(eval_engine)
-    logger.info("Processing engine gate: %s", engine.name)
-
-    raw_result = engine.read_result(reports_dir)
-    if raw_result:
-        engine_gate = engine.to_gate_result(raw_result, policy)
-        gates.append(engine_gate)
-        logger.info(
-            "Engine %s: passed=%s, score=%.3f",
-            engine.name, engine_gate.passed, engine_gate.score
-        )
+    # Determine which engines to process
+    if eval_engine == "both":
+        engine_names = ["harbor", "ase"]
+        logger.info("'both' engine mode: processing Harbor and ASE")
     else:
-        logger.warning("No result found for engine %s", engine.name)
+        engine_names = [eval_engine]
+
+    # Process all requested engines
+    for engine_name in engine_names:
+        engine = get_engine(engine_name)
+        logger.info("Processing engine gate: %s", engine.name)
+
+        raw_result = engine.read_result(reports_dir)
+        if raw_result:
+            engine_gate = engine.to_gate_result(raw_result, policy)
+            gates.append(engine_gate)
+            logger.info(
+                "Engine %s: passed=%s, score=%.3f",
+                engine.name, engine_gate.passed, engine_gate.score
+            )
+        else:
+            logger.warning("No result found for engine %s", engine.name)
 
     for security_gate in get_all_security_gates():
         if not policy.is_enabled(security_gate.name):
@@ -222,19 +237,13 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if args.eval_engine == "both":
-        logger.info("'both' engine mode: processing Harbor as primary")
-        primary_engine = "harbor"
-    else:
-        primary_engine = args.eval_engine
-
     try:
         scorecard = aggregate_scorecard(
             submission_dir=args.submission_dir,
             results_dir=args.results_dir,
             reports_dir=args.reports_dir,
             workspace_root=args.workspace_root,
-            eval_engine=primary_engine,
+            eval_engine=args.eval_engine,
             pipeline_run_id=args.pipeline_run_id,
         )
 
