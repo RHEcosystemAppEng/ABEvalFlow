@@ -45,6 +45,10 @@ spec:
     - name: llm-model
       type: string
       default: "claude-sonnet"
+    - name: llm-api-key
+      type: string
+      default: ""
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
     - name: agent-type
       type: string
       default: "api"
@@ -135,16 +139,14 @@ spec:
           value: "$(params.eval-engine)"
         - name: ENABLE_GENERATION
           value: "$(params.enable-generation)"
-        - name: LLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: llm-credentials
-              key: api-key
-              optional: true
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         echo "=== PREPARE PHASE: Generate Tests ==="
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        export LLM_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-name)")"
+        echo "Using LLM correlation key: sk-run-*** (derived from pipeline run)"
         
         if [ "$ENABLE_GENERATION" != "true" ]; then
           echo "Generation disabled, skipping"

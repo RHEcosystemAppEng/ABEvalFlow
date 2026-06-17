@@ -34,6 +34,14 @@ spec:
       type: string
       default: "claude-sonnet-4-20250514"
       description: Model identifier for the LLM
+    - name: llm-api-key
+      type: string
+      default: ""
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
+    - name: pipeline-run-name
+      type: string
+      default: ""
+      description: PipelineRun name for LLM correlation key generation
     - name: agent-type
       type: string
       default: "api"
@@ -79,18 +87,15 @@ spec:
           value: "$(params.agent-type)"
         - name: EVAL_ENGINE
           value: "$(params.eval-engine)"
-        - name: LLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: llm-credentials
-              key: api-key
-              optional: true
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
         WORKSPACE_DIR="$(workspaces.source.path)"
+
+        export LLM_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-name)")"
+        echo "Using LLM correlation key for test generation"
 
         cd "$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pydantic pyyaml openai pytest

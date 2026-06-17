@@ -69,7 +69,8 @@ spec:
       default: "http://litellm.ab-eval-flow.svc:4000"
     - name: llm-api-key
       type: string
-      default: "mock"
+      default: ""
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
     - name: llm-agent-wrapper
       type: string
       default: ""
@@ -343,6 +344,10 @@ spec:
         cd "$PIPELINE_DIR"
         export PYTHONPATH="$PIPELINE_DIR"
         
+        LLM_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-id)")"
+        export LLM_API_KEY
+        echo "Using LLM correlation key for Harbor eval"
+        
         TREATMENT_REF=$(cat "$(workspaces.source.path)/_eval_tmp/treatment-image-ref" 2>/dev/null || echo "")
         CONTROL_REF=$(cat "$(workspaces.source.path)/_eval_tmp/control-image-ref" 2>/dev/null || echo "")
         
@@ -357,12 +362,12 @@ spec:
           --control-image-ref "$CONTROL_REF" \
           --llm-model "$(params.llm-model)" \
           --llm-api-base "$(params.llm-api-base)" \
-          --llm-api-key "$(params.llm-api-key)"
+          --llm-api-key "$LLM_API_KEY"
         
         mkdir -p "$RESULTS_DIR/treatment" "$RESULTS_DIR/control"
         
         # Export LLM config for claude-code agent (Harbor reads from os.environ)
-        export ANTHROPIC_API_KEY="$(params.llm-api-key)"
+        export ANTHROPIC_API_KEY="$LLM_API_KEY"
         export ANTHROPIC_BASE_URL="$(params.llm-api-base)"
         
         echo "=== Running treatment evaluation ==="
@@ -414,8 +419,6 @@ spec:
     - name: ase-eval
       image: registry.access.redhat.com/ubi9/nodejs-20:latest
       env:
-        - name: OPENAI_API_KEY
-          value: "$(params.llm-api-key)"
         - name: PARAM_LLM_MODEL
           value: "$(params.llm-model)"
         - name: PARAM_LLM_API_BASE
@@ -436,6 +439,11 @@ spec:
         fi
         
         echo "=== EVALUATE PHASE: ASE Evaluation ==="
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        export OPENAI_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-id)")"
+        echo "Using LLM correlation key for ASE eval"
+        
         npm install --global agent-skills-eval 2>&1 | tail -3
         
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"

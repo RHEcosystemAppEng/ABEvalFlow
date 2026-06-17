@@ -32,8 +32,8 @@ spec:
       description: Base URL of the LLM API proxy
     - name: llm-api-key
       type: string
-      default: "mock"
-      description: API key for the LLM provider (mock for LiteLLM proxy)
+      default: ""
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
     - name: iterations
       type: string
       default: "5"
@@ -54,6 +54,10 @@ spec:
       type: string
       default: "0.0"
       description: Minimum uplift for a pass recommendation
+    - name: pipeline-run-id
+      type: string
+      default: ""
+      description: PipelineRun name for LLM correlation key generation
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions repository
@@ -67,12 +71,19 @@ spec:
   steps:
     - name: run-ase-evaluation
       image: registry.access.redhat.com/ubi9/nodejs-20:latest
-      env:
-        - name: OPENAI_API_KEY
-          value: "$(params.llm-api-key)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
+
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -x "$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" ]; then
+          export OPENAI_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-id)")"
+        elif [ -z "$(params.llm-api-key)" ]; then
+          export OPENAI_API_KEY="sk-run-$(params.pipeline-run-id)"
+        else
+          export OPENAI_API_KEY="$(params.llm-api-key)"
+        fi
+        echo "Using LLM correlation key for ASE eval"
 
         # --- 1. Install agent-skills-eval ---
         echo "=== Installing agent-skills-eval ==="

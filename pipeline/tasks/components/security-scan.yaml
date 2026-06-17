@@ -38,7 +38,7 @@ spec:
     - name: llm-api-key
       type: string
       default: ""
-      description: LLM API key (required when use-llm is true).
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
     - name: llm-model
       type: string
       default: "claude-sonnet"
@@ -118,6 +118,16 @@ spec:
 
         mkdir -p "$REPORT_DIR"
 
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        if [ -x "$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" ]; then
+          LLM_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-name)")"
+        elif [ -z "$(params.llm-api-key)" ]; then
+          LLM_API_KEY="sk-run-$(params.pipeline-run-name)"
+        else
+          LLM_API_KEY="$(params.llm-api-key)"
+        fi
+        echo "Using LLM correlation key for security scan"
+
         echo "=== Installing Cisco skill-scanner ==="
         pip install --quiet --no-cache-dir 'cisco-ai-skill-scanner==2.0.11' 2>&1 | tail -3
 
@@ -157,8 +167,8 @@ spec:
           # Set model and API config via env vars
           # openai/ prefix tells LiteLLM library to route through OPENAI_BASE_URL
           export SKILL_SCANNER_LLM_MODEL="openai/$(params.llm-model)"
-          export SKILL_SCANNER_LLM_API_KEY="$(params.llm-api-key)"
-          export OPENAI_API_KEY="$(params.llm-api-key)"
+          export SKILL_SCANNER_LLM_API_KEY="$LLM_API_KEY"
+          export OPENAI_API_KEY="$LLM_API_KEY"
           export OPENAI_BASE_URL="$(params.llm-api-base)"
           echo "Using LLM model: openai/$(params.llm-model)"
         fi

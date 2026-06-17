@@ -10,5 +10,5 @@ data:
   # For non-Claude models (llama, etc.), set llm-agent-wrapper to opencode or qwen-coder.
   llm-model: "claude-sonnet"
   llm-api-base: "http://litellm.ab-eval-flow.svc:4000"
-  llm-api-key: "mock"
+  llm-api-key: ""
   llm-agent-wrapper: ""

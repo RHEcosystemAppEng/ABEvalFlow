@@ -1,0 +1,33 @@
+# Reference OpenTelemetry Collector configuration for ABEvalFlow LLM traces.
+# Clusters with an existing collector can skip deploying this; point LiteLLM
+# general_settings.otel_endpoint at your collector instead.
+#
+# Apply only if you need a dedicated collector in the monitoring namespace.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger-collector.monitoring.svc:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger, debug]

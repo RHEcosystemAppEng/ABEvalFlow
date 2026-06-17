@@ -60,6 +60,7 @@ spec:
     - name: llm-api-key
       type: string
       default: ""
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
     - name: minio-endpoint
       type: string
       default: "minio.ab-eval-flow.svc:9000"
@@ -141,12 +142,14 @@ spec:
               name: ab-eval-db-credentials
               key: database-url
               optional: true
-        - name: LLM_API_KEY
-          value: "$(params.llm-api-key)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         echo "=== TEST PHASE: Security Scan ==="
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        export LLM_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-name)")"
+        echo "Using LLM correlation key for security scan"
         
         EVAL_ENGINE="$(params.eval-engine)"
         if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
@@ -286,13 +289,14 @@ spec:
     # Step 3: Quality review
     - name: quality-review
       image: registry.access.redhat.com/ubi9/python-311:9.6
-      env:
-        - name: LLM_API_KEY
-          value: "$(params.llm-api-key)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         echo "=== TEST PHASE: Quality Review ==="
+        
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        export LLM_API_KEY="$("$PIPELINE_DIR/scripts/resolve_llm_api_key.sh" "$(params.llm-api-key)" "$(params.pipeline-run-name)")"
+        echo "Using LLM correlation key for quality review"
         
         EVAL_ENGINE="$(params.eval-engine)"
         ENABLE_REVIEW="$(params.enable-quality-review)"

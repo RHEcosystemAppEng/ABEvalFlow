@@ -20,6 +20,12 @@ data:
       set_verbose: false
       num_retries: 2
       request_timeout: 120
+      success_callback: ["otel"]
+      failure_callback: ["otel"]
+      service_callback: []
 
     general_settings:
       master_key: "os.environ/LITELLM_MASTER_KEY"
+      otel_exporter: otlp_http
+      otel_endpoint: "http://otel-collector.monitoring.svc:4318"
+      otel_headers: ""

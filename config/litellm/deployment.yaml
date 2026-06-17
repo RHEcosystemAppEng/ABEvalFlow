@@ -37,6 +37,10 @@ spec:
                   key: LITELLM_MASTER_KEY
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /app/credentials/gcp-sa-key.json
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.monitoring.svc:4318"
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: ""
           volumeMounts:
             - name: config
               mountPath: /app/config

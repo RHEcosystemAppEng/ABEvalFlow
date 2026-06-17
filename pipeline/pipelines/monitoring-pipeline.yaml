@@ -63,7 +63,8 @@ spec:
       default: "http://litellm.ab-eval-flow.svc:4000"
     - name: llm-api-key
       type: string
-      default: "mock"
+      default: ""
+      description: "LLM API key. If empty, auto-generated from PipelineRun name for correlation."
     - name: llm-base-url
       type: string
       default: "http://litellm.ab-eval-flow.svc:4000/v1"
@@ -182,6 +183,8 @@ spec:
           value: $(params.llm-base-url)
         - name: llm-model
           value: $(params.llm-model)
+        - name: llm-api-key
+          value: $(params.llm-api-key)
         - name: agent-type
           value: "api"
         - name: max-generation-retries
