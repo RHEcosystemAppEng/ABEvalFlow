@@ -33,14 +33,14 @@ gate_policy:
     bearer_token: ${COMPASS_API_TOKEN}  # from env/secret
   
   gates:
-    harbor:
+    evaluation:          # category name (engine selected by eval-engine param)
       mode: block
       threshold: 0.0
       push_fact: true    # Enable fact pushing for this gate
-    cisco:
+    security:            # category name (uses cisco scanner)
       mode: block
       push_fact: true    # Enable fact pushing for this gate
-    llm-review:
+    quality:             # category name (uses llm-review)
       mode: warn
       push_fact: false   # Disable (default)
 ```

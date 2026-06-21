@@ -113,10 +113,9 @@ class GatePolicy(BaseModel):
     When not specified, defaults are applied.
 
     Gate naming:
-        Gate results use category-based names (evaluation, security, quality)
-        with implementation details in the result. Policy configuration still
-        uses implementation names (harbor, cisco, llm-review) for specific
-        targeting of individual gates.
+        Gates are configured by category: evaluation, security, quality.
+        The specific implementation (harbor, cisco, llm-review) is determined
+        automatically based on the eval-engine and available scanners.
 
     Example in metadata.yaml:
 
@@ -126,15 +125,16 @@ class GatePolicy(BaseModel):
           push_facts:
             endpoint: https://compass.stage.redhat.com/api/soundcheck/facts/
             entity_ref: component:default/abevalflow
+            bearer_token: ${COMPASS_API_TOKEN}
           gates:
-            harbor:       # implementation name (produces evaluation_harbor fact)
+            evaluation:   # category name (auto-selects engine based on eval-engine param)
               mode: block
               threshold: 0.0
               push_fact: true
-            cisco:        # implementation name (produces security_cisco fact)
+            security:     # category name (uses cisco scanner)
               mode: block
               push_fact: true
-            llm-review:   # implementation name (produces quality_llm-review fact)
+            quality:      # category name (uses llm-review)
               mode: warn
               threshold: 0.6
     """

@@ -100,8 +100,8 @@ def _maybe_push_fact(
     Returns:
         FactPushResult if push was attempted, None if skipped
     """
-    policy_key = gate_result.get_policy_key()
-    if not policy.should_push_fact(policy_key):
+    # Policy is keyed by category (gate_name), not implementation (policy_key)
+    if not policy.should_push_fact(gate_result.gate_name):
         return None
 
     if policy.push_facts is None:
@@ -109,12 +109,11 @@ def _maybe_push_fact(
 
     result = push_gate_fact_from_config(gate_result, policy.push_facts)
     if result.success:
-        logger.info("Pushed fact for gate %s (%s) to Compass", gate_result.gate_name, policy_key)
+        logger.info("Pushed fact for gate %s to Compass", gate_result.gate_name)
     else:
         logger.warning(
-            "Failed to push fact for gate %s (%s): %s",
+            "Failed to push fact for gate %s: %s",
             gate_result.gate_name,
-            policy_key,
             result.error,
         )
     return result
