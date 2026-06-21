@@ -9,6 +9,7 @@ Three types exist:
 Each gate produces a GateResult with a normalized score and pass/fail status.
 """
 
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -100,4 +101,8 @@ class GateResult(BaseModel):
     message: str | None = Field(
         default=None,
         description="Human-readable summary of the gate result",
+    )
+    evaluated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp when the gate was evaluated",
     )

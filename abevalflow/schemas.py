@@ -50,6 +50,31 @@ class CombinationMode(StrEnum):
     WEIGHTED = "weighted"
 
 
+class PushFactsConfig(BaseModel):
+    """Configuration for pushing gate results to Compass Facts API.
+
+    When endpoint is set, gates with push_fact=True will POST their
+    results as Soundcheck facts after evaluation completes.
+
+    Example:
+        push_facts:
+          endpoint: https://compass.stage.redhat.com/api/soundcheck/facts/
+          entity_ref: component:default/abevalflow
+          fact_ref_prefix: catalog:default/abevalflow_
+    """
+
+    endpoint: str = Field(
+        description="Compass Facts API URL",
+    )
+    entity_ref: str = Field(
+        description="Compass entity reference (e.g. component:default/abevalflow)",
+    )
+    fact_ref_prefix: str = Field(
+        default="catalog:default/abevalflow_",
+        description="Prefix for fact references. Gate name is appended",
+    )
+
+
 class GatePolicyItem(BaseModel):
     """Policy configuration for a single gate."""
 
@@ -66,6 +91,10 @@ class GatePolicyItem(BaseModel):
         ge=0.0,
         description="Weight for weighted combination mode",
     )
+    push_fact: bool = Field(
+        default=False,
+        description="Push gate result to Compass Facts API (requires push_facts config)",
+    )
 
 
 class GatePolicy(BaseModel):
@@ -79,12 +108,17 @@ class GatePolicy(BaseModel):
         gate_policy:
           default_mode: warn
           combination: all_pass
+          push_facts:
+            endpoint: https://compass.stage.redhat.com/api/soundcheck/facts/
+            entity_ref: component:default/abevalflow
           gates:
             harbor:
               mode: block
               threshold: 0.0
+              push_fact: true
             cisco:
               mode: block
+              push_fact: true
             llm-review:
               mode: warn
               threshold: 0.6
@@ -97,6 +131,10 @@ class GatePolicy(BaseModel):
     combination: CombinationMode = Field(
         default=CombinationMode.ALL_PASS,
         description="How to combine gate results into final recommendation",
+    )
+    push_facts: PushFactsConfig | None = Field(
+        default=None,
+        description="Compass Facts API configuration. None disables fact pushing.",
     )
     gates: dict[str, GatePolicyItem] = Field(
         default_factory=dict,
@@ -113,6 +151,17 @@ class GatePolicy(BaseModel):
         """Check if a gate is enabled (not disabled)."""
         policy = self.get_gate_policy(gate_name)
         return policy.mode != GateMode.DISABLED
+
+    def should_push_fact(self, gate_name: str) -> bool:
+        """Check if a gate should push its result to Compass."""
+        if self.push_facts is None:
+            return False
+        policy = self.get_gate_policy(gate_name)
+        return policy.push_fact
+
+    def get_gates_with_push_fact(self) -> list[str]:
+        """Return list of gate names configured to push facts."""
+        return [name for name, policy in self.gates.items() if policy.push_fact]
 
 
 class LlmConfig(BaseModel):
