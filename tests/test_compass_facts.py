@@ -10,6 +10,7 @@ import pytest
 from abevalflow.compass_facts import (
     FactPushResult,
     _build_fact_payload,
+    _resolve_env_vars,
     push_gate_fact,
     push_gate_fact_from_config,
     validate_push_facts_config,
@@ -42,6 +43,37 @@ def sample_push_facts_config() -> PushFactsConfig:
         entity_ref="component:default/abevalflow",
         fact_ref_prefix="catalog:default/abevalflow_",
     )
+
+
+class TestResolveEnvVars:
+    """Tests for _resolve_env_vars function."""
+
+    def test_resolves_single_env_var(self, monkeypatch):
+        monkeypatch.setenv("MY_TOKEN", "secret123")
+        result = _resolve_env_vars("${MY_TOKEN}")
+        assert result == "secret123"
+
+    def test_resolves_multiple_env_vars(self, monkeypatch):
+        monkeypatch.setenv("HOST", "example.com")
+        monkeypatch.setenv("PORT", "8080")
+        result = _resolve_env_vars("https://${HOST}:${PORT}/api")
+        assert result == "https://example.com:8080/api"
+
+    def test_leaves_unset_vars_unchanged(self):
+        result = _resolve_env_vars("${UNSET_VAR_12345}")
+        assert result == "${UNSET_VAR_12345}"
+
+    def test_handles_none(self):
+        result = _resolve_env_vars(None)
+        assert result is None
+
+    def test_handles_empty_string(self):
+        result = _resolve_env_vars("")
+        assert result == ""
+
+    def test_handles_no_placeholders(self):
+        result = _resolve_env_vars("plain-token-value")
+        assert result == "plain-token-value"
 
 
 class TestBuildFactPayload:
@@ -249,9 +281,9 @@ class TestGatePolicyPushFactMethods:
 
         policy = GatePolicy(
             push_facts=sample_push_facts_config,
-            gates={"cisco": GatePolicyItem(push_fact=True)},
+            gates={"security": GatePolicyItem(push_fact=True)},
         )
-        assert policy.should_push_fact("harbor") is False
+        assert policy.should_push_fact("evaluation") is False
 
     def test_should_push_fact_returns_true_when_configured(
         self, sample_push_facts_config: PushFactsConfig
@@ -260,9 +292,9 @@ class TestGatePolicyPushFactMethods:
 
         policy = GatePolicy(
             push_facts=sample_push_facts_config,
-            gates={"harbor": GatePolicyItem(push_fact=True)},
+            gates={"evaluation": GatePolicyItem(push_fact=True)},
         )
-        assert policy.should_push_fact("harbor") is True
+        assert policy.should_push_fact("evaluation") is True
 
     def test_get_gates_with_push_fact(self, sample_push_facts_config: PushFactsConfig):
         from abevalflow.schemas import GatePolicy, GatePolicyItem
@@ -270,14 +302,14 @@ class TestGatePolicyPushFactMethods:
         policy = GatePolicy(
             push_facts=sample_push_facts_config,
             gates={
-                "harbor": GatePolicyItem(push_fact=True),
-                "cisco": GatePolicyItem(push_fact=True),
-                "llm-review": GatePolicyItem(push_fact=False),
+                "evaluation": GatePolicyItem(push_fact=True),
+                "security": GatePolicyItem(push_fact=True),
+                "quality": GatePolicyItem(push_fact=False),
             },
         )
 
         gates = policy.get_gates_with_push_fact()
-        assert set(gates) == {"harbor", "cisco"}
+        assert set(gates) == {"evaluation", "security"}
 
 
 class TestPushFactsConfigSchema:

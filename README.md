@@ -611,7 +611,7 @@ my-agent-eval/
 
 Harbor creates treatment/control container variants and runs A/B comparison.
 
-See [Manual Trigger Guide](Docs/manual_trigger_guide.md) for detailed submission and trigger instructions.
+See [Trigger Guide](Docs/trigger_guide.md) for detailed submission and trigger instructions.
 
 ## LLM Access
 

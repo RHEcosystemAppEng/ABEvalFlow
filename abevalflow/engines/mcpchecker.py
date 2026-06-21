@@ -45,7 +45,7 @@ class MCPCheckerEngine(EvalEngine):
         policy: GatePolicy,
     ) -> GateResult:
         """Convert MCPCheckerResult to GateResult."""
-        gate_policy = policy.get_gate_policy(self.name)
+        gate_policy = policy.get_gate_policy("evaluation")
         threshold = gate_policy.threshold if gate_policy.threshold is not None else 0.7
 
         overall_score = raw_result.get("overall_score", 0.0)

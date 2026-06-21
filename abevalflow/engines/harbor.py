@@ -53,7 +53,7 @@ class HarborEngine(EvalEngine):
             is included in the message for transparency but does not affect
             the gate decision.
         """
-        gate_policy = policy.get_gate_policy(self.name)
+        gate_policy = policy.get_gate_policy("evaluation")
         threshold = gate_policy.threshold if gate_policy.threshold is not None else 0.0
 
         summary = raw_result.get("summary", {})

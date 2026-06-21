@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -31,6 +33,27 @@ if TYPE_CHECKING:
     from abevalflow.schemas import PushFactsConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_env_vars(value: str | None) -> str | None:
+    """Resolve ${VAR} placeholders from environment.
+
+    Args:
+        value: String that may contain ${VAR} placeholders
+
+    Returns:
+        String with placeholders replaced by environment variable values.
+        If a variable is not set, the placeholder is left unchanged.
+    """
+    if not value:
+        return value
+    pattern = r"\$\{([^}]+)\}"
+
+    def replace(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        return os.environ.get(var_name, match.group(0))
+
+    return re.sub(pattern, replace, value)
 
 
 class FactPushResult(BaseModel):
@@ -210,12 +233,14 @@ def push_gate_fact_from_config(
     else:
         fact_ref = f"{push_facts_config.fact_ref_prefix}{gate_result.gate_name}"
 
+    resolved_token = _resolve_env_vars(push_facts_config.bearer_token)
+
     return push_gate_fact(
         gate_result=gate_result,
         endpoint=push_facts_config.endpoint,
         entity_ref=push_facts_config.entity_ref,
         fact_ref=fact_ref,
-        bearer_token=push_facts_config.bearer_token,
+        bearer_token=resolved_token,
     )
 
 

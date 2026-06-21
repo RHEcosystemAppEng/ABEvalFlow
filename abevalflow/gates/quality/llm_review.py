@@ -44,7 +44,7 @@ class LLMReviewGate(QualityGate):
             - WARN mode: Returns passed=True (review may have been skipped).
             - BLOCK mode: Returns passed=False (artifact required).
         """
-        gate_policy = policy.get_gate_policy(self.name)
+        gate_policy = policy.get_gate_policy("quality")
         threshold = gate_policy.threshold if gate_policy.threshold is not None else 0.6
 
         if gate_policy.mode == GateMode.DISABLED:

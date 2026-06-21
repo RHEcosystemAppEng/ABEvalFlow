@@ -142,7 +142,7 @@ def apply_combination_logic(
             total_weight = 0.0
             weighted_score = 0.0
             for g in blocking_gates:
-                gate_policy = policy.get_gate_policy(g.get_policy_key())
+                gate_policy = policy.get_gate_policy(g.gate_name)
                 weighted_score += g.score * gate_policy.weight
                 total_weight += gate_policy.weight
             total_score = weighted_score / total_weight if total_weight > 0 else 0.0

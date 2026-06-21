@@ -32,7 +32,7 @@ class CiscoGate(SecurityGate):
         policy: GatePolicy,
     ) -> GateResult:
         """Evaluate Cisco security scan results."""
-        gate_policy = policy.get_gate_policy(self.name)
+        gate_policy = policy.get_gate_policy("security")
 
         if gate_policy.mode == GateMode.DISABLED:
             return GateResult(

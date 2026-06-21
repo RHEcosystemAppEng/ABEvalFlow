@@ -257,7 +257,7 @@ class TestThresholdOverridesUpstreamRecommendation:
             }
         }
         # But policy threshold is 0.2, so 0.1 < 0.2 should fail
-        policy = GatePolicy(gates={"harbor": GatePolicyItem(threshold=0.2)})
+        policy = GatePolicy(gates={"evaluation": GatePolicyItem(threshold=0.2)})
         engine = HarborEngine()
         gate_result = engine.to_gate_result(report, policy)
 
@@ -308,7 +308,7 @@ class TestThresholdOverridesUpstreamRecommendation:
             }
         }
         # A2A default threshold is 0.5, but set higher
-        policy = GatePolicy(gates={"a2a": GatePolicyItem(threshold=0.7)})
+        policy = GatePolicy(gates={"evaluation": GatePolicyItem(threshold=0.7)})
         engine = A2AEngine()
         gate_result = engine.to_gate_result(report, policy)
 
