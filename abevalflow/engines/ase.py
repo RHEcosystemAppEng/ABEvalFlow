@@ -77,13 +77,17 @@ class ASEEngine(EvalEngine):
 
         return GateResult(
             gate_type=GateType.ENGINE,
-            gate_name=self.name,
+            gate_name="evaluation",
+            policy_key=self.name,
             passed=passed,
             score=score,
             mode=gate_policy.mode,
             threshold=threshold,
             findings=[],
-            details=raw_result,
+            details={
+                "engine": self.name,
+                **raw_result,
+            },
             message=message,
         )
 

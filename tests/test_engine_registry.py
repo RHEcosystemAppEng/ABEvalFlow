@@ -88,7 +88,9 @@ class TestHarborEngine:
         gate_result = engine.to_gate_result(report, policy)
 
         assert gate_result.gate_type == GateType.ENGINE
-        assert gate_result.gate_name == "harbor"
+        assert gate_result.gate_name == "evaluation"  # category name
+        assert gate_result.policy_key == "harbor"  # implementation name
+        assert gate_result.details["engine"] == "harbor"
         assert gate_result.passed is True
         assert gate_result.score == 0.85
 
@@ -130,7 +132,9 @@ class TestASEEngine:
         gate_result = engine.to_gate_result(report, policy)
 
         assert gate_result.gate_type == GateType.ENGINE
-        assert gate_result.gate_name == "ase"
+        assert gate_result.gate_name == "evaluation"  # category name
+        assert gate_result.policy_key == "ase"  # implementation name
+        assert gate_result.details["engine"] == "ase"
         assert gate_result.passed is True
 
 
@@ -150,7 +154,9 @@ class TestA2AEngine:
         gate_result = engine.to_gate_result(report, policy)
 
         assert gate_result.gate_type == GateType.ENGINE
-        assert gate_result.gate_name == "a2a"
+        assert gate_result.gate_name == "evaluation"  # category name
+        assert gate_result.policy_key == "a2a"  # implementation name
+        assert gate_result.details["engine"] == "a2a"
         assert gate_result.passed is True
         assert gate_result.score == 0.75
 
@@ -192,7 +198,9 @@ class TestMCPCheckerEngine:
         gate_result = engine.to_gate_result(report, policy)
 
         assert gate_result.gate_type == GateType.ENGINE
-        assert gate_result.gate_name == "mcpchecker"
+        assert gate_result.gate_name == "evaluation"  # category name
+        assert gate_result.policy_key == "mcpchecker"  # implementation name
+        assert gate_result.details["engine"] == "mcpchecker"
         assert gate_result.passed is True  # 0.8 >= 0.7
         assert gate_result.score == 0.8
 

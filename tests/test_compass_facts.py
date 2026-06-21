@@ -23,12 +23,13 @@ def sample_gate_result() -> GateResult:
     """Create a sample gate result for testing."""
     return GateResult(
         gate_type=GateType.ENGINE,
-        gate_name="harbor",
+        gate_name="evaluation",
+        policy_key="harbor",
         passed=True,
         score=0.85,
         mode=GateMode.BLOCK,
         message="Harbor evaluation passed",
-        details={"uplift": 0.15, "treatment_pass_rate": 0.9},
+        details={"engine": "harbor", "uplift": 0.15, "treatment_pass_rate": 0.9},
         evaluated_at=datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc),
     )
 
@@ -65,15 +66,16 @@ class TestBuildFactPayload:
         payload = _build_fact_payload(
             gate_result=sample_gate_result,
             entity_ref="component:default/test",
-            fact_ref="catalog:default/test_harbor",
+            fact_ref="catalog:default/test_evaluation_harbor",
         )
 
         data = payload["facts"][0]["data"]
-        assert data["gate_name"] == "harbor"
+        assert data["gate_name"] == "evaluation"
         assert data["passed"] is True
         assert data["score"] == 0.85
         assert data["mode"] == "block"
         assert data["message"] == "Harbor evaluation passed"
+        assert data["details"]["engine"] == "harbor"
         assert "uplift" in data["details"]
 
     def test_evaluated_at_is_iso_format(self, sample_gate_result: GateResult):
@@ -102,14 +104,38 @@ class TestPushGateFact:
                 gate_result=sample_gate_result,
                 endpoint="https://example.com/api/facts/",
                 entity_ref="component:default/test",
-                fact_ref="catalog:default/test_harbor",
+                fact_ref="catalog:default/test_evaluation_harbor",
             )
 
             assert result.success is True
-            assert result.gate_name == "harbor"
-            assert result.fact_ref == "catalog:default/test_harbor"
+            assert result.gate_name == "evaluation"
+            assert result.fact_ref == "catalog:default/test_evaluation_harbor"
             assert result.error is None
             mock_urlopen.assert_called_once()
+
+    def test_successful_push_with_bearer_token(self, sample_gate_result: GateResult):
+        with patch("abevalflow.compass_facts.urllib.request.urlopen") as mock_urlopen:
+            with patch("abevalflow.compass_facts.urllib.request.Request") as mock_request:
+                mock_response = MagicMock()
+                mock_response.status = 200
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+                mock_request.return_value = MagicMock()
+
+                result = push_gate_fact(
+                    gate_result=sample_gate_result,
+                    endpoint="https://example.com/api/facts/",
+                    entity_ref="component:default/test",
+                    fact_ref="catalog:default/test_evaluation_harbor",
+                    bearer_token="test-token-12345",
+                )
+
+                assert result.success is True
+                # Verify Authorization header was included
+                call_kwargs = mock_request.call_args
+                headers = call_kwargs.kwargs.get("headers", {})
+                assert headers.get("Authorization") == "Bearer test-token-12345"
 
     def test_http_error_returns_failure(self, sample_gate_result: GateResult):
         with patch("abevalflow.compass_facts.urllib.request.urlopen") as mock_urlopen:
@@ -127,7 +153,7 @@ class TestPushGateFact:
                 gate_result=sample_gate_result,
                 endpoint="https://example.com/api/facts/",
                 entity_ref="component:default/test",
-                fact_ref="catalog:default/test_harbor",
+                fact_ref="catalog:default/test_evaluation_harbor",
             )
 
             assert result.success is False
@@ -143,7 +169,7 @@ class TestPushGateFact:
                 gate_result=sample_gate_result,
                 endpoint="https://example.com/api/facts/",
                 entity_ref="component:default/test",
-                fact_ref="catalog:default/test_harbor",
+                fact_ref="catalog:default/test_evaluation_harbor",
             )
 
             assert result.success is False
@@ -162,8 +188,8 @@ class TestPushGateFactFromConfig:
 
         with patch("abevalflow.compass_facts.push_gate_fact") as mock_push:
             mock_push.return_value = FactPushResult(
-                gate_name="harbor",
-                fact_ref="catalog:default/abevalflow_harbor",
+                gate_name="evaluation",
+                fact_ref="catalog:default/abevalflow_evaluation_harbor",
                 success=True,
             )
 
@@ -171,7 +197,8 @@ class TestPushGateFactFromConfig:
 
             mock_push.assert_called_once()
             call_kwargs = mock_push.call_args
-            assert call_kwargs.kwargs["fact_ref"] == "catalog:default/abevalflow_harbor"
+            # fact_ref combines category (evaluation) and implementation (harbor)
+            assert call_kwargs.kwargs["fact_ref"] == "catalog:default/abevalflow_evaluation_harbor"
             assert result.success is True
 
 
@@ -268,6 +295,7 @@ class TestPushFactsConfigSchema:
         assert config.endpoint == "https://compass.stage.redhat.com/api/soundcheck/facts/"
         assert config.entity_ref == "component:default/abevalflow"
         assert config.fact_ref_prefix == "catalog:default/abevalflow_"  # default
+        assert config.bearer_token is None  # default
 
     def test_custom_prefix(self):
         config = PushFactsConfig(
@@ -276,3 +304,19 @@ class TestPushFactsConfigSchema:
             fact_ref_prefix="custom:ns/prefix_",
         )
         assert config.fact_ref_prefix == "custom:ns/prefix_"
+
+    def test_bearer_token(self):
+        config = PushFactsConfig(
+            endpoint="https://compass.stage.redhat.com/api/soundcheck/facts/",
+            entity_ref="component:default/abevalflow",
+            bearer_token="my-secret-token",
+        )
+        assert config.bearer_token == "my-secret-token"
+
+    def test_bearer_token_with_env_var_placeholder(self):
+        config = PushFactsConfig(
+            endpoint="https://compass.stage.redhat.com/api/soundcheck/facts/",
+            entity_ref="component:default/abevalflow",
+            bearer_token="${COMPASS_API_TOKEN}",
+        )
+        assert config.bearer_token == "${COMPASS_API_TOKEN}"

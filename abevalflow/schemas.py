@@ -61,6 +61,7 @@ class PushFactsConfig(BaseModel):
           endpoint: https://compass.stage.redhat.com/api/soundcheck/facts/
           entity_ref: component:default/abevalflow
           fact_ref_prefix: catalog:default/abevalflow_
+          bearer_token: ${COMPASS_API_TOKEN}  # from env/secret
     """
 
     endpoint: str = Field(
@@ -72,6 +73,14 @@ class PushFactsConfig(BaseModel):
     fact_ref_prefix: str = Field(
         default="catalog:default/abevalflow_",
         description="Prefix for fact references. Gate name is appended",
+    )
+    bearer_token: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token for Compass API authentication. "
+            "Can use environment variable substitution (e.g. ${COMPASS_API_TOKEN}). "
+            "When set, an Authorization: Bearer header is sent with each request."
+        ),
     )
 
 
@@ -103,6 +112,12 @@ class GatePolicy(BaseModel):
     Can be embedded in metadata.yaml under 'gate_policy' key.
     When not specified, defaults are applied.
 
+    Gate naming:
+        Gate results use category-based names (evaluation, security, quality)
+        with implementation details in the result. Policy configuration still
+        uses implementation names (harbor, cisco, llm-review) for specific
+        targeting of individual gates.
+
     Example in metadata.yaml:
 
         gate_policy:
@@ -112,14 +127,14 @@ class GatePolicy(BaseModel):
             endpoint: https://compass.stage.redhat.com/api/soundcheck/facts/
             entity_ref: component:default/abevalflow
           gates:
-            harbor:
+            harbor:       # implementation name (produces evaluation_harbor fact)
               mode: block
               threshold: 0.0
               push_fact: true
-            cisco:
+            cisco:        # implementation name (produces security_cisco fact)
               mode: block
               push_fact: true
-            llm-review:
+            llm-review:   # implementation name (produces quality_llm-review fact)
               mode: warn
               threshold: 0.6
     """

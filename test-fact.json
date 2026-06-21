@@ -1,0 +1,14 @@
+{
+  "facts": [
+    {
+      "factRef": "catalog:default/abevalflow_eval",
+      "entityRef": "component:default/abevalflow",
+      "data": {
+        "status": "passed",
+        "score": 95,
+        "recommendation": "pass",
+        "last_run": "2026-06-21T09:44:00Z"
+      }
+    }
+  ]
+}

@@ -54,7 +54,9 @@ class TestCiscoGate:
         result = gate.evaluate(tmp_path, policy)
 
         assert result.gate_type == GateType.SECURITY
-        assert result.gate_name == "cisco"
+        assert result.gate_name == "security"
+        assert result.policy_key == "cisco"
+        assert result.details["scanner"] == "cisco"
         assert result.passed is True
         assert result.mode == GateMode.DISABLED
         assert "disabled" in result.message.lower()
@@ -183,7 +185,9 @@ class TestLLMReviewGate:
         result = gate.evaluate(tmp_path, policy)
 
         assert result.gate_type == GateType.QUALITY
-        assert result.gate_name == "llm-review"
+        assert result.gate_name == "quality"
+        assert result.policy_key == "llm-review"
+        assert result.details["reviewer"] == "llm-review"
         assert result.passed is True
         assert result.mode == GateMode.DISABLED
 

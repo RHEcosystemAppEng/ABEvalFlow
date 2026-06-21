@@ -90,6 +90,7 @@ def push_gate_fact(
     entity_ref: str,
     fact_ref: str,
     timeout_sec: float = 30.0,
+    bearer_token: str | None = None,
 ) -> FactPushResult:
     """Push a gate result to Compass Facts API.
 
@@ -99,6 +100,7 @@ def push_gate_fact(
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier for this gate
         timeout_sec: Request timeout in seconds
+        bearer_token: Optional bearer token for authentication
 
     Returns:
         FactPushResult with success status and any error details
@@ -107,13 +109,17 @@ def push_gate_fact(
 
     try:
         data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+            
         request = urllib.request.Request(
             endpoint,
             data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
 
@@ -185,8 +191,11 @@ def push_gate_fact_from_config(
 ) -> FactPushResult:
     """Push a gate result using PushFactsConfig settings.
 
-    Convenience wrapper that builds the fact_ref from the config prefix
-    and gate name.
+    Convenience wrapper that builds the fact_ref from the config prefix,
+    category name, and implementation name.
+
+    The fact_ref format is: {prefix}{category}_{implementation}
+    For example: catalog:default/abevalflow_evaluation_harbor
 
     Args:
         gate_result: The gate evaluation result to push
@@ -195,13 +204,18 @@ def push_gate_fact_from_config(
     Returns:
         FactPushResult with success status and any error details
     """
-    fact_ref = f"{push_facts_config.fact_ref_prefix}{gate_result.gate_name}"
+    policy_key = gate_result.get_policy_key()
+    if policy_key and policy_key != gate_result.gate_name:
+        fact_ref = f"{push_facts_config.fact_ref_prefix}{gate_result.gate_name}_{policy_key}"
+    else:
+        fact_ref = f"{push_facts_config.fact_ref_prefix}{gate_result.gate_name}"
 
     return push_gate_fact(
         gate_result=gate_result,
         endpoint=push_facts_config.endpoint,
         entity_ref=push_facts_config.entity_ref,
         fact_ref=fact_ref,
+        bearer_token=push_facts_config.bearer_token,
     )
 
 

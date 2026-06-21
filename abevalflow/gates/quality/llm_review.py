@@ -50,12 +50,13 @@ class LLMReviewGate(QualityGate):
         if gate_policy.mode == GateMode.DISABLED:
             return GateResult(
                 gate_type=GateType.QUALITY,
-                gate_name=self.name,
+                gate_name="quality",
+                policy_key=self.name,
                 passed=True,
                 score=1.0,
                 mode=GateMode.DISABLED,
                 findings=[],
-                details={},
+                details={"reviewer": self.name},
                 message="LLM quality review disabled",
             )
 
@@ -65,23 +66,25 @@ class LLMReviewGate(QualityGate):
             if gate_policy.mode == GateMode.BLOCK:
                 return GateResult(
                     gate_type=GateType.QUALITY,
-                    gate_name=self.name,
+                    gate_name="quality",
+                    policy_key=self.name,
                     passed=False,
                     score=0.0,
                     mode=gate_policy.mode,
                     findings=[],
-                    details={"review_path": str(review_path), "status": "not_found"},
+                    details={"reviewer": self.name, "review_path": str(review_path), "status": "not_found"},
                     message="FAIL: _ai_review.json missing (required in block mode)",
                 )
             # In WARN mode, missing artifacts pass (review may have been skipped)
             return GateResult(
                 gate_type=GateType.QUALITY,
-                gate_name=self.name,
+                gate_name="quality",
+                policy_key=self.name,
                 passed=True,
                 score=1.0,
                 mode=gate_policy.mode,
                 findings=[],
-                details={"review_path": str(review_path), "status": "not_found"},
+                details={"reviewer": self.name, "review_path": str(review_path), "status": "not_found"},
                 message="No _ai_review.json found (review may have been skipped)",
             )
 
@@ -91,12 +94,13 @@ class LLMReviewGate(QualityGate):
             logger.error("Failed to read quality review: %s", e)
             return GateResult(
                 gate_type=GateType.QUALITY,
-                gate_name=self.name,
+                gate_name="quality",
+                policy_key=self.name,
                 passed=False,
                 score=0.0,
                 mode=gate_policy.mode,
                 findings=[],
-                details={"error": str(e)},
+                details={"reviewer": self.name, "error": str(e)},
                 message=f"Failed to parse _ai_review.json: {e}",
             )
 
@@ -154,13 +158,15 @@ class LLMReviewGate(QualityGate):
 
         return GateResult(
             gate_type=GateType.QUALITY,
-            gate_name=self.name,
+            gate_name="quality",
+            policy_key=self.name,
             passed=passed,
             score=overall_score,
             mode=gate_policy.mode,
             threshold=threshold,
             findings=findings,
             details={
+                "reviewer": self.name,
                 "dimensions": dimension_scores,
                 "recommendation": recommendation,
                 "summary": summary,
