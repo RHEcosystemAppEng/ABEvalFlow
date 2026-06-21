@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from abevalflow.compass_facts import (
+    FactPushResult,
     _build_fact_payload,
     push_gate_fact,
     push_gate_fact_from_config,
@@ -104,10 +105,13 @@ class TestPushGateFact:
                 fact_ref="catalog:default/test_harbor",
             )
 
-            assert result is True
+            assert result.success is True
+            assert result.gate_name == "harbor"
+            assert result.fact_ref == "catalog:default/test_harbor"
+            assert result.error is None
             mock_urlopen.assert_called_once()
 
-    def test_http_error_returns_false(self, sample_gate_result: GateResult):
+    def test_http_error_returns_failure(self, sample_gate_result: GateResult):
         with patch("abevalflow.compass_facts.urllib.request.urlopen") as mock_urlopen:
             import urllib.error
 
@@ -126,9 +130,10 @@ class TestPushGateFact:
                 fact_ref="catalog:default/test_harbor",
             )
 
-            assert result is False
+            assert result.success is False
+            assert result.error == "HTTP 500: Internal Server Error"
 
-    def test_url_error_returns_false(self, sample_gate_result: GateResult):
+    def test_url_error_returns_failure(self, sample_gate_result: GateResult):
         with patch("abevalflow.compass_facts.urllib.request.urlopen") as mock_urlopen:
             import urllib.error
 
@@ -141,7 +146,8 @@ class TestPushGateFact:
                 fact_ref="catalog:default/test_harbor",
             )
 
-            assert result is False
+            assert result.success is False
+            assert "Connection refused" in result.error
 
 
 class TestPushGateFactFromConfig:
@@ -152,14 +158,21 @@ class TestPushGateFactFromConfig:
         sample_gate_result: GateResult,
         sample_push_facts_config: PushFactsConfig,
     ):
-        with patch("abevalflow.compass_facts.push_gate_fact") as mock_push:
-            mock_push.return_value = True
+        from abevalflow.compass_facts import FactPushResult
 
-            push_gate_fact_from_config(sample_gate_result, sample_push_facts_config)
+        with patch("abevalflow.compass_facts.push_gate_fact") as mock_push:
+            mock_push.return_value = FactPushResult(
+                gate_name="harbor",
+                fact_ref="catalog:default/abevalflow_harbor",
+                success=True,
+            )
+
+            result = push_gate_fact_from_config(sample_gate_result, sample_push_facts_config)
 
             mock_push.assert_called_once()
             call_kwargs = mock_push.call_args
             assert call_kwargs.kwargs["fact_ref"] == "catalog:default/abevalflow_harbor"
+            assert result.success is True
 
 
 class TestValidatePushFactsConfig:

@@ -24,11 +24,26 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, Field
+
 if TYPE_CHECKING:
     from abevalflow.gates.base import GateResult
     from abevalflow.schemas import PushFactsConfig
 
 logger = logging.getLogger(__name__)
+
+
+class FactPushResult(BaseModel):
+    """Result of a single fact push attempt."""
+
+    gate_name: str = Field(description="Name of the gate whose fact was pushed")
+    fact_ref: str = Field(description="Fact reference that was used")
+    success: bool = Field(description="Whether the push succeeded")
+    error: str | None = Field(default=None, description="Error message if push failed")
+    pushed_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp of the push attempt",
+    )
 
 
 def _build_fact_payload(
@@ -75,7 +90,7 @@ def push_gate_fact(
     entity_ref: str,
     fact_ref: str,
     timeout_sec: float = 30.0,
-) -> bool:
+) -> FactPushResult:
     """Push a gate result to Compass Facts API.
 
     Args:
@@ -86,7 +101,7 @@ def push_gate_fact(
         timeout_sec: Request timeout in seconds
 
     Returns:
-        True if push succeeded, False otherwise
+        FactPushResult with success status and any error details
     """
     payload = _build_fact_payload(gate_result, entity_ref, fact_ref)
 
@@ -111,35 +126,63 @@ def push_gate_fact(
                     gate_result.gate_name,
                     status,
                 )
-                return True
+                return FactPushResult(
+                    gate_name=gate_result.gate_name,
+                    fact_ref=fact_ref,
+                    success=True,
+                )
             else:
+                error_msg = f"Unexpected status {status}"
                 logger.warning(
                     "Unexpected status %d pushing fact %s",
                     status,
                     fact_ref,
                 )
-                return False
+                return FactPushResult(
+                    gate_name=gate_result.gate_name,
+                    fact_ref=fact_ref,
+                    success=False,
+                    error=error_msg,
+                )
 
     except urllib.error.HTTPError as e:
+        error_msg = f"HTTP {e.code}: {e.reason}"
         logger.error(
             "HTTP error pushing fact %s: %d %s",
             fact_ref,
             e.code,
             e.reason,
         )
-        return False
+        return FactPushResult(
+            gate_name=gate_result.gate_name,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
     except urllib.error.URLError as e:
+        error_msg = f"URL error: {e.reason}"
         logger.error("URL error pushing fact %s: %s", fact_ref, e.reason)
-        return False
+        return FactPushResult(
+            gate_name=gate_result.gate_name,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
     except Exception as e:
+        error_msg = str(e)
         logger.error("Error pushing fact %s: %s", fact_ref, e)
-        return False
+        return FactPushResult(
+            gate_name=gate_result.gate_name,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
 
 
 def push_gate_fact_from_config(
     gate_result: "GateResult",
     push_facts_config: "PushFactsConfig",
-) -> bool:
+) -> FactPushResult:
     """Push a gate result using PushFactsConfig settings.
 
     Convenience wrapper that builds the fact_ref from the config prefix
@@ -150,7 +193,7 @@ def push_gate_fact_from_config(
         push_facts_config: Configuration with endpoint, entity_ref, and prefix
 
     Returns:
-        True if push succeeded, False otherwise
+        FactPushResult with success status and any error details
     """
     fact_ref = f"{push_facts_config.fact_ref_prefix}{gate_result.gate_name}"
 
