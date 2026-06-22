@@ -34,7 +34,7 @@ spec:
             - name: "filter"
               value: >-
                 body.docker_url == "quay.io/ecosystem-appeng/google-lightspeed-agent" &&
-                body.updated_tags.exists(t, !t.startsWith('sha256:') && !t.startsWith('on-pr-'))
+                body.updated_tags.exists(t, !t.startsWith('sha256:') && !t.startsWith('sha256-') && !t.startsWith('on-pr-'))
             - name: "overlays"
               value:
                 - key: agent_tag
