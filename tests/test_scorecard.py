@@ -335,3 +335,127 @@ class TestBothModeAggregation:
         # Both should pass with default threshold 0.0
         assert harbor_gate.passed is True  # gap 0.3 >= 0.0
         assert ase_gate.passed is True  # gap 0.1 >= 0.0
+
+
+class TestValidationJsonHandling:
+    """Tests for validation.json handling in aggregate_scorecard."""
+
+    def test_missing_validation_json_fails_validation(self, tmp_path):
+        """Missing validation.json should result in validation_passed=False."""
+        from scripts.aggregate_scorecard import aggregate_scorecard
+
+        submission_dir = tmp_path / "submissions" / "test-skill"
+        submission_dir.mkdir(parents=True)
+        (submission_dir / "metadata.yaml").write_text("name: test-skill\n")
+
+        reports_dir = tmp_path / "reports" / "test-skill"
+        reports_dir.mkdir(parents=True)
+
+        harbor_report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.9},
+                "control": {"mean_reward": 0.6},
+                "mean_reward_gap": 0.3,
+                "recommendation": "pass",
+            }
+        }
+        (reports_dir / "report.json").write_text(json.dumps(harbor_report))
+
+        scorecard = aggregate_scorecard(
+            submission_dir=submission_dir,
+            results_dir=tmp_path / "results",
+            reports_dir=reports_dir,
+            workspace_root=tmp_path,
+            eval_engine="harbor",
+            pipeline_run_id="test-run",
+        )
+
+        from abevalflow.certification import CheckId
+
+        valid_structure_check = next(
+            c for c in scorecard.certification.foundational.checks
+            if c.check_id == CheckId.VALID_SKILL_STRUCTURE
+        )
+        assert valid_structure_check.passed is False
+
+    def test_present_validation_json_valid_passes(self, tmp_path):
+        """Present validation.json with valid=true should pass validation."""
+        from scripts.aggregate_scorecard import aggregate_scorecard
+
+        submission_dir = tmp_path / "submissions" / "test-skill"
+        submission_dir.mkdir(parents=True)
+        (submission_dir / "metadata.yaml").write_text("name: test-skill\n")
+
+        reports_dir = tmp_path / "reports" / "test-skill"
+        reports_dir.mkdir(parents=True)
+
+        validation_data = {"valid": True, "errors": []}
+        (reports_dir / "validation.json").write_text(json.dumps(validation_data))
+
+        harbor_report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.9},
+                "control": {"mean_reward": 0.6},
+                "mean_reward_gap": 0.3,
+                "recommendation": "pass",
+            }
+        }
+        (reports_dir / "report.json").write_text(json.dumps(harbor_report))
+
+        scorecard = aggregate_scorecard(
+            submission_dir=submission_dir,
+            results_dir=tmp_path / "results",
+            reports_dir=reports_dir,
+            workspace_root=tmp_path,
+            eval_engine="harbor",
+            pipeline_run_id="test-run",
+        )
+
+        from abevalflow.certification import CheckId
+
+        valid_structure_check = next(
+            c for c in scorecard.certification.foundational.checks
+            if c.check_id == CheckId.VALID_SKILL_STRUCTURE
+        )
+        assert valid_structure_check.passed is True
+
+    def test_present_validation_json_invalid_fails(self, tmp_path):
+        """Present validation.json with valid=false should fail validation."""
+        from scripts.aggregate_scorecard import aggregate_scorecard
+
+        submission_dir = tmp_path / "submissions" / "test-skill"
+        submission_dir.mkdir(parents=True)
+        (submission_dir / "metadata.yaml").write_text("name: test-skill\n")
+
+        reports_dir = tmp_path / "reports" / "test-skill"
+        reports_dir.mkdir(parents=True)
+
+        validation_data = {"valid": False, "errors": ["Schema error"]}
+        (reports_dir / "validation.json").write_text(json.dumps(validation_data))
+
+        harbor_report = {
+            "summary": {
+                "treatment": {"mean_reward": 0.9},
+                "control": {"mean_reward": 0.6},
+                "mean_reward_gap": 0.3,
+                "recommendation": "pass",
+            }
+        }
+        (reports_dir / "report.json").write_text(json.dumps(harbor_report))
+
+        scorecard = aggregate_scorecard(
+            submission_dir=submission_dir,
+            results_dir=tmp_path / "results",
+            reports_dir=reports_dir,
+            workspace_root=tmp_path,
+            eval_engine="harbor",
+            pipeline_run_id="test-run",
+        )
+
+        from abevalflow.certification import CheckId
+
+        valid_structure_check = next(
+            c for c in scorecard.certification.foundational.checks
+            if c.check_id == CheckId.VALID_SKILL_STRUCTURE
+        )
+        assert valid_structure_check.passed is False

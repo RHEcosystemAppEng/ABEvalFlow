@@ -246,8 +246,8 @@ def aggregate_scorecard(
 
     # Read validation results from validate task output
     validation_path = reports_dir / "validation.json"
-    validation_passed = True
-    metadata_valid = True
+    validation_passed = False
+    metadata_valid = False
     validation_errors: list[str] = []
 
     if validation_path.exists():
@@ -264,10 +264,15 @@ def aggregate_scorecard(
             )
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read validation.json: %s", e)
+            validation_passed = False
+            metadata_valid = False
     else:
-        # Fallback: check file existence if validation.json not available
-        metadata_valid = (submission_dir / "metadata.yaml").exists()
-        logger.info("No validation.json found, using file existence checks")
+        logger.warning(
+            "validation.json not found at %s; validation_passed defaults to False",
+            validation_path,
+        )
+        validation_passed = False
+        metadata_valid = False
 
     has_eval_assets = (
         (submission_dir / "evals" / "evals.json").exists()

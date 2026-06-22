@@ -9,6 +9,7 @@ Levels are hierarchical: Certified requires Trusted, Trusted requires Foundation
 
 from __future__ import annotations
 
+import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,8 @@ from abevalflow.gates.base import GateResult, GateType
 
 if TYPE_CHECKING:
     from abevalflow.schemas import CertificationPolicy
+
+logger = logging.getLogger(__name__)
 
 
 class CertificationLevel(StrEnum):
@@ -203,6 +206,7 @@ def _map_gate_to_checks(
         List of check results derived from this gate
     """
     checks: list[CheckResult] = []
+    source_impl = gate.policy_key or gate.gate_name
 
     if gate.gate_type == GateType.ENGINE:
         checks.append(
@@ -213,6 +217,7 @@ def _map_gate_to_checks(
                 score=gate.score,
                 message=gate.message or "",
                 source_gate=gate.gate_name,
+                details={"source_implementation": source_impl},
             )
         )
         checks.append(
@@ -223,6 +228,7 @@ def _map_gate_to_checks(
                 score=gate.score,
                 message=gate.message or "",
                 source_gate=gate.gate_name,
+                details={"source_implementation": source_impl},
             )
         )
         advanced_threshold = _get_threshold(
@@ -237,6 +243,7 @@ def _map_gate_to_checks(
                     score=gate.score,
                     message="High evaluation score indicates advanced validation passed",
                     source_gate=gate.gate_name,
+                    details={"source_implementation": source_impl},
                 )
             )
         else:
@@ -248,6 +255,7 @@ def _map_gate_to_checks(
                     score=gate.score,
                     message=f"Score {gate.score:.2f} below {advanced_threshold:.2f} threshold for advanced validation",
                     source_gate=gate.gate_name,
+                    details={"source_implementation": source_impl},
                 )
             )
 
@@ -260,7 +268,10 @@ def _map_gate_to_checks(
                 score=gate.score,
                 message=gate.message or "",
                 source_gate=gate.gate_name,
-                details={"findings": [f.model_dump() for f in gate.findings]},
+                details={
+                    "source_implementation": source_impl,
+                    "findings": [f.model_dump() for f in gate.findings],
+                },
             )
         )
         adv_security_threshold = _get_threshold(
@@ -275,6 +286,7 @@ def _map_gate_to_checks(
                 score=gate.score,
                 message="No high/critical findings" if high_score else "Security concerns present",
                 source_gate=gate.gate_name,
+                details={"source_implementation": source_impl},
             )
         )
         checks.append(
@@ -285,6 +297,7 @@ def _map_gate_to_checks(
                 score=1.0 if len(gate.findings) == 0 else max(0, 1 - len(gate.findings) * 0.1),
                 message="No security findings" if len(gate.findings) == 0 else f"{len(gate.findings)} findings require review",
                 source_gate=gate.gate_name,
+                details={"source_implementation": source_impl},
             )
         )
 
@@ -297,6 +310,7 @@ def _map_gate_to_checks(
                 score=gate.score,
                 message=gate.message or "",
                 source_gate=gate.gate_name,
+                details={"source_implementation": source_impl},
             )
         )
         instruction_threshold = _get_threshold(
@@ -310,6 +324,7 @@ def _map_gate_to_checks(
                 score=gate.score,
                 message="Quality review passed" if gate.score >= instruction_threshold else "Quality below threshold",
                 source_gate=gate.gate_name,
+                details={"source_implementation": source_impl},
             )
         )
 
@@ -401,7 +416,11 @@ def compute_certification(
 
     for gate in gates:
         for check in _map_gate_to_checks(gate, validation_passed, threshold_overrides):
-            if check.check_id not in all_checks or check.passed:
+            if check.check_id not in all_checks:
+                all_checks[check.check_id] = check
+            elif not check.passed and all_checks[check.check_id].passed:
+                # New check fails while existing passes - keep the failing one
+                # (conservative: any failure from any source should block certification)
                 all_checks[check.check_id] = check
 
     all_checks.setdefault(
@@ -490,7 +509,12 @@ def compute_certification(
                         message="Check not evaluated",
                     )
                 )
-        all_passed = all(c.passed for c in level_checks)
+        if len(level_checks) == 0:
+            logger.warning(
+                "Certification level '%s' has no checks configured; level will not pass",
+                level_name,
+            )
+        all_passed = len(level_checks) > 0 and all(c.passed for c in level_checks)
         return LevelResult(level=level, passed=all_passed, checks=level_checks)
 
     return CertificationResult(

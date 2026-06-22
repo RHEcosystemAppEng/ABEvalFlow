@@ -591,7 +591,7 @@ class TestCertificationPolicy:
         assert adv_security_check.passed is True
 
     def test_custom_checks_empty_list(self) -> None:
-        """Empty check list should result in empty level."""
+        """Empty check list should fail the level (no checks = cannot pass)."""
         policy = CertificationPolicy(
             foundational=CertificationLevelPolicy(checks=[])
         )
@@ -603,7 +603,8 @@ class TestCertificationPolicy:
             policy=policy,
         )
         assert len(result.foundational.checks) == 0
-        assert result.foundational.passed is True
+        # Empty check list should NOT pass - certification requires actual checks
+        assert result.foundational.passed is False
 
     def test_combined_custom_checks_and_thresholds(self) -> None:
         """Custom checks and thresholds together."""
@@ -646,3 +647,125 @@ class TestDefaultThresholds:
         assert DEFAULT_THRESHOLDS[CheckId.ADVANCED_AGENT_VALIDATION] == 0.8
         assert DEFAULT_THRESHOLDS[CheckId.ADVANCED_SECURITY_VALIDATION] == 0.9
         assert DEFAULT_THRESHOLDS[CheckId.INSTRUCTION_QUALITY] == 0.7
+
+
+class TestBothModeCheckMerging:
+    """Tests for 'both' mode with multiple engines producing the same check."""
+
+    def test_both_mode_keeps_failing_check_conservative(self) -> None:
+        """When both engines produce the same check, keep the failing one."""
+        harbor_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="harbor",
+            passed=True,
+            score=0.85,
+            mode=GateMode.BLOCK,
+            message="Harbor passed",
+        )
+        ase_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="ase",
+            passed=False,
+            score=0.45,
+            mode=GateMode.BLOCK,
+            message="ASE failed",
+        )
+        result = compute_certification(
+            gates=[harbor_gate, ase_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        exec_check = next(
+            c for c in result.foundational.checks
+            if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION
+        )
+        assert exec_check.passed is False
+        assert exec_check.details.get("source_implementation") == "ase"
+
+    def test_both_mode_passing_first_failing_second(self) -> None:
+        """Failing check from second engine should overwrite passing from first."""
+        harbor_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="harbor",
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+        )
+        ase_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="ase",
+            passed=False,
+            score=0.3,
+            mode=GateMode.BLOCK,
+        )
+        result = compute_certification(
+            gates=[harbor_gate, ase_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        func_check = next(
+            c for c in result.trusted.checks
+            if c.check_id == CheckId.FUNCTIONAL_VALIDATION
+        )
+        assert func_check.passed is False
+        assert func_check.details.get("source_implementation") == "ase"
+
+    def test_both_mode_failing_first_passing_second(self) -> None:
+        """Passing check from second engine should NOT overwrite failing from first."""
+        harbor_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="harbor",
+            passed=False,
+            score=0.3,
+            mode=GateMode.BLOCK,
+        )
+        ase_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="ase",
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+        )
+        result = compute_certification(
+            gates=[harbor_gate, ase_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        exec_check = next(
+            c for c in result.foundational.checks
+            if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION
+        )
+        assert exec_check.passed is False
+        assert exec_check.details.get("source_implementation") == "harbor"
+
+    def test_check_result_includes_source_implementation(self) -> None:
+        """CheckResult should include source_implementation in details."""
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            policy_key="harbor",
+            passed=True,
+            score=0.85,
+            mode=GateMode.BLOCK,
+        )
+        result = compute_certification(
+            gates=[engine_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        exec_check = next(
+            c for c in result.foundational.checks
+            if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION
+        )
+        assert "source_implementation" in exec_check.details
+        assert exec_check.details["source_implementation"] == "harbor"
