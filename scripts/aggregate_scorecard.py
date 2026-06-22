@@ -114,12 +114,11 @@ def load_certification_policy(
 
     # Fall back to profile if specified
     if profile_name:
-        try:
-            policy = load_profile(profile_name)
-            logger.info("Loaded certification profile '%s'", profile_name)
-            return policy
-        except (ValueError, FileNotFoundError) as e:
-            logger.warning("Failed to load profile '%s': %s", profile_name, e)
+        # Fail fast if profile is explicitly requested but cannot be loaded
+        # (don't silently fall back to defaults on misconfiguration)
+        policy = load_profile(profile_name)
+        logger.info("Loaded certification profile '%s'", profile_name)
+        return policy
 
     logger.info("Using default certification policy")
     return None
