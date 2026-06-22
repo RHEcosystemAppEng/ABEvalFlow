@@ -233,6 +233,106 @@ class ExperimentType(StrEnum):
     CUSTOM = "custom"
 
 
+class CertificationLevelPolicy(BaseModel):
+    """Policy configuration for a single certification level.
+
+    Allows customizing which checks are required and their thresholds.
+
+    Example in metadata.yaml:
+        certification_policy:
+          foundational:
+            checks:
+              - valid_skill_structure
+              - basic_security_validation
+            thresholds:
+              basic_execution_validation: 0.5
+    """
+
+    checks: list[str] | None = Field(
+        default=None,
+        description=(
+            "List of check IDs required for this level. "
+            "When None/omitted, uses the default checks from certification.py. "
+            "Check IDs must be valid CheckId enum values."
+        ),
+    )
+    thresholds: dict[str, float] | None = Field(
+        default=None,
+        description=(
+            "Per-check threshold overrides. Keys are check IDs, values are "
+            "score thresholds (0.0-1.0). Overrides hardcoded thresholds."
+        ),
+    )
+
+    @field_validator("thresholds")
+    @classmethod
+    def _validate_thresholds(cls, v: dict[str, float] | None) -> dict[str, float] | None:
+        if v is None:
+            return v
+        for check_id, threshold in v.items():
+            if not 0.0 <= threshold <= 1.0:
+                raise ValueError(f"Threshold for {check_id} must be between 0.0 and 1.0")
+        return v
+
+
+class CertificationPolicy(BaseModel):
+    """Policy for configuring certification level requirements.
+
+    Allows customizing which checks are required for each certification level
+    and overriding score thresholds. When omitted or partially specified,
+    defaults from certification.py are used.
+
+    Example in metadata.yaml:
+        certification_policy:
+          foundational:
+            checks:
+              - valid_skill_structure
+              - basic_security_validation
+              - basic_execution_validation
+              - metadata_compliance
+            thresholds:
+              basic_execution_validation: 0.5
+          trusted:
+            checks:
+              - evaluation_assets
+              - functional_validation
+          certified:
+            checks:
+              - advanced_agent_validation
+    """
+
+    foundational: CertificationLevelPolicy | None = Field(
+        default=None,
+        description="Policy for Foundational certification level",
+    )
+    trusted: CertificationLevelPolicy | None = Field(
+        default=None,
+        description="Policy for Trusted certification level",
+    )
+    certified: CertificationLevelPolicy | None = Field(
+        default=None,
+        description="Policy for Certified certification level",
+    )
+
+    def get_checks_for_level(self, level: str) -> list[str] | None:
+        """Get custom check list for a level, or None to use defaults."""
+        level_policy = getattr(self, level, None)
+        if level_policy is None:
+            return None
+        return level_policy.checks
+
+    def get_threshold(self, check_id: str) -> float | None:
+        """Get threshold override for a check, or None to use default.
+
+        Searches all level policies for threshold overrides.
+        """
+        for level_policy in [self.foundational, self.trusted, self.certified]:
+            if level_policy is not None and level_policy.thresholds is not None:
+                if check_id in level_policy.thresholds:
+                    return level_policy.thresholds[check_id]
+        return None
+
+
 class CopySpec(BaseModel):
     """A source directory and its destination path inside the container."""
 
@@ -444,5 +544,15 @@ class SubmissionMetadata(BaseModel):
             "Optional policy for unified scorecard gate evaluation. "
             "Configures which gates are blocking vs warning, thresholds, "
             "and how results are combined. Defaults are applied when not set."
+        ),
+    )
+
+    certification_policy: CertificationPolicy | None = Field(
+        default=None,
+        description=(
+            "Optional policy for customizing certification level requirements. "
+            "Allows specifying which checks are required for each level and "
+            "overriding score thresholds. When not set, default checks and "
+            "thresholds from certification.py are used."
         ),
     )

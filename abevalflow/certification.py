@@ -10,11 +10,14 @@ Levels are hierarchical: Certified requires Trusted, Trusted requires Foundation
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, computed_field
 
 from abevalflow.gates.base import GateResult, GateType
+
+if TYPE_CHECKING:
+    from abevalflow.schemas import CertificationPolicy
 
 
 class CertificationLevel(StrEnum):
@@ -163,15 +166,34 @@ class CertificationResult(BaseModel):
         return None
 
 
+DEFAULT_THRESHOLDS: dict[CheckId, float] = {
+    CheckId.ADVANCED_AGENT_VALIDATION: 0.8,
+    CheckId.ADVANCED_SECURITY_VALIDATION: 0.9,
+    CheckId.INSTRUCTION_QUALITY: 0.7,
+}
+
+
+def _get_threshold(
+    check_id: CheckId,
+    threshold_overrides: dict[str, float] | None = None,
+) -> float:
+    """Get threshold for a check, using override if provided."""
+    if threshold_overrides and check_id.value in threshold_overrides:
+        return threshold_overrides[check_id.value]
+    return DEFAULT_THRESHOLDS.get(check_id, 0.0)
+
+
 def _map_gate_to_checks(
     gate: GateResult,
     validation_passed: bool = True,
+    threshold_overrides: dict[str, float] | None = None,
 ) -> list[CheckResult]:
     """Map a gate result to certification checks.
 
     Args:
         gate: The gate result to map
         validation_passed: Whether pre-evaluation validation passed
+        threshold_overrides: Optional dict of check_id -> threshold overrides
 
     Returns:
         List of check results derived from this gate
@@ -199,7 +221,10 @@ def _map_gate_to_checks(
                 source_gate=gate.gate_name,
             )
         )
-        if gate.score >= 0.8:
+        advanced_threshold = _get_threshold(
+            CheckId.ADVANCED_AGENT_VALIDATION, threshold_overrides
+        )
+        if gate.score >= advanced_threshold:
             checks.append(
                 CheckResult(
                     check_id=CheckId.ADVANCED_AGENT_VALIDATION,
@@ -217,7 +242,7 @@ def _map_gate_to_checks(
                     name="Advanced Agent Validation",
                     passed=False,
                     score=gate.score,
-                    message=f"Score {gate.score:.2f} below 0.80 threshold for advanced validation",
+                    message=f"Score {gate.score:.2f} below {advanced_threshold:.2f} threshold for advanced validation",
                     source_gate=gate.gate_name,
                 )
             )
@@ -234,7 +259,10 @@ def _map_gate_to_checks(
                 details={"findings": [f.model_dump() for f in gate.findings]},
             )
         )
-        high_score = gate.score >= 0.9 and gate.passed
+        adv_security_threshold = _get_threshold(
+            CheckId.ADVANCED_SECURITY_VALIDATION, threshold_overrides
+        )
+        high_score = gate.score >= adv_security_threshold and gate.passed
         checks.append(
             CheckResult(
                 check_id=CheckId.ADVANCED_SECURITY_VALIDATION,
@@ -267,13 +295,16 @@ def _map_gate_to_checks(
                 source_gate=gate.gate_name,
             )
         )
+        instruction_threshold = _get_threshold(
+            CheckId.INSTRUCTION_QUALITY, threshold_overrides
+        )
         checks.append(
             CheckResult(
                 check_id=CheckId.INSTRUCTION_QUALITY,
                 name="Instruction Quality",
-                passed=gate.score >= 0.7,
+                passed=gate.score >= instruction_threshold,
                 score=gate.score,
-                message="Quality review passed" if gate.score >= 0.7 else "Quality below threshold",
+                message="Quality review passed" if gate.score >= instruction_threshold else "Quality below threshold",
                 source_gate=gate.gate_name,
             )
         )
@@ -281,11 +312,49 @@ def _map_gate_to_checks(
     return checks
 
 
+def _validate_check_ids(check_ids: list[str]) -> list[CheckId]:
+    """Validate and convert string check IDs to CheckId enums.
+
+    Args:
+        check_ids: List of check ID strings
+
+    Returns:
+        List of validated CheckId enums
+
+    Raises:
+        ValueError: If any check ID is not a valid CheckId
+    """
+    valid_ids = {c.value for c in CheckId}
+    result = []
+    for check_id in check_ids:
+        if check_id not in valid_ids:
+            raise ValueError(
+                f"Invalid check ID '{check_id}'. Valid IDs are: {sorted(valid_ids)}"
+            )
+        result.append(CheckId(check_id))
+    return result
+
+
+def _collect_threshold_overrides(
+    policy: "CertificationPolicy | None",
+) -> dict[str, float]:
+    """Collect all threshold overrides from a certification policy."""
+    if policy is None:
+        return {}
+
+    overrides: dict[str, float] = {}
+    for level_policy in [policy.foundational, policy.trusted, policy.certified]:
+        if level_policy is not None and level_policy.thresholds is not None:
+            overrides.update(level_policy.thresholds)
+    return overrides
+
+
 def compute_certification(
     gates: list[GateResult],
     validation_passed: bool = True,
     metadata_valid: bool = True,
     has_eval_assets: bool = True,
+    policy: "CertificationPolicy | None" = None,
 ) -> CertificationResult:
     """Compute certification levels from gate results.
 
@@ -294,10 +363,12 @@ def compute_certification(
         validation_passed: Whether structural validation passed
         metadata_valid: Whether metadata.yaml validation passed
         has_eval_assets: Whether evaluation assets (evals.json, tests) exist
+        policy: Optional certification policy for custom checks and thresholds
 
     Returns:
         Complete certification result with all levels
     """
+    threshold_overrides = _collect_threshold_overrides(policy)
     all_checks: dict[CheckId, CheckResult] = {}
 
     all_checks[CheckId.VALID_SKILL_STRUCTURE] = CheckResult(
@@ -325,7 +396,7 @@ def compute_certification(
     )
 
     for gate in gates:
-        for check in _map_gate_to_checks(gate, validation_passed):
+        for check in _map_gate_to_checks(gate, validation_passed, threshold_overrides):
             if check.check_id not in all_checks or check.passed:
                 all_checks[check.check_id] = check
 
@@ -384,7 +455,23 @@ def compute_certification(
         ),
     )
 
-    def build_level(level: CertificationLevel, check_ids: list[CheckId]) -> LevelResult:
+    def get_checks_for_level(
+        level_name: str,
+        default_checks: list[CheckId],
+    ) -> list[CheckId]:
+        """Get check IDs for a level, using policy override if specified."""
+        if policy is not None:
+            custom_checks = policy.get_checks_for_level(level_name)
+            if custom_checks is not None:
+                return _validate_check_ids(custom_checks)
+        return default_checks
+
+    def build_level(
+        level: CertificationLevel,
+        level_name: str,
+        default_check_ids: list[CheckId],
+    ) -> LevelResult:
+        check_ids = get_checks_for_level(level_name, default_check_ids)
         level_checks = []
         for cid in check_ids:
             if cid in all_checks:
@@ -403,7 +490,11 @@ def compute_certification(
         return LevelResult(level=level, passed=all_passed, checks=level_checks)
 
     return CertificationResult(
-        foundational=build_level(CertificationLevel.FOUNDATIONAL, FOUNDATIONAL_CHECKS),
-        trusted=build_level(CertificationLevel.TRUSTED, TRUSTED_CHECKS),
-        certified=build_level(CertificationLevel.CERTIFIED, CERTIFIED_CHECKS),
+        foundational=build_level(
+            CertificationLevel.FOUNDATIONAL, "foundational", FOUNDATIONAL_CHECKS
+        ),
+        trusted=build_level(CertificationLevel.TRUSTED, "trusted", TRUSTED_CHECKS),
+        certified=build_level(
+            CertificationLevel.CERTIFIED, "certified", CERTIFIED_CHECKS
+        ),
     )

@@ -220,6 +220,82 @@ The summary fact provides a quick overview:
 - `advanced_agent_validation` - Evaluation score >= 0.8
 - `continuous_optimization` - Optimization tracking (not yet implemented)
 
+## Custom Certification Policy
+
+You can customize which checks are required for each certification level and override
+score thresholds via `certification_policy` in `metadata.yaml`.
+
+### Configuration Example
+
+```yaml
+schema_version: "1.0"
+name: my-skill
+eval_engine: harbor
+
+certification_policy:
+  foundational:
+    checks:
+      - valid_skill_structure
+      - basic_security_validation
+      - basic_execution_validation
+      - metadata_compliance
+      # content_quality_review removed
+    thresholds:
+      basic_execution_validation: 0.5  # Override default (gate pass/fail)
+  trusted:
+    checks:
+      - evaluation_assets
+      - functional_validation
+      # registry_governance and others skipped
+  certified:
+    checks:
+      - advanced_agent_validation
+      # Only require this one check
+    thresholds:
+      advanced_agent_validation: 0.7  # Lower from default 0.8
+```
+
+### `certification_policy` Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `foundational` | object | Policy for Foundational level |
+| `trusted` | object | Policy for Trusted level |
+| `certified` | object | Policy for Certified level |
+
+Each level can have:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `checks` | list[str] | Check IDs required for this level. When omitted, uses defaults. |
+| `thresholds` | dict[str, float] | Per-check threshold overrides (0.0-1.0) |
+
+### Behavior
+
+- **Custom checks:** When `checks` is specified for a level, only those checks are
+  required for that level. Omit to use the default check list.
+- **Threshold overrides:** When a threshold is specified, it overrides the hardcoded
+  default for that check. Thresholds apply across all levels.
+- **Partial policies:** You can specify policy for only some levels. Unspecified
+  levels use their defaults.
+- **Empty check list:** Specifying `checks: []` means the level passes automatically
+  (no checks required).
+- **Backward compatibility:** If `certification_policy` is omitted entirely, all
+  defaults from `certification.py` are used.
+
+### Default Thresholds
+
+| Check | Default Threshold |
+|-------|-------------------|
+| `advanced_agent_validation` | 0.8 |
+| `advanced_security_validation` | 0.9 |
+| `instruction_quality` | 0.7 |
+
+### Valid Check IDs
+
+All check IDs are defined in `abevalflow/certification.py`. Invalid check IDs
+will raise a `ValueError` at runtime.
+
 ## Validation Warning
 
 If `push_facts.endpoint` is configured but no gates have `push_fact: true`,

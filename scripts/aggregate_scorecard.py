@@ -44,7 +44,7 @@ from abevalflow.engines import get_engine
 from abevalflow.gates.base import GateResult
 from abevalflow.gates.quality import get_all_quality_gates
 from abevalflow.gates.security import get_all_security_gates
-from abevalflow.schemas import GatePolicy, SubmissionMetadata
+from abevalflow.schemas import CertificationPolicy, GatePolicy, SubmissionMetadata
 from abevalflow.scorecard import Recommendation, Scorecard, apply_combination_logic
 
 logging.basicConfig(
@@ -77,6 +77,31 @@ def load_gate_policy(submission_dir: Path) -> GatePolicy:
     except Exception as e:
         logger.warning("Failed to parse metadata.yaml, using defaults: %s", e)
         return GatePolicy()
+
+
+def load_certification_policy(submission_dir: Path) -> CertificationPolicy | None:
+    """Load certification policy from metadata.yaml or return None for defaults."""
+    metadata_path = submission_dir / "metadata.yaml"
+    if not metadata_path.exists():
+        logger.info("No metadata.yaml found, using default certification policy")
+        return None
+
+    try:
+        data = yaml.safe_load(metadata_path.read_text())
+        if data is None:
+            return None
+
+        metadata = SubmissionMetadata(**data)
+        if metadata.certification_policy:
+            logger.info("Loaded certification policy from metadata.yaml")
+            return metadata.certification_policy
+        else:
+            logger.info("No certification_policy in metadata.yaml, using defaults")
+            return None
+
+    except Exception as e:
+        logger.warning("Failed to parse metadata.yaml for certification policy: %s", e)
+        return None
 
 
 def load_provenance(reports_dir: Path) -> dict:
@@ -144,6 +169,7 @@ def aggregate_scorecard(
         Populated Scorecard instance
     """
     policy = load_gate_policy(submission_dir)
+    certification_policy = load_certification_policy(submission_dir)
     provenance = load_provenance(reports_dir)
 
     # Validate push_facts configuration
@@ -253,6 +279,7 @@ def aggregate_scorecard(
         validation_passed=validation_passed,
         metadata_valid=metadata_valid,
         has_eval_assets=has_eval_assets,
+        policy=certification_policy,
     )
     logger.info(
         "Certification levels: foundational=%s, trusted=%s, certified=%s (highest=%s)",
