@@ -428,7 +428,11 @@ class TestCertificationPolicy:
         assert CheckId.METADATA_COMPLIANCE not in check_ids
 
     def test_custom_checks_for_certified(self) -> None:
-        """Custom check list for certified level (single check)."""
+        """Custom check list for certified level respects hierarchy.
+        
+        Even if certified's own checks pass, certified.passed is False
+        if foundational or trusted fail (hierarchy enforcement).
+        """
         policy = CertificationPolicy(
             certified=CertificationLevelPolicy(
                 checks=["advanced_agent_validation"]
@@ -448,9 +452,13 @@ class TestCertificationPolicy:
             has_eval_assets=True,
             policy=policy,
         )
+        # Certified's own check passes
         assert len(result.certified.checks) == 1
         assert result.certified.checks[0].check_id == CheckId.ADVANCED_AGENT_VALIDATION
-        assert result.certified.passed is True
+        assert result.certified.checks[0].passed is True
+        # But certified.passed is False due to hierarchy (foundational failed)
+        assert result.certified.passed is False
+        assert result.foundational.passed is False  # missing security/quality gates
 
     def test_threshold_override_for_advanced_agent_validation(self) -> None:
         """Override threshold for advanced_agent_validation."""

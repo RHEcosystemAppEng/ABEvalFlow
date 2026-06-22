@@ -227,6 +227,9 @@ def push_gate_fact_from_config(
 
     Returns:
         FactPushResult with success status and any error details
+
+    Raises:
+        UnresolvedEnvVarError: If bearer_token contains unresolved ${VAR} placeholders
     """
     policy_key = gate_result.get_policy_key()
     if policy_key and policy_key != gate_result.gate_name:
@@ -235,6 +238,7 @@ def push_gate_fact_from_config(
         fact_ref = f"{push_facts_config.fact_ref_prefix}{gate_result.gate_name}"
 
     resolved_token = _resolve_env_vars(push_facts_config.bearer_token)
+    _check_unresolved_env_vars(resolved_token, "bearer_token")
 
     return push_gate_fact(
         gate_result=gate_result,
@@ -333,6 +337,7 @@ def _build_certification_summary_payload(
     certification_result: "CertificationResult",
     entity_ref: str,
     fact_ref: str,
+    hierarchy_passed_map: dict[str, bool],
 ) -> dict[str, Any]:
     """Build Soundcheck fact payload for certification summary.
 
@@ -340,6 +345,7 @@ def _build_certification_summary_payload(
         certification_result: Complete certification result
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier
+        hierarchy_passed_map: Map of level name to hierarchy-enforced passed status
 
     Returns:
         Dict ready to be JSON-serialized and POSTed to Facts API
@@ -351,11 +357,11 @@ def _build_certification_summary_payload(
                 "entityRef": entity_ref,
                 "data": {
                     "highest_level": certification_result.highest_level.value,
-                    "foundational_passed": certification_result.foundational.passed,
+                    "foundational_passed": hierarchy_passed_map["foundational"],
                     "foundational_score": certification_result.foundational.overall_score,
-                    "trusted_passed": certification_result.trusted.passed,
+                    "trusted_passed": hierarchy_passed_map["trusted"],
                     "trusted_score": certification_result.trusted.overall_score,
-                    "certified_passed": certification_result.certified.passed,
+                    "certified_passed": hierarchy_passed_map["certified"],
                     "certified_score": certification_result.certified.overall_score,
                     "evaluated_at": datetime.now(timezone.utc).isoformat(),
                 },
@@ -391,77 +397,14 @@ def push_certification_level_fact(
         level_result, entity_ref, fact_ref, hierarchy_passed
     )
 
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        if bearer_token:
-            headers["Authorization"] = f"Bearer {bearer_token}"
-
-        request = urllib.request.Request(
-            endpoint,
-            data=data,
-            headers=headers,
-            method="POST",
-        )
-
-        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
-            status = response.status
-            if status in (200, 201, 202):
-                logger.info(
-                    "Pushed certification fact %s for level %s (status=%d)",
-                    fact_ref,
-                    level_result.level.value,
-                    status,
-                )
-                return CertificationFactPushResult(
-                    level=level_result.level.value,
-                    fact_ref=fact_ref,
-                    success=True,
-                )
-            else:
-                error_msg = f"Unexpected status {status}"
-                logger.warning(
-                    "Unexpected status %d pushing certification fact %s",
-                    status,
-                    fact_ref,
-                )
-                return CertificationFactPushResult(
-                    level=level_result.level.value,
-                    fact_ref=fact_ref,
-                    success=False,
-                    error=error_msg,
-                )
-
-    except urllib.error.HTTPError as e:
-        error_msg = f"HTTP {e.code}: {e.reason}"
-        logger.error("HTTP error pushing certification fact %s: %d %s", fact_ref, e.code, e.reason)
-        return CertificationFactPushResult(
-            level=level_result.level.value,
-            fact_ref=fact_ref,
-            success=False,
-            error=error_msg,
-        )
-    except urllib.error.URLError as e:
-        error_msg = f"URL error: {e.reason}"
-        logger.error("URL error pushing certification fact %s: %s", fact_ref, e.reason)
-        return CertificationFactPushResult(
-            level=level_result.level.value,
-            fact_ref=fact_ref,
-            success=False,
-            error=error_msg,
-        )
-    except Exception as e:
-        error_msg = str(e)
-        logger.error("Error pushing certification fact %s: %s", fact_ref, e)
-        return CertificationFactPushResult(
-            level=level_result.level.value,
-            fact_ref=fact_ref,
-            success=False,
-            error=error_msg,
-        )
+    return _push_raw_fact(
+        payload=payload,
+        endpoint=endpoint,
+        fact_ref=fact_ref,
+        level=level_result.level.value,
+        timeout_sec=timeout_sec,
+        bearer_token=bearer_token,
+    )
 
 
 class UnresolvedEnvVarError(Exception):
@@ -643,6 +586,7 @@ def push_certification_facts(
         certification_result,
         push_facts_config.entity_ref,
         summary_fact_ref,
+        hierarchy_passed_map,
     )
     results.append(
         _push_raw_fact(

@@ -36,6 +36,7 @@ from abevalflow.certification import compute_certification
 from abevalflow.compass_facts import (
     CertificationFactPushResult,
     FactPushResult,
+    UnresolvedEnvVarError,
     push_certification_facts,
     push_gate_fact_from_config,
     validate_push_facts_config,
@@ -135,16 +136,29 @@ def _maybe_push_fact(
     if policy.push_facts is None:
         return None
 
-    result = push_gate_fact_from_config(gate_result, policy.push_facts)
-    if result.success:
-        logger.info("Pushed fact for gate %s to Compass", gate_result.gate_name)
-    else:
-        logger.warning(
-            "Failed to push fact for gate %s: %s",
+    try:
+        result = push_gate_fact_from_config(gate_result, policy.push_facts)
+        if result.success:
+            logger.info("Pushed fact for gate %s to Compass", gate_result.gate_name)
+        else:
+            logger.warning(
+                "Failed to push fact for gate %s: %s",
+                gate_result.gate_name,
+                result.error,
+            )
+        return result
+    except UnresolvedEnvVarError as e:
+        logger.error(
+            "Cannot push fact for gate %s: unresolved env var - %s",
             gate_result.gate_name,
-            result.error,
+            e,
         )
-    return result
+        return FactPushResult(
+            gate_name=gate_result.gate_name,
+            fact_ref="",
+            success=False,
+            error=str(e),
+        )
 
 
 def aggregate_scorecard(
@@ -296,13 +310,16 @@ def aggregate_scorecard(
 
     cert_push_results: list[CertificationFactPushResult] = []
     if policy.push_facts is not None:
-        cert_push_results = push_certification_facts(certification, policy.push_facts)
-        success_count = sum(1 for r in cert_push_results if r.success)
-        logger.info(
-            "Certification facts: %d/%d pushed successfully",
-            success_count,
-            len(cert_push_results),
-        )
+        try:
+            cert_push_results = push_certification_facts(certification, policy.push_facts)
+            success_count = sum(1 for r in cert_push_results if r.success)
+            logger.info(
+                "Certification facts: %d/%d pushed successfully",
+                success_count,
+                len(cert_push_results),
+            )
+        except UnresolvedEnvVarError as e:
+            logger.error("Cannot push certification facts: unresolved env var - %s", e)
 
     if fact_push_results:
         success_count = sum(1 for r in fact_push_results if r.success)

@@ -524,12 +524,40 @@ def compute_certification(
         all_passed = len(level_checks) > 0 and all(c.passed for c in level_checks)
         return LevelResult(level=level, passed=all_passed, checks=level_checks)
 
+    # Build all levels
+    foundational_result = build_level(
+        CertificationLevel.FOUNDATIONAL, "foundational", FOUNDATIONAL_CHECKS
+    )
+    trusted_result = build_level(
+        CertificationLevel.TRUSTED, "trusted", TRUSTED_CHECKS
+    )
+    certified_result = build_level(
+        CertificationLevel.CERTIFIED, "certified", CERTIFIED_CHECKS
+    )
+
+    # Enforce hierarchy: lower levels must pass for higher levels to pass
+    # If foundational fails, trusted and certified cannot pass
+    if not foundational_result.passed:
+        trusted_result = LevelResult(
+            level=trusted_result.level,
+            passed=False,
+            checks=trusted_result.checks,
+        )
+        certified_result = LevelResult(
+            level=certified_result.level,
+            passed=False,
+            checks=certified_result.checks,
+        )
+    # If trusted fails, certified cannot pass
+    elif not trusted_result.passed:
+        certified_result = LevelResult(
+            level=certified_result.level,
+            passed=False,
+            checks=certified_result.checks,
+        )
+
     return CertificationResult(
-        foundational=build_level(
-            CertificationLevel.FOUNDATIONAL, "foundational", FOUNDATIONAL_CHECKS
-        ),
-        trusted=build_level(CertificationLevel.TRUSTED, "trusted", TRUSTED_CHECKS),
-        certified=build_level(
-            CertificationLevel.CERTIFIED, "certified", CERTIFIED_CHECKS
-        ),
+        foundational=foundational_result,
+        trusted=trusted_result,
+        certified=certified_result,
     )
