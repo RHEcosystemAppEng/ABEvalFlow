@@ -5,14 +5,20 @@ which checks pass. Each level has required checks that must all pass for the
 level to be achieved.
 
 Levels are hierarchical: Certified requires Trusted, Trusted requires Foundational.
+
+Profiles can be loaded from config/certification_profiles.yaml to provide
+artifact-type-specific check configurations (e.g., skill, agent, mcp_server).
 """
 
 from __future__ import annotations
 
 import logging
 from enum import StrEnum
+from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
 from pydantic import BaseModel, Field, computed_field
 
 from abevalflow.gates.base import GateResult, GateType
@@ -21,6 +27,9 @@ if TYPE_CHECKING:
     from abevalflow.schemas import CertificationPolicy
 
 logger = logging.getLogger(__name__)
+
+# Default path for certification profiles configuration
+DEFAULT_PROFILES_PATH = Path(__file__).parent.parent / "config" / "certification_profiles.yaml"
 
 
 class CertificationLevel(StrEnum):
@@ -89,6 +98,136 @@ CERTIFIED_CHECKS = [
     CheckId.ADVANCED_AGENT_VALIDATION,
     # CheckId.CONTINUOUS_OPTIMIZATION,  # Not yet implemented
 ]
+
+
+# ---------------------------------------------------------------------------
+# Profile Loading
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _load_profiles_yaml(profiles_path: Path | None = None) -> dict[str, Any]:
+    """Load certification profiles from YAML file.
+
+    Args:
+        profiles_path: Path to profiles YAML. Defaults to config/certification_profiles.yaml
+
+    Returns:
+        Parsed YAML content as dict
+
+    Raises:
+        FileNotFoundError: If profiles file doesn't exist
+        yaml.YAMLError: If YAML is invalid
+    """
+    path = profiles_path or DEFAULT_PROFILES_PATH
+    if not path.exists():
+        raise FileNotFoundError(f"Certification profiles not found: {path}")
+    
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def get_available_profiles(profiles_path: Path | None = None) -> list[str]:
+    """Get list of available profile names.
+
+    Args:
+        profiles_path: Path to profiles YAML. Defaults to config/certification_profiles.yaml
+
+    Returns:
+        List of profile names (e.g., ['skill', 'agent', 'mcp_server', 'plugin'])
+    """
+    data = _load_profiles_yaml(profiles_path)
+    return list(data.get("profiles", {}).keys())
+
+
+def get_default_profile_name(profiles_path: Path | None = None) -> str:
+    """Get the default profile name from configuration.
+
+    Args:
+        profiles_path: Path to profiles YAML. Defaults to config/certification_profiles.yaml
+
+    Returns:
+        Default profile name (e.g., 'skill')
+    """
+    data = _load_profiles_yaml(profiles_path)
+    return data.get("default_profile", "skill")
+
+
+def load_profile(
+    profile_name: str | None = None,
+    profiles_path: Path | None = None,
+) -> "CertificationPolicy":
+    """Load a certification profile and return it as a CertificationPolicy.
+
+    Profiles define which checks apply to each certification level for different
+    artifact types (skill, agent, mcp_server, plugin). This allows pipeline
+    deployments to use appropriate defaults without requiring every submission
+    to specify checks in metadata.yaml.
+
+    Args:
+        profile_name: Name of profile to load. If None, uses default from config.
+        profiles_path: Path to profiles YAML. Defaults to config/certification_profiles.yaml
+
+    Returns:
+        CertificationPolicy with checks configured per the profile
+
+    Raises:
+        ValueError: If profile_name doesn't exist
+        FileNotFoundError: If profiles file doesn't exist
+
+    Example:
+        >>> policy = load_profile("skill")
+        >>> result = compute_certification(gates, policy=policy)
+    """
+    from abevalflow.schemas import CertificationLevelPolicy, CertificationPolicy
+
+    data = _load_profiles_yaml(profiles_path)
+    profiles = data.get("profiles", {})
+    
+    name = profile_name or data.get("default_profile", "skill")
+    
+    if name not in profiles:
+        available = list(profiles.keys())
+        raise ValueError(
+            f"Unknown certification profile '{name}'. Available: {available}"
+        )
+    
+    profile_data = profiles[name]
+    logger.info("Loading certification profile '%s': %s", name, profile_data.get("description", ""))
+    
+    # Build CertificationPolicy from profile data
+    foundational = None
+    trusted = None
+    certified = None
+    
+    if "foundational" in profile_data:
+        foundational = CertificationLevelPolicy(
+            checks=profile_data["foundational"].get("checks"),
+            thresholds=profile_data["foundational"].get("thresholds"),
+        )
+    
+    if "trusted" in profile_data:
+        trusted = CertificationLevelPolicy(
+            checks=profile_data["trusted"].get("checks"),
+            thresholds=profile_data["trusted"].get("thresholds"),
+        )
+    
+    if "certified" in profile_data:
+        certified = CertificationLevelPolicy(
+            checks=profile_data["certified"].get("checks"),
+            thresholds=profile_data["certified"].get("thresholds"),
+        )
+    
+    return CertificationPolicy(
+        foundational=foundational,
+        trusted=trusted,
+        certified=certified,
+    )
+
+
+def clear_profiles_cache() -> None:
+    """Clear the cached profiles data. Useful for testing."""
+    _load_profiles_yaml.cache_clear()
 
 
 class CheckResult(BaseModel):

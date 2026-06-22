@@ -1103,3 +1103,110 @@ class TestHierarchyEnforcement:
         assert result.trusted.passed is True
         assert result.certified.passed is True
         assert result.highest_level == CertificationLevel.CERTIFIED
+
+
+class TestProfileLoading:
+    """Tests for certification profile loading from YAML."""
+
+    def test_load_profile_skill(self) -> None:
+        """Load the default 'skill' profile."""
+        from abevalflow.certification import clear_profiles_cache, load_profile
+        
+        clear_profiles_cache()
+        policy = load_profile("skill")
+        
+        assert policy is not None
+        assert policy.foundational is not None
+        assert "valid_skill_structure" in policy.foundational.checks
+        assert "basic_execution_validation" in policy.foundational.checks
+
+    def test_load_profile_agent(self) -> None:
+        """Load the 'agent' profile with agent-specific checks."""
+        from abevalflow.certification import clear_profiles_cache, load_profile
+        
+        clear_profiles_cache()
+        policy = load_profile("agent")
+        
+        assert policy is not None
+        assert policy.certified is not None
+        assert "advanced_agent_validation" in policy.certified.checks
+        # safety_toxicity_bias_guardrails not yet implemented, commented out in profile
+
+    def test_load_profile_mcp_server(self) -> None:
+        """Load the 'mcp_server' profile with API-focused checks."""
+        from abevalflow.certification import clear_profiles_cache, load_profile
+        
+        clear_profiles_cache()
+        policy = load_profile("mcp_server")
+        
+        assert policy is not None
+        assert policy.certified is not None
+        assert "enterprise_security_review" in policy.certified.checks
+
+    def test_load_profile_invalid_raises(self) -> None:
+        """Loading a non-existent profile raises ValueError."""
+        from abevalflow.certification import clear_profiles_cache, load_profile
+        
+        clear_profiles_cache()
+        with pytest.raises(ValueError, match="Unknown certification profile"):
+            load_profile("nonexistent_profile")
+
+    def test_get_available_profiles(self) -> None:
+        """Get list of available profile names."""
+        from abevalflow.certification import clear_profiles_cache, get_available_profiles
+        
+        clear_profiles_cache()
+        profiles = get_available_profiles()
+        
+        assert "skill" in profiles
+        assert "agent" in profiles
+        assert "mcp_server" in profiles
+        assert "plugin" in profiles
+
+    def test_get_default_profile_name(self) -> None:
+        """Get the default profile name from configuration."""
+        from abevalflow.certification import clear_profiles_cache, get_default_profile_name
+        
+        clear_profiles_cache()
+        default = get_default_profile_name()
+        
+        assert default == "skill"
+
+    def test_load_profile_none_uses_default(self) -> None:
+        """Loading with None uses the default profile."""
+        from abevalflow.certification import clear_profiles_cache, load_profile
+        
+        clear_profiles_cache()
+        policy = load_profile(None)
+        
+        # Should load 'skill' profile (the default)
+        assert policy is not None
+        assert policy.foundational is not None
+        assert "valid_skill_structure" in policy.foundational.checks
+
+    def test_profile_integrates_with_compute_certification(self) -> None:
+        """Profile-loaded policy works with compute_certification."""
+        from abevalflow.certification import clear_profiles_cache, load_profile
+        
+        clear_profiles_cache()
+        policy = load_profile("skill")
+        
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+        )
+        
+        result = compute_certification(
+            gates=[engine_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            policy=policy,
+        )
+        
+        # Should use skill profile's check configuration
+        assert result is not None
+        assert result.foundational is not None

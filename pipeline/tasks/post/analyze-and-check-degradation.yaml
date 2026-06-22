@@ -85,6 +85,13 @@ spec:
       description: >-
         When 'true', aggregate all gates into a unified scorecard after analysis.
         Produces scorecard.json with combined engine, security, and quality gates.
+    - name: certification-profile
+      type: string
+      default: ""
+      description: >-
+        Certification profile name (e.g., 'skill', 'agent', 'mcp_server', 'plugin').
+        Provides artifact-type-specific check defaults. If empty, uses hardcoded defaults
+        unless submission's metadata.yaml specifies certification_policy.
   workspaces:
     - name: source
       description: Workspace containing the evaluation results and report output
@@ -285,13 +292,18 @@ spec:
         REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
         WORKSPACE_ROOT="$(workspaces.source.path)"
 
-        python scripts/aggregate_scorecard.py \
-          --submission-dir "$SUBMISSION_DIR" \
-          --results-dir "$RESULTS_DIR" \
-          --reports-dir "$REPORT_DIR" \
-          --workspace-root "$WORKSPACE_ROOT" \
-          --eval-engine "$(params.eval-engine)" \
+        SCORECARD_ARGS=(
+          --submission-dir "$SUBMISSION_DIR"
+          --results-dir "$RESULTS_DIR"
+          --reports-dir "$REPORT_DIR"
+          --workspace-root "$WORKSPACE_ROOT"
+          --eval-engine "$(params.eval-engine)"
           --pipeline-run-id "$(params.pipeline-run-id)"
+        )
+        if [ -n "$(params.certification-profile)" ]; then
+          SCORECARD_ARGS+=(--certification-profile "$(params.certification-profile)")
+        fi
+        python scripts/aggregate_scorecard.py "${SCORECARD_ARGS[@]}"
 
         if [ -f "$REPORT_DIR/scorecard.json" ]; then
           echo ""

@@ -32,7 +32,7 @@ from pathlib import Path
 
 import yaml
 
-from abevalflow.certification import compute_certification
+from abevalflow.certification import compute_certification, load_profile
 from abevalflow.compass_facts import (
     CertificationFactPushResult,
     FactPushResult,
@@ -80,29 +80,49 @@ def load_gate_policy(submission_dir: Path) -> GatePolicy:
         return GatePolicy()
 
 
-def load_certification_policy(submission_dir: Path) -> CertificationPolicy | None:
-    """Load certification policy from metadata.yaml or return None for defaults."""
+def load_certification_policy(
+    submission_dir: Path,
+    profile_name: str | None = None,
+) -> CertificationPolicy | None:
+    """Load certification policy from metadata.yaml or profile.
+
+    Priority:
+    1. Submission's metadata.yaml certification_policy (if present)
+    2. Profile from config/certification_profiles.yaml (if profile_name provided)
+    3. None (uses hardcoded defaults in certification.py)
+
+    Args:
+        submission_dir: Path to submission directory
+        profile_name: Optional profile name (e.g., 'skill', 'agent')
+
+    Returns:
+        CertificationPolicy or None for defaults
+    """
     metadata_path = submission_dir / "metadata.yaml"
-    if not metadata_path.exists():
-        logger.info("No metadata.yaml found, using default certification policy")
-        return None
+    
+    # Try loading from metadata.yaml first
+    if metadata_path.exists():
+        try:
+            data = yaml.safe_load(metadata_path.read_text())
+            if data:
+                metadata = SubmissionMetadata(**data)
+                if metadata.certification_policy:
+                    logger.info("Loaded certification policy from metadata.yaml")
+                    return metadata.certification_policy
+        except Exception as e:
+            logger.warning("Failed to parse metadata.yaml for certification policy: %s", e)
 
-    try:
-        data = yaml.safe_load(metadata_path.read_text())
-        if data is None:
-            return None
+    # Fall back to profile if specified
+    if profile_name:
+        try:
+            policy = load_profile(profile_name)
+            logger.info("Loaded certification profile '%s'", profile_name)
+            return policy
+        except (ValueError, FileNotFoundError) as e:
+            logger.warning("Failed to load profile '%s': %s", profile_name, e)
 
-        metadata = SubmissionMetadata(**data)
-        if metadata.certification_policy:
-            logger.info("Loaded certification policy from metadata.yaml")
-            return metadata.certification_policy
-        else:
-            logger.info("No certification_policy in metadata.yaml, using defaults")
-            return None
-
-    except Exception as e:
-        logger.warning("Failed to parse metadata.yaml for certification policy: %s", e)
-        return None
+    logger.info("Using default certification policy")
+    return None
 
 
 def load_provenance(reports_dir: Path) -> dict:
@@ -175,6 +195,7 @@ def aggregate_scorecard(
     workspace_root: Path,
     eval_engine: str,
     pipeline_run_id: str,
+    certification_profile: str | None = None,
 ) -> Scorecard:
     """Aggregate all gates into a unified scorecard.
 
@@ -185,12 +206,15 @@ def aggregate_scorecard(
         workspace_root: Path to workspace root (for _ai_review.json)
         eval_engine: Primary evaluation engine name (or "both" for Harbor+ASE)
         pipeline_run_id: Tekton PipelineRun ID
+        certification_profile: Optional profile name (e.g., 'skill', 'agent').
+            If provided and submission has no certification_policy in metadata.yaml,
+            the profile's checks are used instead of hardcoded defaults.
 
     Returns:
         Populated Scorecard instance
     """
     policy = load_gate_policy(submission_dir)
-    certification_policy = load_certification_policy(submission_dir)
+    certification_policy = load_certification_policy(submission_dir, certification_profile)
     provenance = load_provenance(reports_dir)
 
     # Validate push_facts configuration
@@ -411,6 +435,13 @@ def main() -> int:
         default=None,
         help="Directory to write Tekton result files",
     )
+    parser.add_argument(
+        "--certification-profile",
+        type=str,
+        default=None,
+        help="Certification profile name (e.g., 'skill', 'agent', 'mcp_server'). "
+             "Provides default checks per artifact type. Overridden by submission's metadata.yaml.",
+    )
 
     args = parser.parse_args()
 
@@ -422,6 +453,7 @@ def main() -> int:
             workspace_root=args.workspace_root,
             eval_engine=args.eval_engine,
             pipeline_run_id=args.pipeline_run_id,
+            certification_profile=args.certification_profile,
         )
 
         write_scorecard(scorecard, args.reports_dir)

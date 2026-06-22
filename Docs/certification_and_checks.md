@@ -53,6 +53,82 @@ Different artifact types benefit from different checks:
 
 ---
 
+## Certification Profiles
+
+Profiles provide artifact-type-specific check defaults. They are defined in `config/certification_profiles.yaml` and selected at **pipeline deployment level**, not per-submission.
+
+### Available Profiles
+
+| Profile | Description | Certified Checks |
+|---------|-------------|------------------|
+| `skill` | Skills with prompts and code | advanced_agent_validation |
+| `agent` | Autonomous agents | advanced_agent_validation, safety_guardrails |
+| `mcp_server` | MCP tool servers | resilience_chaos_testing, enterprise_security_review |
+| `plugin` | REST API plugins | enterprise_security_review |
+| `full` | All checks enabled | comprehensive |
+
+### How Profiles Work
+
+```
+Pipeline deployment: --certification-profile=skill
+         ↓
+    Profile defaults loaded from config/certification_profiles.yaml
+         ↓
+    Submission's metadata.yaml can override (optional)
+         ↓
+    Final policy used for certification
+```
+
+### Configuration
+
+**Pipeline parameter** (set once per deployment):
+```yaml
+params:
+  - name: certification-profile
+    value: "skill"  # or: agent, mcp_server, plugin, full
+```
+
+**Profile definition** (`config/certification_profiles.yaml`):
+```yaml
+profiles:
+  skill:
+    description: "Skills with prompts and code"
+    foundational:
+      checks:
+        - valid_skill_structure
+        - basic_execution_validation
+        - metadata_compliance
+    trusted:
+      checks:
+        - functional_validation
+    certified:
+      checks:
+        - advanced_agent_validation
+```
+
+**Submission override** (`metadata.yaml` - optional):
+```yaml
+certification_policy:
+  trusted:
+    thresholds:
+      functional_validation: 0.9  # Override threshold only
+```
+
+### Priority Order
+
+1. **Submission's `metadata.yaml`** — if `certification_policy` is present, use it
+2. **Pipeline's `--certification-profile`** — if set, load profile from config
+3. **Hardcoded defaults** — fallback to `FOUNDATIONAL_CHECKS`, `TRUSTED_CHECKS`, `CERTIFIED_CHECKS` in Python
+
+### Code Location
+
+- Profiles YAML: `config/certification_profiles.yaml`
+- Profile loader: `abevalflow/certification.py` → `load_profile()`
+- Aggregate script: `scripts/aggregate_scorecard.py` → `--certification-profile`
+- Pipeline task: `pipeline/tasks/post/analyze-and-check-degradation.yaml`
+
+---
+
 ## Foundational Level (5 checks)
 
 All 5 checks are **fully implemented**.
@@ -521,13 +597,110 @@ certification_policy:
 |-------|--------|---------|
 | Operational Policy Compliance | Medium | Define policy rules |
 
+## Extending the System
+
+### Adding a New Security Scanner
+
+Example: Adding an "Agent Security" scanner (different from Cisco).
+
+**Step 1: Implement the gate** (`abevalflow/gates/security/agent_security.py`)
+
+```python
+from abevalflow.gates.base import GateResult, GateType, GateMode
+
+def run_agent_security_scan(submission_dir: Path) -> GateResult:
+    # Your scanner logic here
+    findings = scan_for_agent_vulnerabilities(submission_dir)
+    
+    return GateResult(
+        gate_name="agent_security",
+        gate_type=GateType.SECURITY,
+        passed=len(critical_findings) == 0,
+        score=calculate_score(findings),
+        mode=GateMode.BLOCK,
+        findings=findings,
+    )
+```
+
+**Step 2: Add the check ID** (`abevalflow/certification.py`)
+
+```python
+class CheckId(StrEnum):
+    # ... existing checks ...
+    AGENT_SECURITY_VALIDATION = "agent_security_validation"
+```
+
+**Step 3: Map gate to check** (`abevalflow/certification.py` → `_map_gate_to_checks()`)
+
+```python
+# In _map_gate_to_checks function
+if gate.gate_type == GateType.SECURITY and gate.gate_name == "agent_security":
+    checks.append(CheckResult(
+        check_id=CheckId.AGENT_SECURITY_VALIDATION,
+        name="Agent Security Validation",
+        passed=gate.passed,
+        score=gate.score,
+        message="Agent-specific security scan",
+        source_gate=gate.gate_name,
+        details={"source_implementation": gate.policy_key or gate.gate_name},
+    ))
+```
+
+**Step 4: Add to profile** (`config/certification_profiles.yaml`)
+
+```yaml
+profiles:
+  agent:
+    trusted:
+      checks:
+        - functional_validation
+        - agent_security_validation  # ← Add here (agent profile only)
+```
+
+### Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    SEPARATION OF CONCERNS                             │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  gates/security/*.py          HOW to run scans                       │
+│       ↓                                                               │
+│  certification.py             WHAT checks exist, gate→check mapping  │
+│       ↓                                                               │
+│  profiles.yaml                WHICH checks apply to which artifacts  │
+│       ↓                                                               │
+│  compass_facts.py             HOW to push to Compass (auto)          │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### What Changes for What
+
+| Change | Files to Modify |
+|--------|-----------------|
+| Add new scanner | `gates/security/new_scanner.py` |
+| Add new check type | `certification.py` (CheckId + mapping) |
+| Add check to profile | `config/certification_profiles.yaml` |
+| Change check threshold | `profiles.yaml` or `metadata.yaml` |
+| Change fact payload structure | `compass_facts.py` |
+
+**No changes needed in:**
+- `compass_facts.py` — automatically picks up new checks
+- `scorecard.py` — automatically includes new checks  
+- Pipeline YAML — just select the profile
+
+---
+
 ## File Locations
 
 | Component | Path |
 |-----------|------|
 | Check IDs and levels | `abevalflow/certification.py` |
 | Certification computation | `abevalflow/certification.py:compute_certification()` |
+| Profile loading | `abevalflow/certification.py:load_profile()` |
 | Default thresholds | `abevalflow/certification.py:DEFAULT_THRESHOLDS` |
+| Certification profiles | `config/certification_profiles.yaml` |
 | Scorecard model | `abevalflow/scorecard.py` |
 | Fact payloads | `abevalflow/compass_facts.py` |
 | Schema (CertificationPolicy) | `abevalflow/schemas.py` |
