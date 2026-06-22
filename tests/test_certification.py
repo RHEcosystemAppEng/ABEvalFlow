@@ -985,10 +985,10 @@ class TestHierarchyEnforcement:
         Scenario: foundational fails (validation_passed=False), provide gates for trusted
         Expected: trusted.passed should be False despite its checks being satisfied
         """
-        # Provide all gates for trusted-level checks
+        # Provide gates for trusted-level checks
         security_gate = GateResult(
             gate_name="security",
-            gate_type=GateType.QUALITY,
+            gate_type=GateType.SECURITY,
             passed=True,
             score=1.0,
             mode=GateMode.BLOCK,
@@ -1024,7 +1024,7 @@ class TestHierarchyEnforcement:
         # Provide gates that satisfy trusted checks
         security_gate = GateResult(
             gate_name="security",
-            gate_type=GateType.QUALITY,
+            gate_type=GateType.SECURITY,
             passed=True,
             score=1.0,
             mode=GateMode.BLOCK,
@@ -1059,7 +1059,7 @@ class TestHierarchyEnforcement:
         """All levels pass when all their requirements are satisfied."""
         security_gate = GateResult(
             gate_name="security",
-            gate_type=GateType.QUALITY,
+            gate_type=GateType.SECURITY,
             passed=True,
             score=1.0,
             mode=GateMode.BLOCK,
