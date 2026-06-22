@@ -42,20 +42,24 @@ class CheckId(StrEnum):
     CONTENT_QUALITY_REVIEW = "content_quality_review"
     METADATA_COMPLIANCE = "metadata_compliance"
 
-    # Trusted checks (11-16 in the spec)
+    # Trusted checks (11-18 in the spec)
     EVALUATION_ASSETS = "evaluation_assets"
     ADVANCED_SECURITY_VALIDATION = "advanced_security_validation"
     FUNCTIONAL_VALIDATION = "functional_validation"
     INSTRUCTION_QUALITY = "instruction_quality"
     REGISTRY_GOVERNANCE = "registry_governance"
     OPERATIONAL_POLICY_COMPLIANCE = "operational_policy_compliance"
+    EFFICIENCY_COST_PROFILING = "efficiency_cost_profiling"
+    DATA_PRIVACY_PII_HANDLING = "data_privacy_pii_handling"
 
-    # Certified checks (1-5 in the spec)
+    # Certified checks (1-7 in the spec)
     ENTERPRISE_STRUCTURE_VALIDATION = "enterprise_structure_validation"
     ENTERPRISE_SECURITY_REVIEW = "enterprise_security_review"
     ENTERPRISE_BEHAVIORAL_TESTING = "enterprise_behavioral_testing"
     ADVANCED_AGENT_VALIDATION = "advanced_agent_validation"
     CONTINUOUS_OPTIMIZATION = "continuous_optimization"
+    SAFETY_TOXICITY_BIAS_GUARDRAILS = "safety_toxicity_bias_guardrails"
+    RESILIENCE_CHAOS_TESTING = "resilience_chaos_testing"
 
 
 FOUNDATIONAL_CHECKS = [
