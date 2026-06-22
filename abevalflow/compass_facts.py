@@ -285,6 +285,7 @@ def _build_certification_level_payload(
     level_result: "LevelResult",
     entity_ref: str,
     fact_ref: str,
+    hierarchy_passed: bool,
 ) -> dict[str, Any]:
     """Build Soundcheck fact payload for a certification level.
 
@@ -292,6 +293,8 @@ def _build_certification_level_payload(
         level_result: The certification level result
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier
+        hierarchy_passed: Whether this level is achieved considering hierarchy
+            (i.e., all lower levels also pass)
 
     Returns:
         Dict ready to be JSON-serialized and POSTed to Facts API
@@ -314,7 +317,7 @@ def _build_certification_level_payload(
                 "entityRef": entity_ref,
                 "data": {
                     "level": level_result.level.value,
-                    "passed": level_result.passed,
+                    "passed": hierarchy_passed,
                     "checks_passed": level_result.checks_passed,
                     "checks_total": level_result.checks_total,
                     "overall_score": level_result.overall_score,
@@ -366,6 +369,7 @@ def push_certification_level_fact(
     endpoint: str,
     entity_ref: str,
     fact_ref: str,
+    hierarchy_passed: bool,
     timeout_sec: float = 30.0,
     bearer_token: str | None = None,
 ) -> CertificationFactPushResult:
@@ -376,13 +380,16 @@ def push_certification_level_fact(
         endpoint: Compass Facts API URL
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier for this level
+        hierarchy_passed: Whether this level is achieved considering hierarchy
         timeout_sec: Request timeout in seconds
         bearer_token: Optional bearer token for authentication
 
     Returns:
         CertificationFactPushResult with success status
     """
-    payload = _build_certification_level_payload(level_result, entity_ref, fact_ref)
+    payload = _build_certification_level_payload(
+        level_result, entity_ref, fact_ref, hierarchy_passed
+    )
 
     try:
         data = json.dumps(payload).encode("utf-8")
@@ -457,6 +464,124 @@ def push_certification_level_fact(
         )
 
 
+class UnresolvedEnvVarError(Exception):
+    """Raised when an environment variable placeholder remains unresolved."""
+
+    pass
+
+
+def _check_unresolved_env_vars(value: str | None, context: str) -> None:
+    """Check if a resolved value still contains unresolved ${VAR} placeholders.
+
+    Args:
+        value: The resolved value to check
+        context: Description of what the value is for (used in error message)
+
+    Raises:
+        UnresolvedEnvVarError: If unresolved placeholders are found
+    """
+    if value and "${" in value:
+        logger.error(
+            "Unresolved environment variable in %s: value contains '${'. "
+            "Ensure the referenced environment variable is set.",
+            context,
+        )
+        raise UnresolvedEnvVarError(
+            f"Unresolved environment variable in {context}: "
+            f"value still contains '${{'. Check that the environment variable is set."
+        )
+
+
+def _push_raw_fact(
+    payload: dict[str, Any],
+    endpoint: str,
+    fact_ref: str,
+    level: str,
+    timeout_sec: float = 30.0,
+    bearer_token: str | None = None,
+) -> CertificationFactPushResult:
+    """Push a raw fact payload to Compass Facts API.
+
+    Args:
+        payload: The JSON payload to push
+        endpoint: Compass Facts API URL
+        fact_ref: Fact reference for logging/result
+        level: Level name for the result
+        timeout_sec: Request timeout in seconds
+        bearer_token: Optional bearer token for authentication
+
+    Returns:
+        CertificationFactPushResult with success status
+    """
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+
+        request = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+            status = response.status
+            if status in (200, 201, 202):
+                logger.info("Pushed %s fact %s (status=%d)", level, fact_ref, status)
+                return CertificationFactPushResult(
+                    level=level,
+                    fact_ref=fact_ref,
+                    success=True,
+                )
+            else:
+                error_msg = f"Unexpected status {status}"
+                logger.warning(
+                    "Unexpected status %d pushing %s fact %s",
+                    status,
+                    level,
+                    fact_ref,
+                )
+                return CertificationFactPushResult(
+                    level=level,
+                    fact_ref=fact_ref,
+                    success=False,
+                    error=error_msg,
+                )
+
+    except urllib.error.HTTPError as e:
+        error_msg = f"HTTP {e.code}: {e.reason}"
+        logger.error("HTTP error pushing %s fact %s: %d %s", level, fact_ref, e.code, e.reason)
+        return CertificationFactPushResult(
+            level=level,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
+    except urllib.error.URLError as e:
+        error_msg = f"URL error: {e.reason}"
+        logger.error("URL error pushing %s fact %s: %s", level, fact_ref, e.reason)
+        return CertificationFactPushResult(
+            level=level,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
+    except Exception as e:
+        error_msg = str(e)
+        logger.error("Error pushing %s fact %s: %s", level, fact_ref, e)
+        return CertificationFactPushResult(
+            level=level,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
+
+
 def push_certification_facts(
     certification_result: "CertificationResult",
     push_facts_config: "PushFactsConfig",
@@ -469,15 +594,32 @@ def push_certification_facts(
     - catalog:default/abevalflow_certified
     - catalog:default/abevalflow_certification (summary)
 
+    The `passed` field in each level fact respects the certification hierarchy:
+    a level only shows as passed if all lower levels also pass.
+
     Args:
         certification_result: Complete certification result
         push_facts_config: Configuration with endpoint and credentials
 
     Returns:
         List of push results for each fact
+
+    Raises:
+        UnresolvedEnvVarError: If bearer_token contains unresolved ${VAR} placeholders
     """
     results: list[CertificationFactPushResult] = []
     resolved_token = _resolve_env_vars(push_facts_config.bearer_token)
+    _check_unresolved_env_vars(resolved_token, "bearer_token")
+
+    foundational_passed = certification_result.foundational.passed
+    trusted_hierarchy_passed = foundational_passed and certification_result.trusted.passed
+    certified_hierarchy_passed = trusted_hierarchy_passed and certification_result.certified.passed
+
+    hierarchy_passed_map = {
+        "foundational": foundational_passed,
+        "trusted": trusted_hierarchy_passed,
+        "certified": certified_hierarchy_passed,
+    }
 
     for level_name, level_result in [
         ("foundational", certification_result.foundational),
@@ -485,11 +627,13 @@ def push_certification_facts(
         ("certified", certification_result.certified),
     ]:
         fact_ref = f"{push_facts_config.fact_ref_prefix}{level_name}"
+        hierarchy_passed = hierarchy_passed_map[level_name]
         result = push_certification_level_fact(
             level_result=level_result,
             endpoint=push_facts_config.endpoint,
             entity_ref=push_facts_config.entity_ref,
             fact_ref=fact_ref,
+            hierarchy_passed=hierarchy_passed,
             bearer_token=resolved_token,
         )
         results.append(result)
@@ -500,52 +644,14 @@ def push_certification_facts(
         push_facts_config.entity_ref,
         summary_fact_ref,
     )
-
-    try:
-        data = json.dumps(summary_payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        if resolved_token:
-            headers["Authorization"] = f"Bearer {resolved_token}"
-
-        request = urllib.request.Request(
-            push_facts_config.endpoint,
-            data=data,
-            headers=headers,
-            method="POST",
+    results.append(
+        _push_raw_fact(
+            payload=summary_payload,
+            endpoint=push_facts_config.endpoint,
+            fact_ref=summary_fact_ref,
+            level="summary",
+            bearer_token=resolved_token,
         )
-
-        with urllib.request.urlopen(request, timeout=30.0) as response:
-            status = response.status
-            if status in (200, 201, 202):
-                logger.info("Pushed certification summary fact (status=%d)", status)
-                results.append(
-                    CertificationFactPushResult(
-                        level="summary",
-                        fact_ref=summary_fact_ref,
-                        success=True,
-                    )
-                )
-            else:
-                results.append(
-                    CertificationFactPushResult(
-                        level="summary",
-                        fact_ref=summary_fact_ref,
-                        success=False,
-                        error=f"Unexpected status {status}",
-                    )
-                )
-    except Exception as e:
-        logger.error("Error pushing certification summary fact: %s", e)
-        results.append(
-            CertificationFactPushResult(
-                level="summary",
-                fact_ref=summary_fact_ref,
-                success=False,
-                error=str(e),
-            )
-        )
+    )
 
     return results

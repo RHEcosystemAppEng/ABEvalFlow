@@ -7,10 +7,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from abevalflow.certification import (
+    CertificationLevel,
+    CertificationResult,
+    CheckId,
+    CheckResult,
+    LevelResult,
+)
 from abevalflow.compass_facts import (
+    CertificationFactPushResult,
     FactPushResult,
+    UnresolvedEnvVarError,
+    _build_certification_level_payload,
     _build_fact_payload,
+    _check_unresolved_env_vars,
     _resolve_env_vars,
+    push_certification_facts,
     push_gate_fact,
     push_gate_fact_from_config,
     validate_push_facts_config,
@@ -352,3 +364,205 @@ class TestPushFactsConfigSchema:
             bearer_token="${COMPASS_API_TOKEN}",
         )
         assert config.bearer_token == "${COMPASS_API_TOKEN}"
+
+
+class TestCheckUnresolvedEnvVars:
+    """Tests for _check_unresolved_env_vars function."""
+
+    def test_no_error_when_fully_resolved(self):
+        _check_unresolved_env_vars("resolved-token-value", "bearer_token")
+
+    def test_no_error_when_none(self):
+        _check_unresolved_env_vars(None, "bearer_token")
+
+    def test_no_error_when_empty(self):
+        _check_unresolved_env_vars("", "bearer_token")
+
+    def test_raises_when_unresolved_var(self):
+        with pytest.raises(UnresolvedEnvVarError) as exc_info:
+            _check_unresolved_env_vars("${UNSET_VAR}", "bearer_token")
+        assert "Unresolved environment variable" in str(exc_info.value)
+        assert "bearer_token" in str(exc_info.value)
+
+    def test_raises_when_partial_unresolved(self):
+        with pytest.raises(UnresolvedEnvVarError):
+            _check_unresolved_env_vars("prefix_${UNSET}_suffix", "some_field")
+
+
+class TestBuildCertificationLevelPayload:
+    """Tests for _build_certification_level_payload function."""
+
+    def test_uses_hierarchy_passed_not_level_passed(self):
+        """Verify payload uses hierarchy_passed parameter, not level_result.passed."""
+        level_result = LevelResult(
+            level=CertificationLevel.CERTIFIED,
+            passed=True,
+            checks=[
+                CheckResult(
+                    check_id=CheckId.ADVANCED_AGENT_VALIDATION,
+                    name="Test Check",
+                    passed=True,
+                    score=0.9,
+                )
+            ],
+        )
+        payload = _build_certification_level_payload(
+            level_result=level_result,
+            entity_ref="component:default/test",
+            fact_ref="catalog:default/test_certified",
+            hierarchy_passed=False,
+        )
+        data = payload["facts"][0]["data"]
+        assert data["passed"] is False
+
+    def test_hierarchy_passed_true_when_all_lower_pass(self):
+        """Verify hierarchy_passed=True is used when provided."""
+        level_result = LevelResult(
+            level=CertificationLevel.TRUSTED,
+            passed=True,
+            checks=[],
+        )
+        payload = _build_certification_level_payload(
+            level_result=level_result,
+            entity_ref="component:default/test",
+            fact_ref="catalog:default/test_trusted",
+            hierarchy_passed=True,
+        )
+        data = payload["facts"][0]["data"]
+        assert data["passed"] is True
+
+
+class TestPushCertificationFactsHierarchy:
+    """Tests for push_certification_facts hierarchy enforcement."""
+
+    @pytest.fixture
+    def mock_urlopen(self):
+        """Mock urlopen for successful responses."""
+        with patch("abevalflow.compass_facts.urllib.request.urlopen") as mock:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            mock.return_value = mock_response
+            yield mock
+
+    def test_certified_passed_false_when_trusted_fails(self, mock_urlopen):
+        """Certified level should show passed=False when Trusted fails."""
+        certification_result = CertificationResult(
+            foundational=LevelResult(level=CertificationLevel.FOUNDATIONAL, passed=True),
+            trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=False),
+            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=True),
+        )
+        push_facts_config = PushFactsConfig(
+            endpoint="https://example.com/api/facts/",
+            entity_ref="component:default/test",
+        )
+
+        payloads_sent = []
+
+        def capture_request(req, **kwargs):
+            data = json.loads(req.data.decode("utf-8"))
+            payloads_sent.append(data)
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            return mock_response
+
+        mock_urlopen.side_effect = capture_request
+
+        results = push_certification_facts(certification_result, push_facts_config)
+
+        assert len(results) == 4
+        assert all(r.success for r in results)
+
+        foundational_payload = payloads_sent[0]
+        trusted_payload = payloads_sent[1]
+        certified_payload = payloads_sent[2]
+
+        assert foundational_payload["facts"][0]["data"]["passed"] is True
+        assert trusted_payload["facts"][0]["data"]["passed"] is False
+        assert certified_payload["facts"][0]["data"]["passed"] is False
+
+    def test_trusted_passed_false_when_foundational_fails(self, mock_urlopen):
+        """Trusted level should show passed=False when Foundational fails."""
+        certification_result = CertificationResult(
+            foundational=LevelResult(level=CertificationLevel.FOUNDATIONAL, passed=False),
+            trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=True),
+            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=True),
+        )
+        push_facts_config = PushFactsConfig(
+            endpoint="https://example.com/api/facts/",
+            entity_ref="component:default/test",
+        )
+
+        payloads_sent = []
+
+        def capture_request(req, **kwargs):
+            data = json.loads(req.data.decode("utf-8"))
+            payloads_sent.append(data)
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            return mock_response
+
+        mock_urlopen.side_effect = capture_request
+
+        push_certification_facts(certification_result, push_facts_config)
+
+        foundational_payload = payloads_sent[0]
+        trusted_payload = payloads_sent[1]
+        certified_payload = payloads_sent[2]
+
+        assert foundational_payload["facts"][0]["data"]["passed"] is False
+        assert trusted_payload["facts"][0]["data"]["passed"] is False
+        assert certified_payload["facts"][0]["data"]["passed"] is False
+
+    def test_all_passed_when_hierarchy_complete(self, mock_urlopen):
+        """All levels show passed=True when full hierarchy passes."""
+        certification_result = CertificationResult(
+            foundational=LevelResult(level=CertificationLevel.FOUNDATIONAL, passed=True),
+            trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=True),
+            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=True),
+        )
+        push_facts_config = PushFactsConfig(
+            endpoint="https://example.com/api/facts/",
+            entity_ref="component:default/test",
+        )
+
+        payloads_sent = []
+
+        def capture_request(req, **kwargs):
+            data = json.loads(req.data.decode("utf-8"))
+            payloads_sent.append(data)
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.__enter__ = MagicMock(return_value=mock_response)
+            mock_response.__exit__ = MagicMock(return_value=False)
+            return mock_response
+
+        mock_urlopen.side_effect = capture_request
+
+        push_certification_facts(certification_result, push_facts_config)
+
+        for payload in payloads_sent[:3]:
+            assert payload["facts"][0]["data"]["passed"] is True
+
+    def test_raises_on_unresolved_bearer_token(self):
+        """Should raise UnresolvedEnvVarError if bearer_token is not resolved."""
+        certification_result = CertificationResult(
+            foundational=LevelResult(level=CertificationLevel.FOUNDATIONAL, passed=True),
+            trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=True),
+            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=True),
+        )
+        push_facts_config = PushFactsConfig(
+            endpoint="https://example.com/api/facts/",
+            entity_ref="component:default/test",
+            bearer_token="${UNSET_TOKEN}",
+        )
+
+        with pytest.raises(UnresolvedEnvVarError) as exc_info:
+            push_certification_facts(certification_result, push_facts_config)
+
+        assert "bearer_token" in str(exc_info.value)

@@ -289,13 +289,20 @@ def _map_gate_to_checks(
                 details={"source_implementation": source_impl},
             )
         )
+        enterprise_passed = high_score and len(gate.findings) == 0
+        if len(gate.findings) == 0 and not high_score:
+            enterprise_message = f"Score {gate.score:.2f} below threshold {adv_security_threshold}"
+        elif len(gate.findings) == 0:
+            enterprise_message = "No security findings"
+        else:
+            enterprise_message = f"{len(gate.findings)} findings require review"
         checks.append(
             CheckResult(
                 check_id=CheckId.ENTERPRISE_SECURITY_REVIEW,
                 name="Enterprise Security Review",
-                passed=high_score and len(gate.findings) == 0,
+                passed=enterprise_passed,
                 score=1.0 if len(gate.findings) == 0 else max(0, 1 - len(gate.findings) * 0.1),
-                message="No security findings" if len(gate.findings) == 0 else f"{len(gate.findings)} findings require review",
+                message=enterprise_message,
                 source_gate=gate.gate_name,
                 details={"source_implementation": source_impl},
             )

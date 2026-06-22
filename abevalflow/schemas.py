@@ -269,7 +269,15 @@ class CertificationLevelPolicy(BaseModel):
     def _validate_thresholds(cls, v: dict[str, float] | None) -> dict[str, float] | None:
         if v is None:
             return v
+        from abevalflow.certification import CheckId
+
+        valid_check_ids = {c.value for c in CheckId}
         for check_id, threshold in v.items():
+            if check_id not in valid_check_ids:
+                raise ValueError(
+                    f"Invalid threshold key '{check_id}'. "
+                    f"Must be a valid CheckId. Valid IDs: {sorted(valid_check_ids)}"
+                )
             if not 0.0 <= threshold <= 1.0:
                 raise ValueError(f"Threshold for {check_id} must be between 0.0 and 1.0")
         return v
@@ -325,12 +333,16 @@ class CertificationPolicy(BaseModel):
         """Get threshold override for a check, or None to use default.
 
         Searches all level policies for threshold overrides.
+        Uses last-wins semantics to match _collect_threshold_overrides behavior:
+        if the same check_id is specified in multiple levels, the later level
+        (certified > trusted > foundational) takes precedence.
         """
+        result: float | None = None
         for level_policy in [self.foundational, self.trusted, self.certified]:
             if level_policy is not None and level_policy.thresholds is not None:
                 if check_id in level_policy.thresholds:
-                    return level_policy.thresholds[check_id]
-        return None
+                    result = level_policy.thresholds[check_id]
+        return result
 
 
 class CopySpec(BaseModel):

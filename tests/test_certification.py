@@ -649,6 +649,155 @@ class TestDefaultThresholds:
         assert DEFAULT_THRESHOLDS[CheckId.INSTRUCTION_QUALITY] == 0.7
 
 
+class TestInvalidThresholdKeyValidation:
+    """Tests for threshold key validation in CertificationLevelPolicy."""
+
+    def test_invalid_threshold_key_raises_error(self) -> None:
+        """Invalid threshold key should raise ValueError during validation."""
+        with pytest.raises(ValueError) as exc_info:
+            CertificationLevelPolicy(
+                thresholds={"invalid_check_name": 0.5}
+            )
+        assert "Invalid threshold key 'invalid_check_name'" in str(exc_info.value)
+
+    def test_valid_threshold_key_passes(self) -> None:
+        """Valid threshold key should pass validation."""
+        policy = CertificationLevelPolicy(
+            thresholds={"advanced_agent_validation": 0.5}
+        )
+        assert policy.thresholds["advanced_agent_validation"] == 0.5
+
+    def test_multiple_valid_threshold_keys(self) -> None:
+        """Multiple valid threshold keys should pass."""
+        policy = CertificationLevelPolicy(
+            thresholds={
+                "advanced_agent_validation": 0.5,
+                "instruction_quality": 0.6,
+                "advanced_security_validation": 0.8,
+            }
+        )
+        assert len(policy.thresholds) == 3
+
+    def test_mixed_valid_and_invalid_keys_raises(self) -> None:
+        """Mix of valid and invalid keys should raise for the invalid one."""
+        with pytest.raises(ValueError) as exc_info:
+            CertificationLevelPolicy(
+                thresholds={
+                    "advanced_agent_validation": 0.5,
+                    "typo_in_check_name": 0.6,
+                }
+            )
+        assert "typo_in_check_name" in str(exc_info.value)
+
+
+class TestEnterpriseSecurityReviewMessage:
+    """Tests for ENTERPRISE_SECURITY_REVIEW message logic."""
+
+    def test_message_when_score_below_threshold_no_findings(self) -> None:
+        """Message should mention score when below threshold with no findings."""
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.SECURITY,
+            passed=True,
+            score=0.5,
+            mode=GateMode.BLOCK,
+            findings=[],
+        )
+        result = compute_certification(
+            gates=[security_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        enterprise_check = next(
+            c for c in result.certified.checks
+            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
+        )
+        assert enterprise_check.passed is False
+        assert "Score" in enterprise_check.message
+        assert "below threshold" in enterprise_check.message
+
+    def test_message_when_score_high_no_findings(self) -> None:
+        """Message should say 'No security findings' when score high and no findings."""
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.SECURITY,
+            passed=True,
+            score=0.95,
+            mode=GateMode.BLOCK,
+            findings=[],
+        )
+        result = compute_certification(
+            gates=[security_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        enterprise_check = next(
+            c for c in result.certified.checks
+            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
+        )
+        assert enterprise_check.passed is True
+        assert enterprise_check.message == "No security findings"
+
+    def test_message_when_findings_present(self) -> None:
+        """Message should mention findings count when findings present."""
+        findings = [
+            Finding(rule_id="test-1", severity=Severity.MEDIUM, message="Finding 1"),
+            Finding(rule_id="test-2", severity=Severity.LOW, message="Finding 2"),
+        ]
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.SECURITY,
+            passed=True,
+            score=0.8,
+            mode=GateMode.BLOCK,
+            findings=findings,
+        )
+        result = compute_certification(
+            gates=[security_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        enterprise_check = next(
+            c for c in result.certified.checks
+            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
+        )
+        assert enterprise_check.passed is False
+        assert "2 findings require review" in enterprise_check.message
+
+
+class TestCertificationPolicyGetThreshold:
+    """Tests for CertificationPolicy.get_threshold semantics."""
+
+    def test_get_threshold_last_wins(self) -> None:
+        """Later level threshold should override earlier level."""
+        policy = CertificationPolicy(
+            foundational=CertificationLevelPolicy(
+                thresholds={"advanced_agent_validation": 0.5}
+            ),
+            certified=CertificationLevelPolicy(
+                thresholds={"advanced_agent_validation": 0.9}
+            ),
+        )
+        assert policy.get_threshold("advanced_agent_validation") == 0.9
+
+    def test_get_threshold_returns_none_when_not_set(self) -> None:
+        """Should return None when threshold not configured."""
+        policy = CertificationPolicy()
+        assert policy.get_threshold("advanced_agent_validation") is None
+
+    def test_get_threshold_from_single_level(self) -> None:
+        """Should return threshold from whichever level defines it."""
+        policy = CertificationPolicy(
+            trusted=CertificationLevelPolicy(
+                thresholds={"instruction_quality": 0.6}
+            ),
+        )
+        assert policy.get_threshold("instruction_quality") == 0.6
+
+
 class TestBothModeCheckMerging:
     """Tests for 'both' mode with multiple engines producing the same check."""
 
