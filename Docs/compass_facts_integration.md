@@ -11,6 +11,7 @@ gate evaluation completes. This provides real-time visibility into:
 - Engine gate results (Harbor, ASE, A2A, MCPChecker)
 - Security gate results (Cisco scanner)
 - Quality gate results (LLM review)
+- **Certification levels** (Foundational, Trusted, Certified)
 
 ## Configuration
 
@@ -106,6 +107,118 @@ Each gate result is pushed as a Soundcheck fact with this structure:
   ]
 }
 ```
+
+## Certification Levels
+
+ABEvalFlow automatically computes certification levels based on gate results and pushes
+them to Compass. Three certification levels are supported:
+
+| Level | Description | Requirements |
+|-------|-------------|--------------|
+| **Foundational** | Basic validation passed | Valid structure, basic security, basic execution, quality review, metadata compliance |
+| **Trusted** | Production-ready | Evaluation assets present, advanced security, functional validation, instruction quality |
+| **Certified** | Enterprise-certified | Enterprise structure, enterprise security review, advanced agent validation, behavioral testing |
+
+### Certification Facts
+
+When `push_facts` is configured, ABEvalFlow automatically pushes 4 certification facts:
+
+| Fact Reference | Description |
+|----------------|-------------|
+| `abevalflow_foundational` | Foundational level result with all checks |
+| `abevalflow_trusted` | Trusted level result with all checks |
+| `abevalflow_certified` | Certified level result with all checks |
+| `abevalflow_certification` | Summary with highest level achieved |
+
+### Certification Fact Payload
+
+Each level fact includes detailed check results:
+
+```json
+{
+  "facts": [
+    {
+      "factRef": "catalog:default/abevalflow_foundational",
+      "entityRef": "component:default/my-skill",
+      "data": {
+        "level": "foundational",
+        "passed": true,
+        "checks_passed": 5,
+        "checks_total": 5,
+        "overall_score": 0.92,
+        "checks": [
+          {
+            "check_id": "valid_skill_structure",
+            "name": "Valid Skill Structure",
+            "passed": true,
+            "score": 1.0,
+            "message": "Structure validation passed",
+            "source_gate": null
+          },
+          {
+            "check_id": "basic_security_validation",
+            "name": "Basic Security Validation",
+            "passed": true,
+            "score": 0.95,
+            "message": "No critical findings",
+            "source_gate": "security"
+          }
+        ],
+        "evaluated_at": "2026-06-22T12:00:00+00:00"
+      }
+    }
+  ]
+}
+```
+
+### Summary Fact Payload
+
+The summary fact provides a quick overview:
+
+```json
+{
+  "facts": [
+    {
+      "factRef": "catalog:default/abevalflow_certification",
+      "entityRef": "component:default/my-skill",
+      "data": {
+        "highest_level": "trusted",
+        "foundational_passed": true,
+        "foundational_score": 0.92,
+        "trusted_passed": true,
+        "trusted_score": 0.85,
+        "certified_passed": false,
+        "certified_score": 0.60,
+        "evaluated_at": "2026-06-22T12:00:00+00:00"
+      }
+    }
+  ]
+}
+```
+
+### Certification Checks Reference
+
+**Foundational Checks:**
+- `valid_skill_structure` - Submission structure validation
+- `basic_security_validation` - No critical security findings
+- `basic_execution_validation` - Basic evaluation passes
+- `content_quality_review` - LLM quality review
+- `metadata_compliance` - Valid metadata.yaml
+
+**Trusted Checks:**
+- `evaluation_assets` - Tests/evals present
+- `advanced_security_validation` - Score >= 0.9
+- `functional_validation` - Evaluation gate passes
+- `instruction_quality` - Quality score >= 0.7
+- `registry_governance` - Registry compliance (not yet implemented)
+- `operational_policy_compliance` - Policy compliance (not yet implemented)
+
+**Certified Checks:**
+- `enterprise_structure_validation` - Enterprise-grade structure
+- `enterprise_security_review` - Zero security findings
+- `enterprise_behavioral_testing` - Behavioral tests (not yet implemented)
+- `advanced_agent_validation` - Evaluation score >= 0.8
+- `continuous_optimization` - Optimization tracking (not yet implemented)
 
 ## Validation Warning
 

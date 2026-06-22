@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
+    from abevalflow.certification import CertificationResult, LevelResult
     from abevalflow.gates.base import GateResult
     from abevalflow.schemas import PushFactsConfig
 
@@ -265,3 +266,286 @@ def validate_push_facts_config(
             "No facts will be pushed. Add push_fact: true to gate configurations.",
             push_facts_config.endpoint,
         )
+
+
+class CertificationFactPushResult(BaseModel):
+    """Result of pushing a certification level fact."""
+
+    level: str = Field(description="Certification level (foundational, trusted, certified)")
+    fact_ref: str = Field(description="Fact reference that was used")
+    success: bool = Field(description="Whether the push succeeded")
+    error: str | None = Field(default=None, description="Error message if push failed")
+    pushed_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp of the push attempt",
+    )
+
+
+def _build_certification_level_payload(
+    level_result: "LevelResult",
+    entity_ref: str,
+    fact_ref: str,
+) -> dict[str, Any]:
+    """Build Soundcheck fact payload for a certification level.
+
+    Args:
+        level_result: The certification level result
+        entity_ref: Compass entity reference
+        fact_ref: Unique fact identifier
+
+    Returns:
+        Dict ready to be JSON-serialized and POSTed to Facts API
+    """
+    checks_data = []
+    for check in level_result.checks:
+        checks_data.append({
+            "check_id": check.check_id.value,
+            "name": check.name,
+            "passed": check.passed,
+            "score": check.score,
+            "message": check.message,
+            "source_gate": check.source_gate,
+        })
+
+    return {
+        "facts": [
+            {
+                "factRef": fact_ref,
+                "entityRef": entity_ref,
+                "data": {
+                    "level": level_result.level.value,
+                    "passed": level_result.passed,
+                    "checks_passed": level_result.checks_passed,
+                    "checks_total": level_result.checks_total,
+                    "overall_score": level_result.overall_score,
+                    "checks": checks_data,
+                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+        ]
+    }
+
+
+def _build_certification_summary_payload(
+    certification_result: "CertificationResult",
+    entity_ref: str,
+    fact_ref: str,
+) -> dict[str, Any]:
+    """Build Soundcheck fact payload for certification summary.
+
+    Args:
+        certification_result: Complete certification result
+        entity_ref: Compass entity reference
+        fact_ref: Unique fact identifier
+
+    Returns:
+        Dict ready to be JSON-serialized and POSTed to Facts API
+    """
+    return {
+        "facts": [
+            {
+                "factRef": fact_ref,
+                "entityRef": entity_ref,
+                "data": {
+                    "highest_level": certification_result.highest_level.value,
+                    "foundational_passed": certification_result.foundational.passed,
+                    "foundational_score": certification_result.foundational.overall_score,
+                    "trusted_passed": certification_result.trusted.passed,
+                    "trusted_score": certification_result.trusted.overall_score,
+                    "certified_passed": certification_result.certified.passed,
+                    "certified_score": certification_result.certified.overall_score,
+                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+        ]
+    }
+
+
+def push_certification_level_fact(
+    level_result: "LevelResult",
+    endpoint: str,
+    entity_ref: str,
+    fact_ref: str,
+    timeout_sec: float = 30.0,
+    bearer_token: str | None = None,
+) -> CertificationFactPushResult:
+    """Push a certification level result to Compass Facts API.
+
+    Args:
+        level_result: The certification level result to push
+        endpoint: Compass Facts API URL
+        entity_ref: Compass entity reference
+        fact_ref: Unique fact identifier for this level
+        timeout_sec: Request timeout in seconds
+        bearer_token: Optional bearer token for authentication
+
+    Returns:
+        CertificationFactPushResult with success status
+    """
+    payload = _build_certification_level_payload(level_result, entity_ref, fact_ref)
+
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+
+        request = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+            status = response.status
+            if status in (200, 201, 202):
+                logger.info(
+                    "Pushed certification fact %s for level %s (status=%d)",
+                    fact_ref,
+                    level_result.level.value,
+                    status,
+                )
+                return CertificationFactPushResult(
+                    level=level_result.level.value,
+                    fact_ref=fact_ref,
+                    success=True,
+                )
+            else:
+                error_msg = f"Unexpected status {status}"
+                logger.warning(
+                    "Unexpected status %d pushing certification fact %s",
+                    status,
+                    fact_ref,
+                )
+                return CertificationFactPushResult(
+                    level=level_result.level.value,
+                    fact_ref=fact_ref,
+                    success=False,
+                    error=error_msg,
+                )
+
+    except urllib.error.HTTPError as e:
+        error_msg = f"HTTP {e.code}: {e.reason}"
+        logger.error("HTTP error pushing certification fact %s: %d %s", fact_ref, e.code, e.reason)
+        return CertificationFactPushResult(
+            level=level_result.level.value,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
+    except urllib.error.URLError as e:
+        error_msg = f"URL error: {e.reason}"
+        logger.error("URL error pushing certification fact %s: %s", fact_ref, e.reason)
+        return CertificationFactPushResult(
+            level=level_result.level.value,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
+    except Exception as e:
+        error_msg = str(e)
+        logger.error("Error pushing certification fact %s: %s", fact_ref, e)
+        return CertificationFactPushResult(
+            level=level_result.level.value,
+            fact_ref=fact_ref,
+            success=False,
+            error=error_msg,
+        )
+
+
+def push_certification_facts(
+    certification_result: "CertificationResult",
+    push_facts_config: "PushFactsConfig",
+) -> list[CertificationFactPushResult]:
+    """Push all certification level facts to Compass.
+
+    Pushes 4 facts:
+    - catalog:default/abevalflow_foundational
+    - catalog:default/abevalflow_trusted
+    - catalog:default/abevalflow_certified
+    - catalog:default/abevalflow_certification (summary)
+
+    Args:
+        certification_result: Complete certification result
+        push_facts_config: Configuration with endpoint and credentials
+
+    Returns:
+        List of push results for each fact
+    """
+    results: list[CertificationFactPushResult] = []
+    resolved_token = _resolve_env_vars(push_facts_config.bearer_token)
+
+    for level_name, level_result in [
+        ("foundational", certification_result.foundational),
+        ("trusted", certification_result.trusted),
+        ("certified", certification_result.certified),
+    ]:
+        fact_ref = f"{push_facts_config.fact_ref_prefix}{level_name}"
+        result = push_certification_level_fact(
+            level_result=level_result,
+            endpoint=push_facts_config.endpoint,
+            entity_ref=push_facts_config.entity_ref,
+            fact_ref=fact_ref,
+            bearer_token=resolved_token,
+        )
+        results.append(result)
+
+    summary_fact_ref = f"{push_facts_config.fact_ref_prefix}certification"
+    summary_payload = _build_certification_summary_payload(
+        certification_result,
+        push_facts_config.entity_ref,
+        summary_fact_ref,
+    )
+
+    try:
+        data = json.dumps(summary_payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if resolved_token:
+            headers["Authorization"] = f"Bearer {resolved_token}"
+
+        request = urllib.request.Request(
+            push_facts_config.endpoint,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=30.0) as response:
+            status = response.status
+            if status in (200, 201, 202):
+                logger.info("Pushed certification summary fact (status=%d)", status)
+                results.append(
+                    CertificationFactPushResult(
+                        level="summary",
+                        fact_ref=summary_fact_ref,
+                        success=True,
+                    )
+                )
+            else:
+                results.append(
+                    CertificationFactPushResult(
+                        level="summary",
+                        fact_ref=summary_fact_ref,
+                        success=False,
+                        error=f"Unexpected status {status}",
+                    )
+                )
+    except Exception as e:
+        logger.error("Error pushing certification summary fact: %s", e)
+        results.append(
+            CertificationFactPushResult(
+                level="summary",
+                fact_ref=summary_fact_ref,
+                success=False,
+                error=str(e),
+            )
+        )
+
+    return results

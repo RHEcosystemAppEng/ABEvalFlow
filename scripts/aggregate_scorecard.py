@@ -32,8 +32,11 @@ from pathlib import Path
 
 import yaml
 
+from abevalflow.certification import compute_certification
 from abevalflow.compass_facts import (
+    CertificationFactPushResult,
     FactPushResult,
+    push_certification_facts,
     push_gate_fact_from_config,
     validate_push_facts_config,
 )
@@ -215,11 +218,40 @@ def aggregate_scorecard(
     recommendation, reason = apply_combination_logic(gates, policy)
     logger.info("Final recommendation: %s (%s)", recommendation, reason)
 
-    # Log fact push summary
+    metadata_valid = (submission_dir / "metadata.yaml").exists()
+    has_eval_assets = (
+        (submission_dir / "evals" / "evals.json").exists()
+        or (submission_dir / "tests").exists()
+    )
+
+    certification = compute_certification(
+        gates=gates,
+        validation_passed=True,
+        metadata_valid=metadata_valid,
+        has_eval_assets=has_eval_assets,
+    )
+    logger.info(
+        "Certification levels: foundational=%s, trusted=%s, certified=%s (highest=%s)",
+        certification.foundational.passed,
+        certification.trusted.passed,
+        certification.certified.passed,
+        certification.highest_level.value,
+    )
+
+    cert_push_results: list[CertificationFactPushResult] = []
+    if policy.push_facts is not None:
+        cert_push_results = push_certification_facts(certification, policy.push_facts)
+        success_count = sum(1 for r in cert_push_results if r.success)
+        logger.info(
+            "Certification facts: %d/%d pushed successfully",
+            success_count,
+            len(cert_push_results),
+        )
+
     if fact_push_results:
         success_count = sum(1 for r in fact_push_results if r.success)
         logger.info(
-            "Compass facts: %d/%d pushed successfully",
+            "Gate facts: %d/%d pushed successfully",
             success_count,
             len(fact_push_results),
         )
@@ -235,6 +267,8 @@ def aggregate_scorecard(
         created_at=datetime.now(timezone.utc),
         provenance=provenance,
         fact_push_results=fact_push_results,
+        certification=certification,
+        certification_fact_push_results=cert_push_results,
     )
 
 
@@ -321,12 +355,14 @@ def main() -> int:
             (results_dir / "scorecard-gates-failed").write_text(str(scorecard.gates_failed))
             (results_dir / "scorecard-blocking-passed").write_text(str(scorecard.blocking_gates_passed))
             (results_dir / "scorecard-blocking-failed").write_text(str(scorecard.blocking_gates_failed))
+            (results_dir / "highest-certification").write_text(scorecard.highest_certification.value)
 
             logger.info("Wrote Tekton results to %s", results_dir)
 
         print(f"Scorecard recommendation: {scorecard.recommendation.value}")
         print(f"Reason: {scorecard.recommendation_reason}")
         print(f"Gates: {scorecard.gates_passed} passed, {scorecard.gates_failed} failed")
+        print(f"Highest certification: {scorecard.highest_certification.value}")
 
         return 0
 

@@ -2,6 +2,9 @@
 
 The scorecard aggregates results from all gates (engine, security, quality)
 and applies a configurable policy to produce a single recommendation.
+
+The scorecard also computes certification levels (Foundational, Trusted, Certified)
+based on which checks pass. See abevalflow.certification for level definitions.
 """
 
 from datetime import datetime, timezone
@@ -10,7 +13,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
-from abevalflow.compass_facts import FactPushResult
+from abevalflow.certification import (
+    CertificationLevel,
+    CertificationResult,
+    compute_certification,
+)
+from abevalflow.compass_facts import CertificationFactPushResult, FactPushResult
 from abevalflow.gates.base import GateMode, GateResult
 from abevalflow.schemas import CombinationMode, GatePolicy
 
@@ -65,6 +73,24 @@ class Scorecard(BaseModel):
         default_factory=list,
         description="Results of pushing gate facts to Compass (empty if disabled)",
     )
+
+    certification: CertificationResult | None = Field(
+        default=None,
+        description="Certification level results (Foundational, Trusted, Certified)",
+    )
+
+    certification_fact_push_results: list[CertificationFactPushResult] = Field(
+        default_factory=list,
+        description="Results of pushing certification facts to Compass",
+    )
+
+    @computed_field
+    @property
+    def highest_certification(self) -> CertificationLevel:
+        """Highest certification level achieved."""
+        if self.certification is None:
+            return CertificationLevel.NONE
+        return self.certification.highest_level
 
     @computed_field
     @property
