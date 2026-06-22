@@ -218,7 +218,31 @@ def aggregate_scorecard(
     recommendation, reason = apply_combination_logic(gates, policy)
     logger.info("Final recommendation: %s (%s)", recommendation, reason)
 
-    metadata_valid = (submission_dir / "metadata.yaml").exists()
+    # Read validation results from validate task output
+    validation_path = reports_dir / "validation.json"
+    validation_passed = True
+    metadata_valid = True
+    validation_errors: list[str] = []
+
+    if validation_path.exists():
+        try:
+            validation_data = json.loads(validation_path.read_text())
+            validation_passed = validation_data.get("valid", False)
+            validation_errors = validation_data.get("errors", [])
+            # Metadata is valid if validation passed (schema check is part of validation)
+            metadata_valid = validation_passed
+            logger.info(
+                "Read validation results: valid=%s, errors=%d",
+                validation_passed,
+                len(validation_errors),
+            )
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to read validation.json: %s", e)
+    else:
+        # Fallback: check file existence if validation.json not available
+        metadata_valid = (submission_dir / "metadata.yaml").exists()
+        logger.info("No validation.json found, using file existence checks")
+
     has_eval_assets = (
         (submission_dir / "evals" / "evals.json").exists()
         or (submission_dir / "tests").exists()
@@ -226,7 +250,7 @@ def aggregate_scorecard(
 
     certification = compute_certification(
         gates=gates,
-        validation_passed=True,
+        validation_passed=validation_passed,
         metadata_valid=metadata_valid,
         has_eval_assets=has_eval_assets,
     )
