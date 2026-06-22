@@ -136,6 +136,13 @@ def _maybe_push_fact(
     if policy.push_facts is None:
         return None
 
+    # Compute intended fact_ref before the call (for use in error case)
+    policy_key = gate_result.get_policy_key()
+    if policy_key and policy_key != gate_result.gate_name:
+        intended_fact_ref = f"{policy.push_facts.fact_ref_prefix}{gate_result.gate_name}_{policy_key}"
+    else:
+        intended_fact_ref = f"{policy.push_facts.fact_ref_prefix}{gate_result.gate_name}"
+
     try:
         result = push_gate_fact_from_config(gate_result, policy.push_facts)
         if result.success:
@@ -155,7 +162,7 @@ def _maybe_push_fact(
         )
         return FactPushResult(
             gate_name=gate_result.gate_name,
-            fact_ref="",
+            fact_ref=intended_fact_ref,
             success=False,
             error=str(e),
         )

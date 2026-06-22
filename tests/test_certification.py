@@ -926,3 +926,180 @@ class TestBothModeCheckMerging:
         )
         assert "source_implementation" in exec_check.details
         assert exec_check.details["source_implementation"] == "harbor"
+
+
+class TestHierarchyEnforcement:
+    """Tests for certification hierarchy enforcement in compute_certification.
+    
+    The hierarchy is: Foundational < Trusted < Certified
+    If a lower level fails, higher levels must also fail even if their own checks pass.
+    """
+
+    def test_trusted_fails_certified_cascades(self) -> None:
+        """If trusted's own checks fail, certified should also fail.
+        
+        Scenario: foundational passes, trusted fails its own checks
+        Expected: certified.passed should be False
+        """
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.85,
+            mode=GateMode.BLOCK,
+        )
+        # Use simplified policy: foundational needs only structure checks,
+        # trusted needs functional_validation which will pass from engine gate,
+        # BUT also needs advanced_security_validation which won't be satisfied
+        policy = CertificationPolicy(
+            foundational=CertificationLevelPolicy(
+                checks=["valid_skill_structure", "metadata_compliance"]
+            ),
+            trusted=CertificationLevelPolicy(
+                checks=["functional_validation", "advanced_security_validation"]
+            ),
+            certified=CertificationLevelPolicy(
+                checks=["advanced_agent_validation"]
+            ),
+        )
+        
+        result = compute_certification(
+            gates=[engine_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            policy=policy,
+        )
+        
+        # Foundational should pass (only needs structure/metadata)
+        assert result.foundational.passed is True
+        # Trusted should fail (advanced_security_validation not satisfied)
+        assert result.trusted.passed is False
+        # Certified should also fail due to hierarchy
+        assert result.certified.passed is False
+        assert result.highest_level == CertificationLevel.FOUNDATIONAL
+
+    def test_foundational_fails_trusted_cascades(self) -> None:
+        """If foundational fails, trusted should also fail even if its own checks pass.
+        
+        Scenario: foundational fails (validation_passed=False), provide gates for trusted
+        Expected: trusted.passed should be False despite its checks being satisfied
+        """
+        # Provide all gates for trusted-level checks
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.QUALITY,
+            passed=True,
+            score=1.0,
+            mode=GateMode.BLOCK,
+        )
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.85,
+            mode=GateMode.BLOCK,
+        )
+        
+        result = compute_certification(
+            gates=[security_gate, engine_gate],
+            validation_passed=False,  # This causes foundational to fail
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        
+        # Foundational fails because validation_passed=False
+        assert result.foundational.passed is False
+        # Trusted should fail due to hierarchy even if its checks might pass
+        assert result.trusted.passed is False
+        # Certified should also fail
+        assert result.certified.passed is False
+        assert result.highest_level == CertificationLevel.NONE
+
+    def test_foundational_fails_trusted_checks_still_preserved(self) -> None:
+        """When hierarchy forces trusted to fail, individual check results are preserved.
+        
+        This allows consumers to see what would have passed if foundational passed.
+        """
+        # Provide gates that satisfy trusted checks
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.QUALITY,
+            passed=True,
+            score=1.0,
+            mode=GateMode.BLOCK,
+        )
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.85,
+            mode=GateMode.BLOCK,
+        )
+        
+        result = compute_certification(
+            gates=[security_gate, engine_gate],
+            validation_passed=False,  # Causes foundational to fail
+            metadata_valid=True,
+            has_eval_assets=True,
+        )
+        
+        # Trusted level fails due to hierarchy
+        assert result.trusted.passed is False
+        # But individual checks that could be evaluated are still present
+        func_check = next(
+            (c for c in result.trusted.checks if c.check_id == CheckId.FUNCTIONAL_VALIDATION),
+            None
+        )
+        assert func_check is not None
+        # The check itself passed (from the engine gate)
+        assert func_check.passed is True
+
+    def test_all_levels_pass_when_all_requirements_met(self) -> None:
+        """All levels pass when all their requirements are satisfied."""
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.QUALITY,
+            passed=True,
+            score=1.0,
+            mode=GateMode.BLOCK,
+        )
+        quality_gate = GateResult(
+            gate_name="quality",
+            gate_type=GateType.QUALITY,
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+        )
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.85,
+            mode=GateMode.BLOCK,
+        )
+        # Use policy to simplify check requirements
+        policy = CertificationPolicy(
+            foundational=CertificationLevelPolicy(
+                checks=["valid_skill_structure", "metadata_compliance"]
+            ),
+            trusted=CertificationLevelPolicy(
+                checks=["functional_validation"]
+            ),
+            certified=CertificationLevelPolicy(
+                checks=["advanced_agent_validation"]
+            ),
+        )
+        
+        result = compute_certification(
+            gates=[security_gate, quality_gate, engine_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            policy=policy,
+        )
+        
+        assert result.foundational.passed is True
+        assert result.trusted.passed is True
+        assert result.certified.passed is True
+        assert result.highest_level == CertificationLevel.CERTIFIED

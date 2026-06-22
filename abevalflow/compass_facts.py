@@ -289,16 +289,13 @@ def _build_certification_level_payload(
     level_result: "LevelResult",
     entity_ref: str,
     fact_ref: str,
-    hierarchy_passed: bool,
 ) -> dict[str, Any]:
     """Build Soundcheck fact payload for a certification level.
 
     Args:
-        level_result: The certification level result
+        level_result: The certification level result (with hierarchy already enforced)
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier
-        hierarchy_passed: Whether this level is achieved considering hierarchy
-            (i.e., all lower levels also pass)
 
     Returns:
         Dict ready to be JSON-serialized and POSTed to Facts API
@@ -314,20 +311,29 @@ def _build_certification_level_payload(
             "source_gate": check.source_gate,
         })
 
+    # Determine if this level failed due to hierarchy (all checks passed but level failed)
+    all_checks_passed = level_result.checks_total > 0 and level_result.checks_passed == level_result.checks_total
+    hierarchy_forced_failure = not level_result.passed and all_checks_passed
+
+    data: dict[str, Any] = {
+        "level": level_result.level.value,
+        "passed": level_result.passed,
+        "checks_passed": level_result.checks_passed,
+        "checks_total": level_result.checks_total,
+        "overall_score": level_result.overall_score,
+        "checks": checks_data,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if hierarchy_forced_failure:
+        data["failure_reason"] = "prerequisite_level_failed"
+
     return {
         "facts": [
             {
                 "factRef": fact_ref,
                 "entityRef": entity_ref,
-                "data": {
-                    "level": level_result.level.value,
-                    "passed": hierarchy_passed,
-                    "checks_passed": level_result.checks_passed,
-                    "checks_total": level_result.checks_total,
-                    "overall_score": level_result.overall_score,
-                    "checks": checks_data,
-                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
-                },
+                "data": data,
             }
         ]
     }
@@ -337,18 +343,20 @@ def _build_certification_summary_payload(
     certification_result: "CertificationResult",
     entity_ref: str,
     fact_ref: str,
-    hierarchy_passed_map: dict[str, bool],
 ) -> dict[str, Any]:
     """Build Soundcheck fact payload for certification summary.
 
     Args:
-        certification_result: Complete certification result
+        certification_result: Complete certification result (with hierarchy already enforced)
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier
-        hierarchy_passed_map: Map of level name to hierarchy-enforced passed status
 
     Returns:
         Dict ready to be JSON-serialized and POSTed to Facts API
+
+    Note:
+        The .passed values on each level already reflect hierarchy enforcement
+        from compute_certification(). No additional hierarchy logic needed here.
     """
     return {
         "facts": [
@@ -357,11 +365,11 @@ def _build_certification_summary_payload(
                 "entityRef": entity_ref,
                 "data": {
                     "highest_level": certification_result.highest_level.value,
-                    "foundational_passed": hierarchy_passed_map["foundational"],
+                    "foundational_passed": certification_result.foundational.passed,
                     "foundational_score": certification_result.foundational.overall_score,
-                    "trusted_passed": hierarchy_passed_map["trusted"],
+                    "trusted_passed": certification_result.trusted.passed,
                     "trusted_score": certification_result.trusted.overall_score,
-                    "certified_passed": hierarchy_passed_map["certified"],
+                    "certified_passed": certification_result.certified.passed,
                     "certified_score": certification_result.certified.overall_score,
                     "evaluated_at": datetime.now(timezone.utc).isoformat(),
                 },
@@ -375,27 +383,27 @@ def push_certification_level_fact(
     endpoint: str,
     entity_ref: str,
     fact_ref: str,
-    hierarchy_passed: bool,
     timeout_sec: float = 30.0,
     bearer_token: str | None = None,
 ) -> CertificationFactPushResult:
     """Push a certification level result to Compass Facts API.
 
     Args:
-        level_result: The certification level result to push
+        level_result: The certification level result to push (with hierarchy already enforced)
         endpoint: Compass Facts API URL
         entity_ref: Compass entity reference
         fact_ref: Unique fact identifier for this level
-        hierarchy_passed: Whether this level is achieved considering hierarchy
         timeout_sec: Request timeout in seconds
         bearer_token: Optional bearer token for authentication
 
     Returns:
         CertificationFactPushResult with success status
+
+    Note:
+        The level_result.passed value already reflects hierarchy enforcement
+        from compute_certification(). No additional hierarchy logic needed here.
     """
-    payload = _build_certification_level_payload(
-        level_result, entity_ref, fact_ref, hierarchy_passed
-    )
+    payload = _build_certification_level_payload(level_result, entity_ref, fact_ref)
 
     return _push_raw_fact(
         payload=payload,
@@ -537,11 +545,12 @@ def push_certification_facts(
     - catalog:default/abevalflow_certified
     - catalog:default/abevalflow_certification (summary)
 
-    The `passed` field in each level fact respects the certification hierarchy:
-    a level only shows as passed if all lower levels also pass.
+    The `passed` field in each level fact respects the certification hierarchy
+    (enforced by compute_certification): a level only shows as passed if all
+    lower levels also pass.
 
     Args:
-        certification_result: Complete certification result
+        certification_result: Complete certification result (with hierarchy enforced)
         push_facts_config: Configuration with endpoint and credentials
 
     Returns:
@@ -549,20 +558,14 @@ def push_certification_facts(
 
     Raises:
         UnresolvedEnvVarError: If bearer_token contains unresolved ${VAR} placeholders
+
+    Note:
+        Hierarchy enforcement happens in compute_certification(), not here.
+        The .passed values on each level already reflect hierarchy requirements.
     """
     results: list[CertificationFactPushResult] = []
     resolved_token = _resolve_env_vars(push_facts_config.bearer_token)
     _check_unresolved_env_vars(resolved_token, "bearer_token")
-
-    foundational_passed = certification_result.foundational.passed
-    trusted_hierarchy_passed = foundational_passed and certification_result.trusted.passed
-    certified_hierarchy_passed = trusted_hierarchy_passed and certification_result.certified.passed
-
-    hierarchy_passed_map = {
-        "foundational": foundational_passed,
-        "trusted": trusted_hierarchy_passed,
-        "certified": certified_hierarchy_passed,
-    }
 
     for level_name, level_result in [
         ("foundational", certification_result.foundational),
@@ -570,13 +573,11 @@ def push_certification_facts(
         ("certified", certification_result.certified),
     ]:
         fact_ref = f"{push_facts_config.fact_ref_prefix}{level_name}"
-        hierarchy_passed = hierarchy_passed_map[level_name]
         result = push_certification_level_fact(
             level_result=level_result,
             endpoint=push_facts_config.endpoint,
             entity_ref=push_facts_config.entity_ref,
             fact_ref=fact_ref,
-            hierarchy_passed=hierarchy_passed,
             bearer_token=resolved_token,
         )
         results.append(result)
@@ -586,7 +587,6 @@ def push_certification_facts(
         certification_result,
         push_facts_config.entity_ref,
         summary_fact_ref,
-        hierarchy_passed_map,
     )
     results.append(
         _push_raw_fact(

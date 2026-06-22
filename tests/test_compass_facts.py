@@ -392,8 +392,8 @@ class TestCheckUnresolvedEnvVars:
 class TestBuildCertificationLevelPayload:
     """Tests for _build_certification_level_payload function."""
 
-    def test_uses_hierarchy_passed_not_level_passed(self):
-        """Verify payload uses hierarchy_passed parameter, not level_result.passed."""
+    def test_uses_level_result_passed(self):
+        """Verify payload uses level_result.passed directly (hierarchy pre-enforced)."""
         level_result = LevelResult(
             level=CertificationLevel.CERTIFIED,
             passed=True,
@@ -410,30 +410,66 @@ class TestBuildCertificationLevelPayload:
             level_result=level_result,
             entity_ref="component:default/test",
             fact_ref="catalog:default/test_certified",
-            hierarchy_passed=False,
         )
         data = payload["facts"][0]["data"]
-        assert data["passed"] is False
+        assert data["passed"] is True
 
-    def test_hierarchy_passed_true_when_all_lower_pass(self):
-        """Verify hierarchy_passed=True is used when provided."""
+    def test_failure_reason_when_hierarchy_forced(self):
+        """Verify failure_reason is added when all checks pass but level fails (hierarchy)."""
+        # This simulates a level that was forced to fail due to hierarchy
+        # (all checks passed but level.passed is False)
         level_result = LevelResult(
             level=CertificationLevel.TRUSTED,
-            passed=True,
-            checks=[],
+            passed=False,  # Forced to fail by hierarchy
+            checks=[
+                CheckResult(
+                    check_id=CheckId.FUNCTIONAL_VALIDATION,
+                    name="Functional Validation",
+                    passed=True,  # Check itself passed
+                    score=0.9,
+                )
+            ],
         )
         payload = _build_certification_level_payload(
             level_result=level_result,
             entity_ref="component:default/test",
             fact_ref="catalog:default/test_trusted",
-            hierarchy_passed=True,
         )
         data = payload["facts"][0]["data"]
-        assert data["passed"] is True
+        assert data["passed"] is False
+        assert data.get("failure_reason") == "prerequisite_level_failed"
+
+    def test_no_failure_reason_when_check_failed(self):
+        """Verify failure_reason is NOT added when a check actually failed."""
+        level_result = LevelResult(
+            level=CertificationLevel.FOUNDATIONAL,
+            passed=False,  # Failed because a check failed
+            checks=[
+                CheckResult(
+                    check_id=CheckId.VALID_SKILL_STRUCTURE,
+                    name="Valid Skill Structure",
+                    passed=False,  # Check actually failed
+                    score=0.0,
+                )
+            ],
+        )
+        payload = _build_certification_level_payload(
+            level_result=level_result,
+            entity_ref="component:default/test",
+            fact_ref="catalog:default/test_foundational",
+        )
+        data = payload["facts"][0]["data"]
+        assert data["passed"] is False
+        assert "failure_reason" not in data
 
 
 class TestPushCertificationFactsHierarchy:
-    """Tests for push_certification_facts hierarchy enforcement."""
+    """Tests for push_certification_facts with pre-enforced hierarchy.
+    
+    Note: Hierarchy enforcement now happens in compute_certification(), not in
+    push_certification_facts. These tests verify that push_certification_facts
+    correctly passes through the pre-enforced .passed values.
+    """
 
     @pytest.fixture
     def mock_urlopen(self):
@@ -446,12 +482,14 @@ class TestPushCertificationFactsHierarchy:
             mock.return_value = mock_response
             yield mock
 
-    def test_certified_passed_false_when_trusted_fails(self, mock_urlopen):
-        """Certified level should show passed=False when Trusted fails."""
+    def test_trusted_fails_certified_also_fails(self, mock_urlopen):
+        """With pre-enforced hierarchy: if trusted fails, certified also fails."""
+        # This is a properly hierarchy-enforced result from compute_certification
+        # (trusted failed its own checks, so certified is also marked as failed)
         certification_result = CertificationResult(
             foundational=LevelResult(level=CertificationLevel.FOUNDATIONAL, passed=True),
             trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=False),
-            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=True),
+            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=False),  # Pre-enforced
         )
         push_facts_config = PushFactsConfig(
             endpoint="https://example.com/api/facts/",
@@ -484,12 +522,13 @@ class TestPushCertificationFactsHierarchy:
         assert trusted_payload["facts"][0]["data"]["passed"] is False
         assert certified_payload["facts"][0]["data"]["passed"] is False
 
-    def test_trusted_passed_false_when_foundational_fails(self, mock_urlopen):
-        """Trusted level should show passed=False when Foundational fails."""
+    def test_foundational_fails_all_fail(self, mock_urlopen):
+        """With pre-enforced hierarchy: if foundational fails, all levels fail."""
+        # This is a properly hierarchy-enforced result from compute_certification
         certification_result = CertificationResult(
             foundational=LevelResult(level=CertificationLevel.FOUNDATIONAL, passed=False),
-            trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=True),
-            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=True),
+            trusted=LevelResult(level=CertificationLevel.TRUSTED, passed=False),  # Pre-enforced
+            certified=LevelResult(level=CertificationLevel.CERTIFIED, passed=False),  # Pre-enforced
         )
         push_facts_config = PushFactsConfig(
             endpoint="https://example.com/api/facts/",
