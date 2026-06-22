@@ -339,11 +339,12 @@ class TestComputeCertification:
         )
         assert enterprise_check.passed is False
 
-    def test_all_check_ids_covered(self) -> None:
-        """Verify all check IDs are accounted for in level definitions."""
+    def test_default_checks_are_valid_check_ids(self) -> None:
+        """Verify all default checks are valid CheckId values."""
         all_level_checks = set(FOUNDATIONAL_CHECKS + TRUSTED_CHECKS + CERTIFIED_CHECKS)
         all_check_ids = set(CheckId)
-        assert all_check_ids == all_level_checks
+        # All default checks should be valid CheckIds (subset)
+        assert all_level_checks.issubset(all_check_ids)
 
 
 class TestCertificationLevelConstants:
@@ -362,13 +363,15 @@ class TestCertificationLevelConstants:
         assert CheckId.ADVANCED_SECURITY_VALIDATION in TRUSTED_CHECKS
         assert CheckId.FUNCTIONAL_VALIDATION in TRUSTED_CHECKS
         assert CheckId.INSTRUCTION_QUALITY in TRUSTED_CHECKS
-        assert len(TRUSTED_CHECKS) == 6
+        # registry_governance and operational_policy_compliance not yet implemented
+        assert len(TRUSTED_CHECKS) == 4
 
     def test_certified_has_expected_checks(self) -> None:
         assert CheckId.ENTERPRISE_STRUCTURE_VALIDATION in CERTIFIED_CHECKS
         assert CheckId.ENTERPRISE_SECURITY_REVIEW in CERTIFIED_CHECKS
         assert CheckId.ADVANCED_AGENT_VALIDATION in CERTIFIED_CHECKS
-        assert len(CERTIFIED_CHECKS) == 5
+        # behavioral_testing and continuous_optimization not yet implemented
+        assert len(CERTIFIED_CHECKS) == 3
 
 
 class TestCertificationPolicy:
