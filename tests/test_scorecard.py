@@ -18,14 +18,18 @@ class TestGateResult:
     def test_create_engine_gate(self):
         gate = GateResult(
             gate_type=GateType.ENGINE,
-            gate_name="harbor",
+            gate_name="evaluation",
+            policy_key="harbor",
             passed=True,
             score=0.85,
             mode=GateMode.BLOCK,
             message="Test passed",
+            details={"engine": "harbor"},
         )
         assert gate.gate_type == GateType.ENGINE
-        assert gate.gate_name == "harbor"
+        assert gate.gate_name == "evaluation"
+        assert gate.policy_key == "harbor"
+        assert gate.get_policy_key() == "harbor"
         assert gate.passed is True
         assert gate.score == 0.85
         assert gate.mode == GateMode.BLOCK
@@ -46,13 +50,17 @@ class TestGateResult:
         ]
         gate = GateResult(
             gate_type=GateType.SECURITY,
-            gate_name="cisco",
+            gate_name="security",
+            policy_key="cisco",
             passed=False,
             score=0.3,
             mode=GateMode.BLOCK,
             findings=findings,
+            details={"scanner": "cisco"},
         )
         assert gate.gate_type == GateType.SECURITY
+        assert gate.gate_name == "security"
+        assert gate.policy_key == "cisco"
         assert len(gate.findings) == 2
         assert gate.findings[0].severity == Severity.HIGH
 
@@ -112,8 +120,8 @@ class TestCombinationLogic:
 
     def test_all_pass_success(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.SECURITY, gate_name="cisco", passed=True, score=1.0, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.SECURITY, gate_name="security", policy_key="cisco", passed=True, score=1.0, mode=GateMode.BLOCK),
         ]
         policy = GatePolicy(combination=CombinationMode.ALL_PASS)
         rec, reason = apply_combination_logic(gates, policy)
@@ -122,28 +130,28 @@ class TestCombinationLogic:
 
     def test_all_pass_failure(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.SECURITY, gate_name="cisco", passed=False, score=0.3, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.SECURITY, gate_name="security", policy_key="cisco", passed=False, score=0.3, mode=GateMode.BLOCK),
         ]
         policy = GatePolicy(combination=CombinationMode.ALL_PASS)
         rec, reason = apply_combination_logic(gates, policy)
         assert rec == Recommendation.FAIL
-        assert "cisco" in reason
+        assert "security" in reason  # Now uses category name in reason
 
     def test_all_pass_warn_only(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.QUALITY, gate_name="llm-review", passed=False, score=0.4, mode=GateMode.WARN),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.QUALITY, gate_name="quality", policy_key="llm-review", passed=False, score=0.4, mode=GateMode.WARN),
         ]
         policy = GatePolicy(combination=CombinationMode.ALL_PASS)
         rec, reason = apply_combination_logic(gates, policy)
         assert rec == Recommendation.WARN
-        assert "llm-review" in reason
+        assert "quality" in reason  # Now uses category name in reason
 
     def test_any_pass_success(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.ENGINE, gate_name="ase", passed=False, score=0.3, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="ase", passed=False, score=0.3, mode=GateMode.BLOCK),
         ]
         policy = GatePolicy(combination=CombinationMode.ANY_PASS)
         rec, reason = apply_combination_logic(gates, policy)
@@ -151,8 +159,8 @@ class TestCombinationLogic:
 
     def test_any_pass_failure(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=False, score=0.3, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.ENGINE, gate_name="ase", passed=False, score=0.2, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=False, score=0.3, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="ase", passed=False, score=0.2, mode=GateMode.BLOCK),
         ]
         policy = GatePolicy(combination=CombinationMode.ANY_PASS)
         rec, reason = apply_combination_logic(gates, policy)
@@ -160,8 +168,8 @@ class TestCombinationLogic:
 
     def test_weighted_pass(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.ENGINE, gate_name="ase", passed=True, score=0.6, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.9, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="ase", passed=True, score=0.6, mode=GateMode.BLOCK),
         ]
         policy = GatePolicy(
             combination=CombinationMode.WEIGHTED,
@@ -176,8 +184,8 @@ class TestCombinationLogic:
 
     def test_weighted_warn(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.6, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.ENGINE, gate_name="ase", passed=True, score=0.5, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.6, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="ase", passed=True, score=0.5, mode=GateMode.BLOCK),
         ]
         policy = GatePolicy(combination=CombinationMode.WEIGHTED)
         rec, reason = apply_combination_logic(gates, policy)
@@ -196,8 +204,8 @@ class TestScorecard:
 
     def test_create_scorecard(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.85, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.SECURITY, gate_name="cisco", passed=True, score=1.0, mode=GateMode.WARN),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.85, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.SECURITY, gate_name="security", policy_key="cisco", passed=True, score=1.0, mode=GateMode.WARN),
         ]
         policy = GatePolicy()
         scorecard = Scorecard(
@@ -217,9 +225,9 @@ class TestScorecard:
 
     def test_computed_fields(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.85, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.SECURITY, gate_name="cisco", passed=False, score=0.3, mode=GateMode.BLOCK),
-            GateResult(gate_type=GateType.QUALITY, gate_name="llm-review", passed=False, score=0.4, mode=GateMode.WARN),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.85, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.SECURITY, gate_name="security", policy_key="cisco", passed=False, score=0.3, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.QUALITY, gate_name="quality", policy_key="llm-review", passed=False, score=0.4, mode=GateMode.WARN),
         ]
         scorecard = Scorecard(
             submission_name="test",
@@ -237,7 +245,7 @@ class TestScorecard:
 
     def test_scorecard_json_serialization(self):
         gates = [
-            GateResult(gate_type=GateType.ENGINE, gate_name="harbor", passed=True, score=0.85, mode=GateMode.BLOCK),
+            GateResult(gate_type=GateType.ENGINE, gate_name="evaluation", policy_key="harbor", passed=True, score=0.85, mode=GateMode.BLOCK),
         ]
         scorecard = Scorecard(
             submission_name="test",
@@ -311,9 +319,13 @@ class TestBothModeAggregation:
         engine_gates = [g for g in scorecard.gates if g.gate_type == GateType.ENGINE]
         assert len(engine_gates) == 2
 
-        # Find each engine's gate
-        harbor_gate = next(g for g in engine_gates if g.gate_name == "harbor")
-        ase_gate = next(g for g in engine_gates if g.gate_name == "ase")
+        # Find each engine's gate by policy_key (implementation name)
+        harbor_gate = next(g for g in engine_gates if g.policy_key == "harbor")
+        ase_gate = next(g for g in engine_gates if g.policy_key == "ase")
+        
+        # Both should have category-based gate_name
+        assert harbor_gate.gate_name == "evaluation"
+        assert ase_gate.gate_name == "evaluation"
 
         # Verify each read the correct report (different gaps)
         # Harbor should have 0.9 treatment mean (score), ASE should have 0.7

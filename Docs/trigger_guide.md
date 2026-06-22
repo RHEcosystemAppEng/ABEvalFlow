@@ -67,8 +67,8 @@ You write just the skill file. The pipeline generates the task description
 and tests automatically using an AI assistant. To use this mode, set
 `generation_mode: ai` in your `metadata.yaml`.
 
-> **Note:** AI-assisted mode is planned but not yet implemented. For now,
-> use manual mode.
+> **Note:** AI-assisted mode is now working. Set `generation_mode: ai` in
+> your `metadata.yaml` to use it.
 
 ---
 
@@ -207,6 +207,60 @@ MCPChecker is single-agent evaluation (no A/B comparison). Results are
 scored by task pass rate and LLM judge verification. See
 `examples/mcpchecker-skill/` for a complete example.
 
+### A2A Format (Agent-to-Agent Evaluation)
+
+For evaluating agents that communicate via the A2A (Agent-to-Agent) protocol,
+use the A2A format. This mode tests how well your agent responds to requests
+from other agents using standardized A2A messaging.
+
+```
+submissions/<name>/
+├── metadata.yaml              # Required — eval_engine: a2a
+├── agent_card.json            # Required — A2A agent card
+├── skills/
+│   └── SKILL.md               # Required — skill definition
+└── evals/
+    └── evals.json             # Optional — evaluation scenarios (generated if missing)
+```
+
+**agent_card.json example:**
+
+```json
+{
+  "name": "my-a2a-agent",
+  "description": "Agent that handles customer support queries",
+  "version": "1.0.0",
+  "capabilities": ["text-generation", "tool-use"],
+  "endpoint": "http://localhost:8000/a2a"
+}
+```
+
+**metadata.yaml for A2A:**
+
+```yaml
+name: my-a2a-agent
+eval_engine: a2a
+a2a_config:
+  protocol_version: "1.0"
+  timeout_seconds: 30
+  max_turns: 10
+```
+
+Trigger with `eval-engine=a2a`:
+
+```bash
+tkn pipeline start abevalflow-pipeline \
+  -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
+  -p revision=main \
+  -p submission-dir=my-a2a-agent \
+  -p eval-engine=a2a \
+  -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
+  -n ab-eval-flow
+```
+
+A2A evaluation tests both agent functionality and protocol compliance. See
+`examples/a2a-skill/` for a complete example.
+
 ### AI-Assisted Mode
 
 If you only have the skill definition and want the pipeline to generate the
@@ -283,12 +337,12 @@ gate_policy:
   default_mode: warn          # disabled | warn | block (default: warn)
   combination: all_pass       # all_pass | any_pass | weighted (default: all_pass)
   gates:
-    harbor:
+    evaluation:
       mode: block             # Engine gate must pass for approval
       threshold: 0.0          # Minimum uplift threshold
-    cisco:
+    security:
       mode: warn              # Security findings are advisory
-    llm-review:
+    quality:
       mode: warn              # Quality review is advisory
       threshold: 0.6          # Minimum quality score
 ```
@@ -302,6 +356,30 @@ Combination modes:
 - `all_pass` — All blocking gates must pass (default)
 - `any_pass` — At least one blocking gate must pass
 - `weighted` — Weighted average of scores (≥0.7 pass, 0.5-0.7 warn, <0.5 fail)
+
+For Compass Facts integration (pushing evaluation results to Red Hat Compass):
+
+```yaml
+name: my-skill
+gate_policy:
+  push_facts:
+    endpoint: https://compass.redhat.com/api/soundcheck/facts/
+    entity_ref: component:default/my-skill
+    fact_ref_prefix: catalog:default/abevalflow_
+    bearer_token: ${COMPASS_API_TOKEN}
+  gates:
+    evaluation:
+      mode: block
+      push_fact: true
+    security:
+      mode: warn
+      push_fact: true
+```
+
+When `push_fact: true` is set for a gate, the pipeline pushes the gate result as a
+Soundcheck fact to Compass after evaluation completes. The `entity_ref` identifies
+your component in Compass, and `fact_ref_prefix` is prepended to the gate name
+(e.g., `catalog:default/abevalflow_evaluation`).
 
 **Name rules:** lowercase letters, numbers, hyphens, dots, and underscores
 only. Must start with a letter or number. Examples: `my-skill`,
@@ -444,9 +522,9 @@ a different aspect:
 
 | Gate Type | Gate Name | What it checks |
 |-----------|-----------|----------------|
-| **Engine** | `harbor`, `ase`, `a2a`, `mcpchecker` | A/B evaluation results (uplift, pass rate) |
-| **Security** | `cisco` | Security vulnerabilities in skill code |
-| **Quality** | `llm-review` | Test coherence, coverage, clarity, feasibility |
+| **Engine** | `evaluation` | A/B evaluation results (Harbor, ASE, A2A, MCPChecker) |
+| **Security** | `security` | Security vulnerabilities (Cisco scanner) |
+| **Quality** | `quality` | Test coherence, coverage, clarity (LLM review) |
 
 Each gate produces:
 - `passed`: boolean (did it meet its threshold?)
@@ -466,9 +544,9 @@ Example scorecard output:
   "gates_passed": 3,
   "gates_failed": 0,
   "gates": [
-    {"gate_name": "harbor", "passed": true, "score": 0.85},
-    {"gate_name": "cisco", "passed": true, "score": 1.0},
-    {"gate_name": "llm-review", "passed": true, "score": 0.78}
+    {"gate_name": "evaluation", "passed": true, "score": 0.85},
+    {"gate_name": "security", "passed": true, "score": 1.0},
+    {"gate_name": "quality", "passed": true, "score": 0.78}
   ]
 }
 ```
@@ -484,7 +562,7 @@ You can bypass the webhook and trigger the pipeline directly:
 ### Option 1: `tkn` CLI
 
 ```bash
-tkn pipeline start skills-eval-pipeline \
+tkn pipeline start abevalflow-pipeline \
   -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
   -p revision=main \
   -p skill-dir=my-skill \
@@ -498,11 +576,11 @@ tkn pipeline start skills-eval-pipeline \
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: skills-eval-manual-
+  generateName: abevalflow-manual-
   namespace: ab-eval-flow
 spec:
   pipelineRef:
-    name: skills-eval-pipeline
+    name: abevalflow-pipeline
   params:
     - name: repo-url
       value: https://github.com/RHEcosystemAppEng/skill-submissions.git

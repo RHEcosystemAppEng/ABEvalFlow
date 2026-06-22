@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
+from abevalflow.compass_facts import FactPushResult
 from abevalflow.gates.base import GateMode, GateResult
 from abevalflow.schemas import CombinationMode, GatePolicy
 
@@ -58,6 +59,11 @@ class Scorecard(BaseModel):
     provenance: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional provenance metadata (commit SHA, branch, etc.)",
+    )
+
+    fact_push_results: list[FactPushResult] = Field(
+        default_factory=list,
+        description="Results of pushing gate facts to Compass (empty if disabled)",
     )
 
     @computed_field

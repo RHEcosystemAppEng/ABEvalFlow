@@ -253,6 +253,13 @@ spec:
 
     - name: aggregate-scorecard
       image: registry.access.redhat.com/ubi9/python-311:9.6
+      env:
+        - name: COMPASS_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: compass-facts-api
+              key: token
+              optional: true
       script: |
         #!/usr/bin/env bash
         set -euo pipefail

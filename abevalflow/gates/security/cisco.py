@@ -32,17 +32,18 @@ class CiscoGate(SecurityGate):
         policy: GatePolicy,
     ) -> GateResult:
         """Evaluate Cisco security scan results."""
-        gate_policy = policy.get_gate_policy(self.name)
+        gate_policy = policy.get_gate_policy("security")
 
         if gate_policy.mode == GateMode.DISABLED:
             return GateResult(
                 gate_type=GateType.SECURITY,
-                gate_name=self.name,
+                gate_name="security",
+                policy_key=self.name,
                 passed=True,
                 score=1.0,
                 mode=GateMode.DISABLED,
                 findings=[],
-                details={},
+                details={"scanner": self.name},
                 message="Cisco security scan disabled",
             )
 
@@ -52,23 +53,25 @@ class CiscoGate(SecurityGate):
             if gate_policy.mode == GateMode.BLOCK:
                 return GateResult(
                     gate_type=GateType.SECURITY,
-                    gate_name=self.name,
+                    gate_name="security",
+                    policy_key=self.name,
                     passed=False,
                     score=0.0,
                     mode=gate_policy.mode,
                     findings=[],
-                    details={"scan_path": str(scan_path), "status": "not_found"},
+                    details={"scanner": self.name, "scan_path": str(scan_path), "status": "not_found"},
                     message="FAIL: security-scan.json missing (required in block mode)",
                 )
             # In WARN mode, missing artifacts pass (scan may have been skipped)
             return GateResult(
                 gate_type=GateType.SECURITY,
-                gate_name=self.name,
+                gate_name="security",
+                policy_key=self.name,
                 passed=True,
                 score=1.0,
                 mode=gate_policy.mode,
                 findings=[],
-                details={"scan_path": str(scan_path), "status": "not_found"},
+                details={"scanner": self.name, "scan_path": str(scan_path), "status": "not_found"},
                 message="No security-scan.json found (scan may have been skipped)",
             )
 
@@ -78,12 +81,13 @@ class CiscoGate(SecurityGate):
             logger.error("Failed to read security scan: %s", e)
             return GateResult(
                 gate_type=GateType.SECURITY,
-                gate_name=self.name,
+                gate_name="security",
+                policy_key=self.name,
                 passed=False,
                 score=0.0,
                 mode=gate_policy.mode,
                 findings=[],
-                details={"error": str(e)},
+                details={"scanner": self.name, "error": str(e)},
                 message=f"Failed to parse security-scan.json: {e}",
             )
 
@@ -136,12 +140,14 @@ class CiscoGate(SecurityGate):
 
         return GateResult(
             gate_type=GateType.SECURITY,
-            gate_name=self.name,
+            gate_name="security",
+            policy_key=self.name,
             passed=passed,
             score=score,
             mode=gate_policy.mode,
             findings=findings,
             details={
+                "scanner": self.name,
                 "severity_counts": severity_counts,
                 "scan_path": str(scan_path),
             },

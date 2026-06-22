@@ -32,6 +32,11 @@ from pathlib import Path
 
 import yaml
 
+from abevalflow.compass_facts import (
+    FactPushResult,
+    push_gate_fact_from_config,
+    validate_push_facts_config,
+)
 from abevalflow.engines import get_engine
 from abevalflow.gates.base import GateResult
 from abevalflow.gates.quality import get_all_quality_gates
@@ -83,6 +88,37 @@ def load_provenance(reports_dir: Path) -> dict:
     return {}
 
 
+def _maybe_push_fact(
+    gate_result: GateResult, policy: GatePolicy
+) -> FactPushResult | None:
+    """Push gate fact to Compass if configured.
+
+    Args:
+        gate_result: The gate result to potentially push
+        policy: Policy containing push_facts configuration
+
+    Returns:
+        FactPushResult if push was attempted, None if skipped
+    """
+    # Policy is keyed by category (gate_name), not implementation (policy_key)
+    if not policy.should_push_fact(gate_result.gate_name):
+        return None
+
+    if policy.push_facts is None:
+        return None
+
+    result = push_gate_fact_from_config(gate_result, policy.push_facts)
+    if result.success:
+        logger.info("Pushed fact for gate %s to Compass", gate_result.gate_name)
+    else:
+        logger.warning(
+            "Failed to push fact for gate %s: %s",
+            gate_result.gate_name,
+            result.error,
+        )
+    return result
+
+
 def aggregate_scorecard(
     submission_dir: Path,
     results_dir: Path,
@@ -107,8 +143,12 @@ def aggregate_scorecard(
     policy = load_gate_policy(submission_dir)
     provenance = load_provenance(reports_dir)
 
+    # Validate push_facts configuration
+    validate_push_facts_config(policy.push_facts, policy.get_gates_with_push_fact())
+
     submission_name = submission_dir.name
     gates: list[GateResult] = []
+    fact_push_results: list[FactPushResult] = []
 
     # Determine which engines to process and their report directories
     # In 'both' mode, Harbor reports are in reports_dir/harbor/, ASE in reports_dir/
@@ -130,6 +170,9 @@ def aggregate_scorecard(
         if raw_result:
             engine_gate = engine.to_gate_result(raw_result, policy)
             gates.append(engine_gate)
+            push_result = _maybe_push_fact(engine_gate, policy)
+            if push_result:
+                fact_push_results.append(push_result)
             logger.info(
                 "Engine %s: passed=%s, score=%.3f",
                 engine.name, engine_gate.passed, engine_gate.score
@@ -145,6 +188,9 @@ def aggregate_scorecard(
         logger.info("Processing security gate: %s", security_gate.name)
         gate_result = security_gate.evaluate(reports_dir, policy)
         gates.append(gate_result)
+        push_result = _maybe_push_fact(gate_result, policy)
+        if push_result:
+            fact_push_results.append(push_result)
         logger.info(
             "Security %s: passed=%s, score=%.3f, findings=%d",
             security_gate.name, gate_result.passed, gate_result.score, len(gate_result.findings)
@@ -158,6 +204,9 @@ def aggregate_scorecard(
         logger.info("Processing quality gate: %s", quality_gate.name)
         gate_result = quality_gate.evaluate(workspace_root, policy)
         gates.append(gate_result)
+        push_result = _maybe_push_fact(gate_result, policy)
+        if push_result:
+            fact_push_results.append(push_result)
         logger.info(
             "Quality %s: passed=%s, score=%.3f",
             quality_gate.name, gate_result.passed, gate_result.score
@@ -165,6 +214,15 @@ def aggregate_scorecard(
 
     recommendation, reason = apply_combination_logic(gates, policy)
     logger.info("Final recommendation: %s (%s)", recommendation, reason)
+
+    # Log fact push summary
+    if fact_push_results:
+        success_count = sum(1 for r in fact_push_results if r.success)
+        logger.info(
+            "Compass facts: %d/%d pushed successfully",
+            success_count,
+            len(fact_push_results),
+        )
 
     return Scorecard(
         submission_name=submission_name,
@@ -176,6 +234,7 @@ def aggregate_scorecard(
         recommendation_reason=reason,
         created_at=datetime.now(timezone.utc),
         provenance=provenance,
+        fact_push_results=fact_push_results,
     )
 
 

@@ -30,3 +30,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp files
+.tmp-jira-comment.txt
+test-fact.json

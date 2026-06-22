@@ -9,6 +9,7 @@ Three types exist:
 Each gate produces a GateResult with a normalized score and pass/fail status.
 """
 
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -69,11 +70,23 @@ class GateResult(BaseModel):
 
     All gates (engine, security, quality) produce this common format,
     enabling unified scorecard aggregation and policy enforcement.
+
+    Gate naming conventions:
+        - gate_name: Category name (evaluation, security, quality) used in Compass facts
+        - policy_key: Implementation name (harbor, cisco, llm-review) used for policy lookup
+
+    This separation allows category-based naming in external systems (Compass) while
+    maintaining implementation-specific policy configuration.
     """
 
     gate_type: GateType = Field(description="Type of gate: engine, security, or quality")
     gate_name: str = Field(
-        description="Unique name of the gate (e.g., 'harbor', 'cisco', 'llm-review')"
+        description="Category name of the gate (e.g., 'evaluation', 'security', 'quality')"
+    )
+    policy_key: str | None = Field(
+        default=None,
+        description="Implementation name for policy lookup (e.g., 'harbor', 'cisco'). "
+        "Falls back to gate_name if not set.",
     )
     passed: bool = Field(description="Whether the gate passed based on its internal criteria")
     score: float = Field(
@@ -101,3 +114,14 @@ class GateResult(BaseModel):
         default=None,
         description="Human-readable summary of the gate result",
     )
+    evaluated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp when the gate was evaluated",
+    )
+
+    def get_policy_key(self) -> str:
+        """Get the key used for policy lookup.
+
+        Returns policy_key if set, otherwise falls back to gate_name.
+        """
+        return self.policy_key or self.gate_name
