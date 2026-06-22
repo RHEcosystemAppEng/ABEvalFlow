@@ -238,6 +238,12 @@ spec:
         
         cat /tmp/validation-output.json | tr -d '\n' > "$(results.validation-result.path)"
         
+        # Also write to workspace for downstream tasks (certification levels)
+        REPORTS_DIR="$(workspaces.source.path)/reports/$(params.submission-dir)"
+        mkdir -p "$REPORTS_DIR"
+        cp /tmp/validation-output.json "$REPORTS_DIR/validation.json"
+        echo "Wrote validation results to $REPORTS_DIR/validation.json"
+        
         VALID=$(python3 -c "import json; print(json.load(open('/tmp/validation-output.json'))['valid'])")
         
         if [ "$VALID" = "True" ]; then
