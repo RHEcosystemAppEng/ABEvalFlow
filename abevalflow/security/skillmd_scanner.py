@@ -48,10 +48,20 @@ PROMPT_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"(?:ignore\s+safety|bypass\s+(?:filter|safety|restriction))", re.I),
     ),
     ("output control", re.compile(r"output\s+the\s+following\s+exactly", re.I)),
-    ("markdown image exfiltration", re.compile(r"!\[.*?\]\(https?://", re.I)),
+    (
+        "markdown image exfiltration",
+        re.compile(
+            r"!\[.*?\]\(https?://(?!(?:docs\.|github\.|imgur\.|i\.stack))[^\)]*",
+            re.I,
+        ),
+    ),
     (
         "translate evasion",
-        re.compile(r"translate\s+(?:this|the\s+following)\s+(?:to|into)\s+", re.I),
+        re.compile(
+            r"translate\s+(?:this|the\s+following)\s+(?:to|into)\s+"
+            r"(?!(?:english|spanish|french|german|chinese|japanese|korean|portuguese)\b)",
+            re.I,
+        ),
     ),
 ]
 
@@ -224,6 +234,18 @@ def scan_file(file_path: Path, relative_to: Path | None = None) -> list[dict]:
     return findings
 
 
+_EXCLUDED_DIRS = {".git", "node_modules", "vendor", "__pycache__", ".venv"}
+
+
+def _is_excluded(path: Path, base: Path) -> bool:
+    """Check if a path is under an excluded directory."""
+    try:
+        parts = path.relative_to(base).parts
+    except ValueError:
+        return False
+    return bool(_EXCLUDED_DIRS.intersection(parts))
+
+
 def scan_directory(directory: Path) -> dict:
     """Scan all markdown files in a directory for security issues.
 
@@ -237,7 +259,7 @@ def scan_directory(directory: Path) -> dict:
         logger.error("Not a directory: %s", directory)
         return {"findings": []}
 
-    md_files = sorted(directory.rglob("*.md"))
+    md_files = sorted(f for f in directory.rglob("*.md") if not _is_excluded(f, directory))
     if not md_files:
         logger.info("No markdown files found in %s", directory)
         return {"findings": []}

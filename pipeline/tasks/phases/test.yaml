@@ -283,7 +283,57 @@ spec:
         
         echo "Security scan complete"
 
-    # Step 3: Quality review
+    # Step 3: SKILL.md security scan (harness-eval-lab patterns)
+    - name: skillmd-security-scan
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== TEST PHASE: SKILL.md Security Scan ==="
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
+          echo "MCPChecker mode: SKILL.md scan skipped"
+          exit 0
+        fi
+
+        PIPELINE_MODE="$(params.security-scan-mode)"
+        SUBMISSION_MODE="$(params.submission-security-scan)"
+        SCAN_MODE="${PIPELINE_MODE:-$SUBMISSION_MODE}"
+
+        if [ "$SCAN_MODE" = "disabled" ]; then
+          echo "Security scanning disabled, skipping SKILL.md scan"
+          exit 0
+        fi
+
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        SUBMISSION_NAME="$(params.submission-name)"
+        REPORT_DIR="$(workspaces.source.path)/reports/$SUBMISSION_NAME"
+        JSON_PATH="$REPORT_DIR/skillmd-security-scan.json"
+        mkdir -p "$REPORT_DIR"
+
+        if [ -d "$SUBMISSION_PATH/skills" ] && [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
+          SUBMISSION_PATH="$SUBMISSION_PATH/skills"
+        fi
+
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        pip install --quiet --no-cache-dir pydantic pyyaml 2>&1 | tail -3
+        export PYTHONPATH="$PIPELINE_DIR"
+
+        echo "Scanning: $SUBMISSION_PATH"
+        python3 "$PIPELINE_DIR/scripts/skillmd_security_scan.py" \
+          "$SUBMISSION_PATH" --output "$JSON_PATH" 2>&1 || true
+
+        if [ -f "$JSON_PATH" ]; then
+          FINDINGS=$(python3 -c "import json; print(len(json.load(open('$JSON_PATH')).get('findings', [])))" 2>/dev/null || echo "0")
+          echo "SKILL.md scan: $FINDINGS findings"
+        else
+          echo "SKILL.md scan: no output (scanner may have failed)"
+        fi
+
+        echo "SKILL.md security scan complete"
+
+    # Step 4: Quality review
     - name: quality-review
       image: registry.access.redhat.com/ubi9/python-311:9.6
       env:
@@ -332,7 +382,7 @@ spec:
         
         echo "Quality review: passed=$PASSED"
 
-    # Step 4: Finalize results
+    # Step 5: Finalize results
     - name: finalize
       image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
