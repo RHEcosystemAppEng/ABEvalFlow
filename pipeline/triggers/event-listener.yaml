@@ -32,14 +32,16 @@ spec:
             name: "cel"
           params:
             - name: "filter"
+              # Whitelist only production tags to avoid spurious triggers from
+              # digest tags, PR builds, and commit SHA tags
               value: >-
                 body.docker_url == "quay.io/ecosystem-appeng/google-lightspeed-agent" &&
-                body.updated_tags.exists(t, !t.startsWith('sha256:') && !t.startsWith('sha256-') && !t.startsWith('on-pr-'))
+                body.updated_tags.exists(t, t == 'latest' || t == 'stable' || t.startsWith('v') || t.startsWith('release-'))
             - name: "overlays"
               value:
                 - key: agent_tag
                   expression: >-
-                    body.updated_tags.filter(t, !t.startsWith('sha256:') && !t.startsWith('on-pr-'))[0]
+                    body.updated_tags.filter(t, t == 'latest' || t == 'stable' || t.startsWith('v') || t.startsWith('release-'))[0]
       bindings:
         - ref: quay-push-binding
       template:
