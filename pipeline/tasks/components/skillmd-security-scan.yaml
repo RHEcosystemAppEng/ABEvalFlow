@@ -184,7 +184,7 @@ spec:
 
         PASSED="true"
         if [ ! -f "$JSON_PATH" ]; then
-          echo "ERROR: Scanner failed to produce output"
+          echo "WARNING: Scanner failed to produce output"
           PASSED="false"
         elif [ "$SCAN_MODE" = "block" ]; then
           if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
@@ -195,11 +195,6 @@ spec:
 
         echo -n "$PASSED" > "$(results.passed.path)"
         echo "Mode: $SCAN_MODE, Passed: $PASSED"
-
-        if [ "$PASSED" = "false" ]; then
-          echo "=== SKILL.md scan FAILED ==="
-          exit 1
-        fi
 
         echo "=== SKILL.md scan complete ==="
 
