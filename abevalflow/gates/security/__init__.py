@@ -12,9 +12,11 @@ _SECURITY_GATE_REGISTRY: dict[str, type[SecurityGate]] = {}
 
 def register_security_gate(name: str):
     """Decorator to register a security gate class."""
+
     def decorator(cls: type[SecurityGate]) -> type[SecurityGate]:
         _SECURITY_GATE_REGISTRY[name] = cls
         return cls
+
     return decorator
 
 
@@ -47,6 +49,7 @@ def get_all_security_gate_names() -> list[str]:
 
 
 from abevalflow.gates.security.cisco import CiscoGate
+from abevalflow.gates.security.skillmd_scanner import SkillMdScannerGate
 
 __all__ = [
     "register_security_gate",
@@ -54,4 +57,5 @@ __all__ = [
     "get_all_security_gates",
     "get_all_security_gate_names",
     "CiscoGate",
+    "SkillMdScannerGate",
 ]
