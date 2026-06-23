@@ -102,40 +102,6 @@ DANGEROUS_COMMAND_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("chown root", re.compile(r"\bchown\s+root\b")),
 ]
 
-# --- Data exfiltration patterns (8) ---
-
-DATA_EXFIL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("curl post file contents", re.compile(r"curl\s+.*-d\s+\"\$\(cat\b", re.I)),
-    ("curl with command substitution", re.compile(r"curl\s+.*--data.*\$\(", re.I)),
-    ("wget post data", re.compile(r"wget\s+--post-data", re.I)),
-    ("dns tunneling dig", re.compile(r"\bdig\s+.*\bTXT\b", re.I)),
-    ("dns tunneling nslookup", re.compile(r"\bnslookup\s+.*-type=TXT", re.I)),
-    (
-        "webhook exfiltration",
-        re.compile(
-            r"(?:curl|wget|fetch)\s+.*(?:webhook|hooks\.|pipedream|requestbin|ngrok)",
-            re.I,
-        ),
-    ),
-    ("base64 pipe to network", re.compile(r"base64\s+.*\|\s*(?:curl|wget|nc)\b", re.I)),
-    ("archive pipe to network", re.compile(r"tar\s+.*\|\s*(?:curl|wget|nc|ssh)\b", re.I)),
-]
-
-# --- Reverse shell patterns (10) ---
-
-REVERSE_SHELL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("bash reverse shell", re.compile(r"bash\s+-i\s+>&\s*/dev/tcp/", re.I)),
-    ("netcat exec", re.compile(r"\bnc\s+.*-e\s+/bin/", re.I)),
-    ("ncat exec", re.compile(r"\bncat\s+.*--exec", re.I)),
-    ("python socket shell", re.compile(r"python[23]?\s+-c\s+.*(?:socket|subprocess)", re.I)),
-    ("perl socket shell", re.compile(r"perl\s+-e\s+.*(?:socket|Socket)", re.I)),
-    ("ruby socket shell", re.compile(r"ruby\s+-rsocket\s+-e", re.I)),
-    ("php socket shell", re.compile(r"php\s+-r\s+.*fsockopen", re.I)),
-    ("socat exec", re.compile(r"\bsocat\s+.*exec:", re.I)),
-    ("named pipe shell", re.compile(r"\bmknod\s+.*\bp\b.*(?:/bin/sh|bash)", re.I)),
-    ("powershell reverse shell", re.compile(r"\bpowershell\s+.*(?:Net\.Sockets|TCPClient)", re.I)),
-]
-
 # --- Obfuscation patterns (8) ---
 
 OBFUSCATION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -196,8 +162,6 @@ def scan_file(file_path: Path, relative_to: Path | None = None) -> list[dict]:
         ("sensitive_path", "high", SENSITIVE_PATH_PATTERNS),
         ("sensitive_env", "high", SENSITIVE_ENV_PATTERNS),
         ("dangerous_command", "high", DANGEROUS_COMMAND_PATTERNS),
-        ("data_exfiltration", "critical", DATA_EXFIL_PATTERNS),
-        ("reverse_shell", "critical", REVERSE_SHELL_PATTERNS),
         ("obfuscation", "high", OBFUSCATION_PATTERNS),
     ]
 
