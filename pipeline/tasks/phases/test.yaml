@@ -283,9 +283,12 @@ spec:
         
         echo "Security scan complete"
 
-    # Step 3: SKILL.md security scan (harness-eval-lab patterns)
+    # Step 3: SKILL.md security scan (deterministic + LLM semantic review)
     - name: skillmd-security-scan
       image: registry.access.redhat.com/ubi9/python-311:9.6
+      env:
+        - name: LLM_API_KEY
+          value: "$(params.llm-api-key)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -317,12 +320,21 @@ spec:
         fi
 
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
-        pip install --quiet --no-cache-dir pydantic pyyaml 2>&1 | tail -3
+        pip install --quiet --no-cache-dir pydantic pyyaml openai 2>&1 | tail -3
         export PYTHONPATH="$PIPELINE_DIR"
+        export LLM_BASE_URL="$(params.llm-base-url)"
+        export LLM_MODEL="$(params.llm-model)"
 
-        echo "Scanning: $SUBMISSION_PATH"
-        python3 "$PIPELINE_DIR/scripts/skillmd_security_scan.py" \
-          "$SUBMISSION_PATH" --output "$JSON_PATH" 2>&1 || true
+        USE_LLM="$(params.security-scan-use-llm)"
+        SCAN_CMD=(python3 "$PIPELINE_DIR/scripts/skillmd_security_scan.py"
+          "$SUBMISSION_PATH" --output "$JSON_PATH")
+
+        if [ "$USE_LLM" != "true" ]; then
+          SCAN_CMD+=(--no-llm)
+        fi
+
+        echo "Scanning: $SUBMISSION_PATH (use-llm=$USE_LLM)"
+        "${SCAN_CMD[@]}" 2>&1 || true
 
         if [ -f "$JSON_PATH" ]; then
           FINDINGS=$(python3 -c "import json; print(len(json.load(open('$JSON_PATH')).get('findings', [])))" 2>/dev/null || echo "0")
