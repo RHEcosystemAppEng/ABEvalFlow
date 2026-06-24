@@ -29,10 +29,10 @@ from scripts.analyze import (
     render_markdown,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — fake result directories
 # ---------------------------------------------------------------------------
+
 
 def _write_result(trial_dir: Path, reward: float | None, nested: bool = True) -> None:
     """Write a result.json file to a trial directory."""
@@ -87,6 +87,7 @@ def empty_results_dir(tmp_path: Path) -> Path:
 # TestExtractReward
 # ---------------------------------------------------------------------------
 
+
 class TestExtractReward:
     def test_nested_format(self):
         data = {"verifier_result": {"rewards": {"reward": 0.75}}}
@@ -123,6 +124,7 @@ class TestExtractReward:
 # ---------------------------------------------------------------------------
 # TestParseVariantTrials
 # ---------------------------------------------------------------------------
+
 
 class TestParseVariantTrials:
     def test_parses_all_trials(self, results_dir: Path):
@@ -177,9 +179,7 @@ class TestParseVariantTrials:
         (job_dir / "result.json").write_text(json.dumps({"job_name": "sub-treatment"}))
         trial_dir = job_dir / "task__001"
         trial_dir.mkdir()
-        (trial_dir / "result.json").write_text(
-            json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}})
-        )
+        (trial_dir / "result.json").write_text(json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}}))
         trials = parse_variant_trials(variant)
         assert len(trials) == 1
         assert trials[0].reward == 1.0
@@ -188,6 +188,7 @@ class TestParseVariantTrials:
 # ---------------------------------------------------------------------------
 # TestComputeVariantSummary
 # ---------------------------------------------------------------------------
+
 
 class TestComputeVariantSummary:
     def test_basic_stats(self, results_dir: Path):
@@ -236,6 +237,7 @@ class TestComputeVariantSummary:
 # ---------------------------------------------------------------------------
 # TestStatisticalTests
 # ---------------------------------------------------------------------------
+
 
 class TestStatisticalTests:
     def test_ttest_significant_difference(self, results_dir: Path):
@@ -301,6 +303,7 @@ class TestStatisticalTests:
 # TestBuildAnalysis
 # ---------------------------------------------------------------------------
 
+
 class TestBuildAnalysis:
     def test_full_analysis(self, results_dir: Path):
         result = build_analysis(results_dir, "my-submission")
@@ -333,9 +336,13 @@ class TestBuildAnalysis:
             job = base / variant / f"sub-{variant}"
             trial = job / "trial-0__abc"
             trial.mkdir(parents=True)
-            (trial / "result.json").write_text(json.dumps({
-                "verifier_result": {"rewards": {"reward": 0.0}},
-            }))
+            (trial / "result.json").write_text(
+                json.dumps(
+                    {
+                        "verifier_result": {"rewards": {"reward": 0.0}},
+                    }
+                )
+            )
         result = build_analysis(base, "all-fail", threshold=0.0)
         assert result.summary.treatment.n_passed == 0
         assert result.summary.control.n_passed == 0
@@ -365,6 +372,7 @@ class TestBuildAnalysis:
 
     def test_small_sample_warning(self, results_dir: Path, caplog):
         import logging
+
         with caplog.at_level(logging.WARNING):
             build_analysis(results_dir, "my-submission")
         assert any("only 5 trials" in msg for msg in caplog.messages)
@@ -373,6 +381,7 @@ class TestBuildAnalysis:
 # ---------------------------------------------------------------------------
 # TestRenderMarkdown
 # ---------------------------------------------------------------------------
+
 
 class TestRenderMarkdown:
     def test_contains_title(self, results_dir: Path):
@@ -421,6 +430,7 @@ class TestRenderMarkdown:
 # TestJsonRoundtrip
 # ---------------------------------------------------------------------------
 
+
 class TestJsonRoundtrip:
     def test_json_serialization(self, results_dir: Path):
         result = build_analysis(results_dir, "my-submission")
@@ -435,14 +445,20 @@ class TestJsonRoundtrip:
 # TestMainCLI
 # ---------------------------------------------------------------------------
 
+
 class TestMainCLI:
     def test_success(self, results_dir: Path, tmp_path: Path):
         out_dir = tmp_path / "reports"
-        rc = main([
-            "--results-dir", str(results_dir),
-            "--output-dir", str(out_dir),
-            "--submission-name", "my-submission",
-        ])
+        rc = main(
+            [
+                "--results-dir",
+                str(results_dir),
+                "--output-dir",
+                str(out_dir),
+                "--submission-name",
+                "my-submission",
+            ]
+        )
         assert rc == 0
         assert (out_dir / "report.json").is_file()
         assert (out_dir / "report.md").is_file()
@@ -452,57 +468,88 @@ class TestMainCLI:
 
     def test_with_provenance_flags(self, results_dir: Path, tmp_path: Path):
         out_dir = tmp_path / "reports"
-        rc = main([
-            "--results-dir", str(results_dir),
-            "--output-dir", str(out_dir),
-            "--submission-name", "my-submission",
-            "--commit-sha", "abc123",
-            "--pipeline-run-id", "run-42",
-            "--treatment-image-ref", "img@sha256:aaa",
-            "--control-image-ref", "img@sha256:bbb",
-            "--harbor-fork-revision", "main",
-        ])
+        rc = main(
+            [
+                "--results-dir",
+                str(results_dir),
+                "--output-dir",
+                str(out_dir),
+                "--submission-name",
+                "my-submission",
+                "--commit-sha",
+                "abc123",
+                "--pipeline-run-id",
+                "run-42",
+                "--treatment-image-ref",
+                "img@sha256:aaa",
+                "--control-image-ref",
+                "img@sha256:bbb",
+                "--harbor-fork-revision",
+                "main",
+            ]
+        )
         assert rc == 0
         report = json.loads((out_dir / "report.json").read_text())
         assert report["provenance"]["commit_sha"] == "abc123"
 
     def test_with_threshold(self, results_dir: Path, tmp_path: Path):
         out_dir = tmp_path / "reports"
-        rc = main([
-            "--results-dir", str(results_dir),
-            "--output-dir", str(out_dir),
-            "--submission-name", "my-submission",
-            "--threshold", "0.9",
-        ])
+        rc = main(
+            [
+                "--results-dir",
+                str(results_dir),
+                "--output-dir",
+                str(out_dir),
+                "--submission-name",
+                "my-submission",
+                "--threshold",
+                "0.9",
+            ]
+        )
         assert rc == 0
         report = json.loads((out_dir / "report.json").read_text())
         assert report["summary"]["recommendation"] == "fail"
 
     def test_nonexistent_results_dir(self, tmp_path: Path):
-        rc = main([
-            "--results-dir", str(tmp_path / "nope"),
-            "--output-dir", str(tmp_path / "out"),
-            "--submission-name", "x",
-        ])
+        rc = main(
+            [
+                "--results-dir",
+                str(tmp_path / "nope"),
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--submission-name",
+                "x",
+            ]
+        )
         assert rc == 1
 
     def test_creates_output_dir(self, results_dir: Path, tmp_path: Path):
         out_dir = tmp_path / "nested" / "dir" / "reports"
-        rc = main([
-            "--results-dir", str(results_dir),
-            "--output-dir", str(out_dir),
-            "--submission-name", "my-submission",
-        ])
+        rc = main(
+            [
+                "--results-dir",
+                str(results_dir),
+                "--output-dir",
+                str(out_dir),
+                "--submission-name",
+                "my-submission",
+            ]
+        )
         assert rc == 0
         assert (out_dir / "report.json").is_file()
 
     def test_markdown_written(self, results_dir: Path, tmp_path: Path):
         out_dir = tmp_path / "reports"
-        main([
-            "--results-dir", str(results_dir),
-            "--output-dir", str(out_dir),
-            "--submission-name", "my-submission",
-        ])
+        main(
+            [
+                "--results-dir",
+                str(results_dir),
+                "--output-dir",
+                str(out_dir),
+                "--submission-name",
+                "my-submission",
+            ]
+        )
         md = (out_dir / "report.md").read_text()
         assert "# A/B Evaluation Report" in md
 
@@ -510,6 +557,7 @@ class TestMainCLI:
 # ---------------------------------------------------------------------------
 # TestSecurityModels
 # ---------------------------------------------------------------------------
+
 
 class TestSecurityModels:
     """Tests for SecurityFinding and SecurityScanResult Pydantic models."""

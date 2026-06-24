@@ -16,9 +16,11 @@ _ENGINE_REGISTRY: dict[str, type[EvalEngine]] = {}
 
 def register_engine(name: str):
     """Decorator to register an engine class."""
+
     def decorator(cls: type[EvalEngine]) -> type[EvalEngine]:
         _ENGINE_REGISTRY[name] = cls
         return cls
+
     return decorator
 
 
@@ -45,9 +47,9 @@ def get_all_engines() -> list[str]:
     return list(_ENGINE_REGISTRY.keys())
 
 
-from abevalflow.engines.harbor import HarborEngine
-from abevalflow.engines.ase import ASEEngine
 from abevalflow.engines.a2a import A2AEngine
+from abevalflow.engines.ase import ASEEngine
+from abevalflow.engines.harbor import HarborEngine
 from abevalflow.engines.mcpchecker import MCPCheckerEngine
 
 __all__ = [

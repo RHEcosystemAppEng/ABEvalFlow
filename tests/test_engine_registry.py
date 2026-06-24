@@ -1,8 +1,6 @@
 """Tests for engine registry and adapters."""
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -11,7 +9,7 @@ from abevalflow.engines.a2a import A2AEngine
 from abevalflow.engines.ase import ASEEngine
 from abevalflow.engines.harbor import HarborEngine
 from abevalflow.engines.mcpchecker import MCPCheckerEngine
-from abevalflow.gates.base import GateMode, GateType
+from abevalflow.gates.base import GateType
 from abevalflow.schemas import GatePolicy, GatePolicyItem
 
 

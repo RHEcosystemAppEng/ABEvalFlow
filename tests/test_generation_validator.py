@@ -93,10 +93,12 @@ class TestContentCheck:
 
     @patch("abevalflow.generation_validator.llm_client.chat_completion")
     def test_fail_response(self, mock_chat: MagicMock, submission: Path) -> None:
-        mock_chat.return_value = json.dumps({
-            "pass": False,
-            "issues": ["instruction does not match skill"],
-        })
+        mock_chat.return_value = json.dumps(
+            {
+                "pass": False,
+                "issues": ["instruction does not match skill"],
+            }
+        )
         result = content_check(submission)
         assert result["passed"] is False
         assert "instruction does not match skill" in result["issues"]
@@ -151,6 +153,7 @@ class TestPytestCollectCheck:
     @patch("abevalflow.generation_validator.subprocess.run")
     def test_timeout_returns_error(self, mock_run: MagicMock, submission: Path) -> None:
         import subprocess
+
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="pytest", timeout=10)
         errors = pytest_collect_check(submission)
         assert any("timed out" in e for e in errors)
@@ -228,10 +231,12 @@ class TestFinalReview:
 
     @patch("abevalflow.generation_validator.llm_client.chat_completion")
     def test_fail_response(self, mock_chat: MagicMock, submission: Path) -> None:
-        mock_chat.return_value = json.dumps({
-            "pass": False,
-            "issues": ["tests are not deterministic"],
-        })
+        mock_chat.return_value = json.dumps(
+            {
+                "pass": False,
+                "issues": ["tests are not deterministic"],
+            }
+        )
         result = final_review(submission)
         assert result["passed"] is False
         assert "tests are not deterministic" in result["issues"]

@@ -189,9 +189,7 @@ def store_mcpchecker(
 
     with session_factory() as session:
         existing = session.execute(
-            select(MCPCheckerRun).where(
-                MCPCheckerRun.pipeline_run_id == effective_run_id
-            )
+            select(MCPCheckerRun).where(MCPCheckerRun.pipeline_run_id == effective_run_id)
         ).scalar_one_or_none()
 
         if existing is not None:
@@ -267,9 +265,7 @@ def store(
 
     with session_factory() as session:
         existing = session.execute(
-            select(EvaluationRun).where(
-                EvaluationRun.pipeline_run_id == effective_run_id
-            )
+            select(EvaluationRun).where(EvaluationRun.pipeline_run_id == effective_run_id)
         ).scalar_one_or_none()
 
         if existing is not None:
@@ -287,9 +283,7 @@ def store(
         # Check if security scans already exist (may have been inserted by
         # security-scan task's immediate persistence step)
         existing_scan = session.execute(
-            select(SecurityScan).where(
-                SecurityScan.pipeline_run_id == effective_run_id
-            )
+            select(SecurityScan).where(SecurityScan.pipeline_run_id == effective_run_id)
         ).scalar_one_or_none()
 
         session.add(ev_run)

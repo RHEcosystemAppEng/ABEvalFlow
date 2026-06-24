@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +15,6 @@ from abevalflow.certification import (
     LevelResult,
 )
 from abevalflow.compass_facts import (
-    CertificationFactPushResult,
     FactPushResult,
     UnresolvedEnvVarError,
     _build_certification_level_payload,
@@ -43,7 +42,7 @@ def sample_gate_result() -> GateResult:
         mode=GateMode.BLOCK,
         message="Harbor evaluation passed",
         details={"engine": "harbor", "uplift": 0.15, "treatment_pass_rate": 0.9},
-        evaluated_at=datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc),
+        evaluated_at=datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -228,7 +227,6 @@ class TestPushGateFactFromConfig:
         sample_gate_result: GateResult,
         sample_push_facts_config: PushFactsConfig,
     ):
-        from abevalflow.compass_facts import FactPushResult
 
         with patch("abevalflow.compass_facts.push_gate_fact") as mock_push:
             mock_push.return_value = FactPushResult(
@@ -286,9 +284,7 @@ class TestGatePolicyPushFactMethods:
         policy = GatePolicy()
         assert policy.should_push_fact("harbor") is False
 
-    def test_should_push_fact_returns_false_when_gate_not_configured(
-        self, sample_push_facts_config: PushFactsConfig
-    ):
+    def test_should_push_fact_returns_false_when_gate_not_configured(self, sample_push_facts_config: PushFactsConfig):
         from abevalflow.schemas import GatePolicy, GatePolicyItem
 
         policy = GatePolicy(
@@ -297,9 +293,7 @@ class TestGatePolicyPushFactMethods:
         )
         assert policy.should_push_fact("evaluation") is False
 
-    def test_should_push_fact_returns_true_when_configured(
-        self, sample_push_facts_config: PushFactsConfig
-    ):
+    def test_should_push_fact_returns_true_when_configured(self, sample_push_facts_config: PushFactsConfig):
         from abevalflow.schemas import GatePolicy, GatePolicyItem
 
         policy = GatePolicy(
@@ -465,7 +459,7 @@ class TestBuildCertificationLevelPayload:
 
 class TestPushCertificationFactsHierarchy:
     """Tests for push_certification_facts with pre-enforced hierarchy.
-    
+
     Note: Hierarchy enforcement now happens in compute_certification(), not in
     push_certification_facts. These tests verify that push_certification_facts
     correctly passes through the pre-enforced .passed values.

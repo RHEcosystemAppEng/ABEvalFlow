@@ -98,6 +98,7 @@ class TestFetchSkill:
         tmp_path: Path,
     ) -> None:
         import subprocess
+
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
 
         target = tmp_path / "target"
@@ -112,6 +113,7 @@ class TestFetchSkill:
         tmp_path: Path,
     ) -> None:
         import subprocess
+
         mock_run.side_effect = subprocess.TimeoutExpired("git", 60)
 
         target = tmp_path / "target"

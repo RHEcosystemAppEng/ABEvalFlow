@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -35,7 +35,7 @@ def _build_artifact_prefix(
     pipeline_run_id: str,
 ) -> str:
     """Build the MinIO object prefix: YYYYMMDD_hhmmss_<name>_<run-id>."""
-    datestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    datestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     return f"{datestamp}_{submission_name}_{pipeline_run_id}"
 
 
@@ -330,9 +330,7 @@ def upload_scaffolded_configs(
     eval_configs_dir = workspace_root / "_eval-configs"
     if eval_configs_dir.is_dir():
         for fpath in sorted(eval_configs_dir.glob("*.yaml")):
-            masked = re.sub(
-                r"(API_KEY:\s*)(\S+)", r"\1***", fpath.read_text()
-            )
+            masked = re.sub(r"(API_KEY:\s*)(\S+)", r"\1***", fpath.read_text())
             masked_path = fpath.parent / f".masked_{fpath.name}"
             masked_path.write_text(masked)
             object_name = f"{prefix}/scaffolded/{fpath.name}"
@@ -375,8 +373,7 @@ def upload_scaffolded_configs(
         except Exception as exc:
             logger.warning("Failed to upload generated file %s: %s", filepath, exc)
 
-    logger.info("Uploaded %d config/generated files to s3://%s/%s/",
-                uploaded, bucket, prefix)
+    logger.info("Uploaded %d config/generated files to s3://%s/%s/", uploaded, bucket, prefix)
     return uploaded
 
 
@@ -394,7 +391,8 @@ def promote_to_quay(
     quay_tag = f"{quay_repo}/{submission_name}:treatment-{commit_sha[:12]}"
 
     cmd = [
-        "skopeo", "copy",
+        "skopeo",
+        "copy",
         "--src-tls-verify=false",
         f"docker://{treatment_image_ref}",
         f"docker://{quay_tag}",
@@ -428,7 +426,7 @@ def post_pr_comment(
 
     Uses the GitHub REST API via ``urllib`` (no ``gh`` CLI required).
     ``github_token`` falls back to the ``GITHUB_TOKEN`` environment variable.
-    
+
     If scorecard.json exists, its recommendation takes precedence over report.json.
     """
     import os
@@ -466,11 +464,11 @@ def post_pr_comment(
             sc_reason = scorecard.get("recommendation_reason", "")
             gates_passed = scorecard.get("gates_passed", 0)
             gates_failed = scorecard.get("gates_failed", 0)
-            
+
             # Scorecard recommendation takes precedence
             if sc_recommendation:
                 recommendation = sc_recommendation
-            
+
             # Build gate summary
             gates = scorecard.get("gates", [])
             gate_lines = []
@@ -480,7 +478,7 @@ def post_pr_comment(
                 score = gate.get("score", 0.0)
                 mode = gate.get("mode", "warn")
                 gate_lines.append(f"| {name} | {status} | {score:.2f} | {mode} |")
-            
+
             if gate_lines:
                 gate_table = "\n".join(gate_lines)
                 scorecard_section = (
@@ -563,8 +561,7 @@ def cleanup_images(
             if key in seen_imagestreams:
                 continue
             seen_imagestreams.add(key)
-            cmd = ["oc", "delete", "imagestream", is_name, "-n", namespace,
-                   "--ignore-not-found"]
+            cmd = ["oc", "delete", "imagestream", is_name, "-n", namespace, "--ignore-not-found"]
         else:
             cmd = ["oc", "delete", "istag", name_part, "-n", namespace]
 
@@ -590,35 +587,46 @@ def main() -> int:
     parser.add_argument("--report-dir", type=Path, required=True)
     parser.add_argument("--submission-name", type=str, required=True)
     parser.add_argument("--pipeline-run-id", type=str, required=True)
-    parser.add_argument("--recommendation", type=str, required=True,
-                        help="'pass' or 'fail' from the analyze step")
+    parser.add_argument("--recommendation", type=str, required=True, help="'pass' or 'fail' from the analyze step")
     parser.add_argument("--treatment-image-ref", type=str, default="")
     parser.add_argument("--control-image-ref", type=str, default="")
     parser.add_argument("--commit-sha", type=str, default="")
-    parser.add_argument("--uplift-threshold", type=float, default=-1.0,
-                        help="Minimum uplift for Quay promotion. -1.0 disables promotion.")
-    parser.add_argument("--quay-repo", type=str, default="",
-                        help="Quay.io repo for image promotion (e.g. quay.io/myorg)")
+    parser.add_argument(
+        "--uplift-threshold",
+        type=float,
+        default=-1.0,
+        help="Minimum uplift for Quay promotion. -1.0 disables promotion.",
+    )
+    parser.add_argument(
+        "--quay-repo", type=str, default="", help="Quay.io repo for image promotion (e.g. quay.io/myorg)"
+    )
     parser.add_argument("--quay-ttl-days", type=int, default=7)
-    parser.add_argument("--repo-name", type=str, default="",
-                        help="GitHub repo (org/name) for PR comment")
-    parser.add_argument("--pr-number", type=str, default="",
-                        help="PR number for GitHub comment")
-    parser.add_argument("--results-dir", type=Path, default=None,
-                        help="Path to results dir (Harbor or ASE) for debug artifact upload")
-    parser.add_argument("--eval-engine", type=str, default="harbor",
-                        choices=["harbor", "ase", "mcpchecker", "a2a", "both"],
-                        help="Evaluation engine used — determines debug artifact layout")
-    parser.add_argument("--workspace-root", type=Path, default=None,
-                        help="Workspace root for uploading scaffolded configs")
-    parser.add_argument("--minio-endpoint", type=str, default=None,
-                        help="MinIO endpoint (default: MINIO_ENDPOINT env var)")
+    parser.add_argument("--repo-name", type=str, default="", help="GitHub repo (org/name) for PR comment")
+    parser.add_argument("--pr-number", type=str, default="", help="PR number for GitHub comment")
+    parser.add_argument(
+        "--results-dir", type=Path, default=None, help="Path to results dir (Harbor or ASE) for debug artifact upload"
+    )
+    parser.add_argument(
+        "--eval-engine",
+        type=str,
+        default="harbor",
+        choices=["harbor", "ase", "mcpchecker", "a2a", "both"],
+        help="Evaluation engine used — determines debug artifact layout",
+    )
+    parser.add_argument(
+        "--workspace-root", type=Path, default=None, help="Workspace root for uploading scaffolded configs"
+    )
+    parser.add_argument(
+        "--minio-endpoint", type=str, default=None, help="MinIO endpoint (default: MINIO_ENDPOINT env var)"
+    )
     parser.add_argument("--minio-bucket", type=str, default="ab-eval-reports")
-    parser.add_argument("--report-prefix", type=str, default="",
-                        help="Pre-computed MinIO prefix (skips generating new timestamp)")
+    parser.add_argument(
+        "--report-prefix", type=str, default="", help="Pre-computed MinIO prefix (skips generating new timestamp)"
+    )
     args = parser.parse_args()
 
     import os
+
     minio_endpoint = args.minio_endpoint or os.environ.get("MINIO_ENDPOINT", "")
     minio_access_key = os.environ.get("MINIO_ACCESS_KEY", "")
     minio_secret_key = os.environ.get("MINIO_SECRET_KEY", "")
@@ -643,7 +651,8 @@ def main() -> int:
         else:
             logger.warning("No report files uploaded — continuing with debug artifacts")
             prefix = args.report_prefix or _build_artifact_prefix(
-                args.submission_name, args.pipeline_run_id,
+                args.submission_name,
+                args.pipeline_run_id,
             )
         if args.results_dir:
             if args.eval_engine == "mcpchecker":
@@ -674,12 +683,7 @@ def main() -> int:
         logger.warning("MinIO not configured — skipping report upload")
 
     # --- 2. Quay.io promotion (if enabled) ---
-    if (
-        args.uplift_threshold > -1.0
-        and args.recommendation == "pass"
-        and args.treatment_image_ref
-        and args.quay_repo
-    ):
+    if args.uplift_threshold > -1.0 and args.recommendation == "pass" and args.treatment_image_ref and args.quay_repo:
         report_path = args.report_dir / "report.json"
         uplift = 0.0
         if report_path.exists():
@@ -702,7 +706,8 @@ def main() -> int:
         else:
             logger.info(
                 "Uplift %.4f below threshold %.4f — skipping Quay promotion",
-                uplift, args.uplift_threshold,
+                uplift,
+                args.uplift_threshold,
             )
     else:
         logger.info("Quay promotion disabled or not applicable")

@@ -71,9 +71,7 @@ def _parse_benchmarks(results_dir: Path, n_iterations: int) -> list[dict]:
     return benchmarks
 
 
-def _collect_trials(
-    results_dir: Path, n_iterations: int
-) -> tuple[list[TrialResult], list[TrialResult]]:
+def _collect_trials(results_dir: Path, n_iterations: int) -> tuple[list[TrialResult], list[TrialResult]]:
     """Collect per-iteration trial results for treatment (with_skill) and control (without_skill)."""
     treatment_trials: list[TrialResult] = []
     control_trials: list[TrialResult] = []
@@ -193,9 +191,7 @@ def build_ase_analysis(
         logger.warning("Zero passes in both variants — defaulting to FAIL")
         recommendation = Recommendation.FAIL
     else:
-        recommendation = (
-            Recommendation.PASS if primary_gap >= threshold else Recommendation.FAIL
-        )
+        recommendation = Recommendation.PASS if primary_gap >= threshold else Recommendation.FAIL
 
     prov = provenance or Provenance()
     prov.eval_engine = "ase"
@@ -262,12 +258,8 @@ def render_markdown(result: AnalysisResult) -> str:
     lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
     if s.mean_reward_gap is not None:
         lines.append(f"- **Mean reward gap:** {s.mean_reward_gap:+.4f}")
-    lines.append(
-        f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}"
-    )
-    lines.append(
-        f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}"
-    )
+    lines.append(f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}")
+    lines.append(f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}")
     lines.append(f"- **Recommendation:** **{s.recommendation.value.upper()}**")
     lines.append(f"- **Evaluation engine:** {prov.eval_engine}")
     lines.append("")
@@ -303,23 +295,32 @@ def main(argv: list[str] | None = None) -> int:
         description="Aggregate agent-skills-eval results into AnalysisResult format",
     )
     parser.add_argument(
-        "--results-dir", type=Path, required=True,
+        "--results-dir",
+        type=Path,
+        required=True,
         help="Path to ASE results directory containing iteration-N/ subdirs",
     )
     parser.add_argument(
-        "--output-dir", type=Path, required=True,
+        "--output-dir",
+        type=Path,
+        required=True,
         help="Directory to write report.json and report.md",
     )
     parser.add_argument(
-        "--submission-name", required=True,
+        "--submission-name",
+        required=True,
         help="Name of the submission being analyzed",
     )
     parser.add_argument(
-        "--iterations", type=int, default=5,
+        "--iterations",
+        type=int,
+        default=5,
         help="Number of iterations to aggregate (default: 5)",
     )
     parser.add_argument(
-        "--threshold", type=float, default=0.0,
+        "--threshold",
+        type=float,
+        default=0.0,
         help="Minimum uplift for a 'pass' recommendation (default: 0.0)",
     )
     parser.add_argument("--commit-sha", default=None)

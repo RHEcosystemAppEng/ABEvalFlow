@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CRITERIA = ["correctness", "helpfulness", "safety"]
 DEFAULT_MODEL = os.environ.get("LLM_JUDGE_MODEL", "openai/claude-sonnet")
-DEFAULT_LLM_BASE_URL = os.environ.get(
-    "LLM_BASE_URL", "http://litellm.ab-eval-flow.svc.cluster.local:4000"
-)
+DEFAULT_LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://litellm.ab-eval-flow.svc.cluster.local:4000")
 
 JUDGE_SYSTEM_PROMPT = """You are an expert evaluator for AI agent responses.
 Your task is to score the agent's response on the following criteria:
@@ -172,8 +170,7 @@ class LLMJudgeVerifier:
             return self._fallback_score(response_text)
 
         criteria_desc = "\n".join(
-            f"- {name}: {CRITERIA_DESCRIPTIONS.get(name, 'Custom criterion')}"
-            for name in self.criteria
+            f"- {name}: {CRITERIA_DESCRIPTIONS.get(name, 'Custom criterion')}" for name in self.criteria
         )
 
         system_prompt = JUDGE_SYSTEM_PROMPT.format(criteria_descriptions=criteria_desc)
@@ -227,9 +224,7 @@ class LLMJudgeVerifier:
 
         parts.append(f"## Agent Response\n{response_text}")
 
-        parts.append(
-            "\nPlease evaluate the agent's response on the specified criteria."
-        )
+        parts.append("\nPlease evaluate the agent's response on the specified criteria.")
 
         return "\n\n".join(parts)
 
@@ -257,8 +252,7 @@ class LLMJudgeVerifier:
         return JudgeResult(
             overall_score=score,
             criteria_scores={
-                name: {"score": score, "explanation": "Fallback scoring (LLM unavailable)"}
-                for name in self.criteria
+                name: {"score": score, "explanation": "Fallback scoring (LLM unavailable)"} for name in self.criteria
             },
             overall_explanation="Fallback scoring due to LLM unavailability",
         )

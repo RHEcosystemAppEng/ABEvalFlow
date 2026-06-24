@@ -112,8 +112,7 @@ def _check_metadata_yaml(submission_dir: Path) -> tuple[list[str], SubmissionMet
         model = SubmissionMetadata(**raw)
     except ValidationError as exc:
         errors = [
-            f"metadata.yaml validation: {e['msg']} ({'.'.join(str(loc) for loc in e['loc'])})"
-            for e in exc.errors()
+            f"metadata.yaml validation: {e['msg']} ({'.'.join(str(loc) for loc in e['loc'])})" for e in exc.errors()
         ]
         return errors, None
     return [], model
@@ -133,6 +132,7 @@ def _check_supportive_size(submission_dir: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 # ASE-specific checks
 # ---------------------------------------------------------------------------
+
 
 def _check_skill_md_frontmatter(submission_dir: Path) -> list[str]:
     """Validate that at least one SKILL.md has YAML frontmatter with 'name'."""
@@ -176,7 +176,7 @@ def _check_skill_md_frontmatter(submission_dir: Path) -> list[str]:
 
 def _check_evals_json(submission_dir: Path) -> list[str]:
     """Validate evals/evals.json for agent-skills-eval format.
-    
+
     Note: Missing evals.json is NOT an error - the pipeline will generate it
     from SKILL.md. This function only validates format when the file exists.
     """
@@ -214,6 +214,7 @@ def _check_evals_json(submission_dir: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 # MCPChecker-specific checks
 # ---------------------------------------------------------------------------
+
 
 def _check_mcpchecker_eval_yaml(submission_dir: Path) -> list[str]:
     """Validate eval.yaml exists and has valid MCPChecker structure."""
@@ -303,6 +304,7 @@ def _check_mcpchecker_tasks(submission_dir: Path) -> list[str]:
 # Main validation
 # ---------------------------------------------------------------------------
 
+
 def validate_submission(
     submission_dir: Path,
     eval_engine: EvalEngine = EvalEngine.HARBOR,
@@ -351,9 +353,7 @@ def validate_submission(
         has_task_toml = (submission_dir / "task.toml").is_file()
         has_tasks_dir = (submission_dir / "tasks").is_dir()
         if not has_instruction and not has_task_toml and not has_tasks_dir:
-            errors.append(
-                "A2A evaluation requires instruction.md, task.toml, or tasks/ directory"
-            )
+            errors.append("A2A evaluation requires instruction.md, task.toml, or tasks/ directory")
 
     # Common: supportive/ size check (skip for mcpchecker and a2a)
     if not run_mcpchecker and not run_a2a:

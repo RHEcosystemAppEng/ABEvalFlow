@@ -12,9 +12,11 @@ _QUALITY_GATE_REGISTRY: dict[str, type[QualityGate]] = {}
 
 def register_quality_gate(name: str):
     """Decorator to register a quality gate class."""
+
     def decorator(cls: type[QualityGate]) -> type[QualityGate]:
         _QUALITY_GATE_REGISTRY[name] = cls
         return cls
+
     return decorator
 
 

@@ -1,7 +1,6 @@
 """Tests for security and quality gate registries."""
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -47,9 +46,7 @@ class TestCiscoGate:
     """Tests for Cisco security gate."""
 
     def test_evaluate_disabled(self, tmp_path):
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.DISABLED)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.DISABLED)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -90,9 +87,7 @@ class TestCiscoGate:
         }
         (tmp_path / "security-scan.json").write_text(json.dumps(scan_data))
 
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.WARN)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.WARN)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -108,9 +103,7 @@ class TestCiscoGate:
         }
         (tmp_path / "security-scan.json").write_text(json.dumps(scan_data))
 
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.BLOCK)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.BLOCK)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -125,9 +118,7 @@ class TestCiscoGate:
         }
         (tmp_path / "security-scan.json").write_text(json.dumps(scan_data))
 
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.BLOCK)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.BLOCK)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -143,9 +134,7 @@ class TestCiscoGate:
         }
         (tmp_path / "security-scan.json").write_text(json.dumps(scan_data))
 
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.BLOCK)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.BLOCK)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -178,9 +167,7 @@ class TestLLMReviewGate:
     """Tests for LLM review quality gate."""
 
     def test_evaluate_disabled(self, tmp_path):
-        policy = GatePolicy(
-            gates={"quality": GatePolicyItem(mode=GateMode.DISABLED)}
-        )
+        policy = GatePolicy(gates={"quality": GatePolicyItem(mode=GateMode.DISABLED)})
         gate = LLMReviewGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -259,9 +246,7 @@ class TestLLMReviewGate:
         }
         (tmp_path / "_ai_review.json").write_text(json.dumps(review_data))
 
-        policy = GatePolicy(
-            gates={"quality": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)}
-        )
+        policy = GatePolicy(gates={"quality": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)})
         gate = LLMReviewGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -280,9 +265,7 @@ class TestLLMReviewGate:
         }
         (tmp_path / "_ai_review.json").write_text(json.dumps(review_data))
 
-        policy = GatePolicy(
-            gates={"quality": GatePolicyItem(mode=GateMode.WARN)}
-        )
+        policy = GatePolicy(gates={"quality": GatePolicyItem(mode=GateMode.WARN)})
         gate = LLMReviewGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -302,9 +285,7 @@ class TestLLMReviewGate:
         }
         (tmp_path / "_ai_review.json").write_text(json.dumps(review_data))
 
-        policy = GatePolicy(
-            gates={"quality": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)}
-        )
+        policy = GatePolicy(gates={"quality": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)})
         gate = LLMReviewGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -324,9 +305,7 @@ class TestLLMReviewGate:
         }
         (tmp_path / "_ai_review.json").write_text(json.dumps(review_data))
 
-        policy = GatePolicy(
-            gates={"quality": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)}
-        )
+        policy = GatePolicy(gates={"quality": GatePolicyItem(mode=GateMode.BLOCK, threshold=0.6)})
         gate = LLMReviewGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -336,9 +315,7 @@ class TestLLMReviewGate:
 
     def test_block_mode_missing_artifact_fails(self, tmp_path):
         """In BLOCK mode, missing _ai_review.json fails the gate."""
-        policy = GatePolicy(
-            gates={"quality": GatePolicyItem(mode=GateMode.BLOCK)}
-        )
+        policy = GatePolicy(gates={"quality": GatePolicyItem(mode=GateMode.BLOCK)})
         gate = LLMReviewGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -351,9 +328,7 @@ class TestCiscoGateBlockMode:
 
     def test_block_mode_missing_artifact_fails(self, tmp_path):
         """In BLOCK mode, missing security-scan.json fails the gate."""
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.BLOCK)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.BLOCK)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 
@@ -362,9 +337,7 @@ class TestCiscoGateBlockMode:
 
     def test_warn_mode_missing_artifact_passes(self, tmp_path):
         """In WARN mode, missing security-scan.json passes the gate."""
-        policy = GatePolicy(
-            gates={"security": GatePolicyItem(mode=GateMode.WARN)}
-        )
+        policy = GatePolicy(gates={"security": GatePolicyItem(mode=GateMode.WARN)})
         gate = CiscoGate()
         result = gate.evaluate(tmp_path, policy)
 

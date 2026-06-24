@@ -50,8 +50,14 @@ def fetch_skill(
         try:
             subprocess.run(
                 [
-                    "git", "clone", "--depth", "1", "--sparse",
-                    "--filter=blob:none", repo_url, tmp,
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--sparse",
+                    "--filter=blob:none",
+                    repo_url,
+                    tmp,
                 ],
                 capture_output=True,
                 text=True,

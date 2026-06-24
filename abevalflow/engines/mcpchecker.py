@@ -9,7 +9,7 @@ from typing import Any
 
 from abevalflow.engines import register_engine
 from abevalflow.engines.base import EvalEngine
-from abevalflow.gates.base import Finding, GateMode, GateResult, GateType, Severity
+from abevalflow.gates.base import Finding, GateResult, GateType, Severity
 from abevalflow.schemas import GatePolicy
 
 logger = logging.getLogger(__name__)
@@ -50,11 +50,11 @@ class MCPCheckerEngine(EvalEngine):
 
         overall_score = raw_result.get("overall_score", 0.0)
         passed_tasks = raw_result.get("passed_tasks", 0)
-        failed_tasks = raw_result.get("failed_tasks", 0)
-        error_tasks = raw_result.get("error_tasks", 0)
+        _failed_tasks = raw_result.get("failed_tasks", 0)  # Reserved for future use
+        _error_tasks = raw_result.get("error_tasks", 0)  # Reserved for future use
         total_tasks = raw_result.get("total_tasks", 0)
 
-        recommendation = raw_result.get("recommendation", "fail")
+        _recommendation = raw_result.get("recommendation", "fail")  # Reserved for future use
         passed = overall_score >= threshold
 
         findings = []
@@ -62,12 +62,14 @@ class MCPCheckerEngine(EvalEngine):
             status = task.get("status", "unknown")
             if status in ("failed", "error"):
                 severity = Severity.HIGH if status == "error" else Severity.MEDIUM
-                findings.append(Finding(
-                    severity=severity,
-                    message=task.get("error_message") or f"Task {status}: {task.get('task_name', 'unknown')}",
-                    location=task.get("task_id"),
-                    rule_id=f"mcpchecker-{status}",
-                ))
+                findings.append(
+                    Finding(
+                        severity=severity,
+                        message=task.get("error_message") or f"Task {status}: {task.get('task_name', 'unknown')}",
+                        location=task.get("task_id"),
+                        rule_id=f"mcpchecker-{status}",
+                    )
+                )
 
         message = (
             f"MCPChecker: {passed_tasks}/{total_tasks} tasks passed "

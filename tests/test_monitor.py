@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -74,7 +74,7 @@ class TestCheckDegradation:
 
     def test_single_run_returns_not_degraded(self, engine, session):
         """When only one run exists, should return not degraded."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 0.8, now)
 
         result = check_degradation(engine, "test-skill")
@@ -87,7 +87,7 @@ class TestCheckDegradation:
 
     def test_healthy_no_degradation(self, engine, session):
         """When current score is similar to previous, no degradation."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 0.80, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.82, now)
 
@@ -101,7 +101,7 @@ class TestCheckDegradation:
 
     def test_degradation_detected(self, engine, session):
         """When score drops significantly, degradation is detected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 0.90, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.70, now)
 
@@ -117,7 +117,7 @@ class TestCheckDegradation:
 
     def test_exact_threshold_not_degraded(self, engine, session):
         """When ratio equals threshold exactly, no degradation."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 1.0, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.85, now)
 
@@ -128,7 +128,7 @@ class TestCheckDegradation:
 
     def test_just_below_threshold_is_degraded(self, engine, session):
         """When ratio is just below threshold, degradation is detected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 1.0, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.84, now)
 
@@ -139,7 +139,7 @@ class TestCheckDegradation:
 
     def test_previous_score_zero(self, engine, session):
         """Edge case: previous score is zero."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 0.0, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.5, now)
 
@@ -150,7 +150,7 @@ class TestCheckDegradation:
 
     def test_both_scores_zero(self, engine, session):
         """Edge case: both scores are zero."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 0.0, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.0, now)
 
@@ -161,7 +161,7 @@ class TestCheckDegradation:
 
     def test_filters_by_submission_name(self, engine, session):
         """Should only consider runs for the specified submission."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "skill-a", "run-a1", 0.9, now - timedelta(days=2))
         _create_run(session, "skill-a", "run-a2", 0.85, now - timedelta(days=1))
         _create_run(session, "skill-b", "run-b1", 0.5, now)
@@ -175,7 +175,7 @@ class TestCheckDegradation:
 
     def test_custom_threshold(self, engine, session):
         """Custom threshold should be respected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _create_run(session, "test-skill", "run-001", 1.0, now - timedelta(days=1))
         _create_run(session, "test-skill", "run-002", 0.75, now)
 

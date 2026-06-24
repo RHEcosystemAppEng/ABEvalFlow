@@ -122,7 +122,7 @@ def _load_profiles_yaml(profiles_path: Path | None = None) -> dict[str, Any]:
     path = profiles_path or DEFAULT_PROFILES_PATH
     if not path.exists():
         raise FileNotFoundError(f"Certification profiles not found: {path}")
-    
+
     with open(path) as f:
         return yaml.safe_load(f)
 
@@ -156,7 +156,7 @@ def get_default_profile_name(profiles_path: Path | None = None) -> str:
 def load_profile(
     profile_name: str | None = None,
     profiles_path: Path | None = None,
-) -> "CertificationPolicy":
+) -> CertificationPolicy:
     """Load a certification profile and return it as a CertificationPolicy.
 
     Profiles define which checks apply to each certification level for different
@@ -183,41 +183,39 @@ def load_profile(
 
     data = _load_profiles_yaml(profiles_path)
     profiles = data.get("profiles", {})
-    
+
     name = profile_name or data.get("default_profile", "skill")
-    
+
     if name not in profiles:
         available = list(profiles.keys())
-        raise ValueError(
-            f"Unknown certification profile '{name}'. Available: {available}"
-        )
-    
+        raise ValueError(f"Unknown certification profile '{name}'. Available: {available}")
+
     profile_data = profiles[name]
     logger.info("Loading certification profile '%s': %s", name, profile_data.get("description", ""))
-    
+
     # Build CertificationPolicy from profile data
     foundational = None
     trusted = None
     certified = None
-    
+
     if "foundational" in profile_data:
         foundational = CertificationLevelPolicy(
             checks=profile_data["foundational"].get("checks"),
             thresholds=profile_data["foundational"].get("thresholds"),
         )
-    
+
     if "trusted" in profile_data:
         trusted = CertificationLevelPolicy(
             checks=profile_data["trusted"].get("checks"),
             thresholds=profile_data["trusted"].get("thresholds"),
         )
-    
+
     if "certified" in profile_data:
         certified = CertificationLevelPolicy(
             checks=profile_data["certified"].get("checks"),
             thresholds=profile_data["certified"].get("thresholds"),
         )
-    
+
     return CertificationPolicy(
         foundational=foundational,
         trusted=trusted,
@@ -370,9 +368,7 @@ def _map_gate_to_checks(
                 details={"source_implementation": source_impl},
             )
         )
-        advanced_threshold = _get_threshold(
-            CheckId.ADVANCED_AGENT_VALIDATION, threshold_overrides
-        )
+        advanced_threshold = _get_threshold(CheckId.ADVANCED_AGENT_VALIDATION, threshold_overrides)
         if gate.score >= advanced_threshold:
             checks.append(
                 CheckResult(
@@ -413,9 +409,7 @@ def _map_gate_to_checks(
                 },
             )
         )
-        adv_security_threshold = _get_threshold(
-            CheckId.ADVANCED_SECURITY_VALIDATION, threshold_overrides
-        )
+        adv_security_threshold = _get_threshold(CheckId.ADVANCED_SECURITY_VALIDATION, threshold_overrides)
         high_score = gate.score >= adv_security_threshold and gate.passed
         checks.append(
             CheckResult(
@@ -459,9 +453,7 @@ def _map_gate_to_checks(
                 details={"source_implementation": source_impl},
             )
         )
-        instruction_threshold = _get_threshold(
-            CheckId.INSTRUCTION_QUALITY, threshold_overrides
-        )
+        instruction_threshold = _get_threshold(CheckId.INSTRUCTION_QUALITY, threshold_overrides)
         checks.append(
             CheckResult(
                 check_id=CheckId.INSTRUCTION_QUALITY,
@@ -493,15 +485,13 @@ def _validate_check_ids(check_ids: list[str]) -> list[CheckId]:
     result = []
     for check_id in check_ids:
         if check_id not in valid_ids:
-            raise ValueError(
-                f"Invalid check ID '{check_id}'. Valid IDs are: {sorted(valid_ids)}"
-            )
+            raise ValueError(f"Invalid check ID '{check_id}'. Valid IDs are: {sorted(valid_ids)}")
         result.append(CheckId(check_id))
     return result
 
 
 def _collect_threshold_overrides(
-    policy: "CertificationPolicy | None",
+    policy: CertificationPolicy | None,
 ) -> dict[str, float]:
     """Collect all threshold overrides from a certification policy."""
     if policy is None:
@@ -519,7 +509,7 @@ def compute_certification(
     validation_passed: bool = True,
     metadata_valid: bool = True,
     has_eval_assets: bool = True,
-    policy: "CertificationPolicy | None" = None,
+    policy: CertificationPolicy | None = None,
 ) -> CertificationResult:
     """Compute certification levels from gate results.
 
@@ -664,15 +654,9 @@ def compute_certification(
         return LevelResult(level=level, passed=all_passed, checks=level_checks)
 
     # Build all levels
-    foundational_result = build_level(
-        CertificationLevel.FOUNDATIONAL, "foundational", FOUNDATIONAL_CHECKS
-    )
-    trusted_result = build_level(
-        CertificationLevel.TRUSTED, "trusted", TRUSTED_CHECKS
-    )
-    certified_result = build_level(
-        CertificationLevel.CERTIFIED, "certified", CERTIFIED_CHECKS
-    )
+    foundational_result = build_level(CertificationLevel.FOUNDATIONAL, "foundational", FOUNDATIONAL_CHECKS)
+    trusted_result = build_level(CertificationLevel.TRUSTED, "trusted", TRUSTED_CHECKS)
+    certified_result = build_level(CertificationLevel.CERTIFIED, "certified", CERTIFIED_CHECKS)
 
     # Enforce hierarchy: lower levels must pass for higher levels to pass
     # If foundational fails, trusted and certified cannot pass

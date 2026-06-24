@@ -27,7 +27,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -46,7 +46,7 @@ from abevalflow.gates.base import GateResult
 from abevalflow.gates.quality import get_all_quality_gates
 from abevalflow.gates.security import get_all_security_gates
 from abevalflow.schemas import CertificationPolicy, GatePolicy, SubmissionMetadata
-from abevalflow.scorecard import Recommendation, Scorecard, apply_combination_logic
+from abevalflow.scorecard import Scorecard, apply_combination_logic
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,7 +99,7 @@ def load_certification_policy(
         CertificationPolicy or None for defaults
     """
     metadata_path = submission_dir / "metadata.yaml"
-    
+
     # Try loading from metadata.yaml first
     if metadata_path.exists():
         try:
@@ -136,9 +136,7 @@ def load_provenance(reports_dir: Path) -> dict:
     return {}
 
 
-def _maybe_push_fact(
-    gate_result: GateResult, policy: GatePolicy
-) -> FactPushResult | None:
+def _maybe_push_fact(gate_result: GateResult, policy: GatePolicy) -> FactPushResult | None:
     """Push gate fact to Compass if configured.
 
     Args:
@@ -246,10 +244,7 @@ def aggregate_scorecard(
             push_result = _maybe_push_fact(engine_gate, policy)
             if push_result:
                 fact_push_results.append(push_result)
-            logger.info(
-                "Engine %s: passed=%s, score=%.3f",
-                engine.name, engine_gate.passed, engine_gate.score
-            )
+            logger.info("Engine %s: passed=%s, score=%.3f", engine.name, engine_gate.passed, engine_gate.score)
         else:
             logger.warning("No result found for engine %s at %s", engine.name, engine_reports_dir)
 
@@ -266,7 +261,10 @@ def aggregate_scorecard(
             fact_push_results.append(push_result)
         logger.info(
             "Security %s: passed=%s, score=%.3f, findings=%d",
-            security_gate.name, gate_result.passed, gate_result.score, len(gate_result.findings)
+            security_gate.name,
+            gate_result.passed,
+            gate_result.score,
+            len(gate_result.findings),
         )
 
     for quality_gate in get_all_quality_gates():
@@ -280,10 +278,7 @@ def aggregate_scorecard(
         push_result = _maybe_push_fact(gate_result, policy)
         if push_result:
             fact_push_results.append(push_result)
-        logger.info(
-            "Quality %s: passed=%s, score=%.3f",
-            quality_gate.name, gate_result.passed, gate_result.score
-        )
+        logger.info("Quality %s: passed=%s, score=%.3f", quality_gate.name, gate_result.passed, gate_result.score)
 
     recommendation, reason = apply_combination_logic(gates, policy)
     logger.info("Final recommendation: %s (%s)", recommendation, reason)
@@ -318,10 +313,7 @@ def aggregate_scorecard(
         validation_passed = False
         metadata_valid = False
 
-    has_eval_assets = (
-        (submission_dir / "evals" / "evals.json").exists()
-        or (submission_dir / "tests").exists()
-    )
+    has_eval_assets = (submission_dir / "evals" / "evals.json").exists() or (submission_dir / "tests").exists()
 
     certification = compute_certification(
         gates=gates,
@@ -367,7 +359,7 @@ def aggregate_scorecard(
         policy=policy,
         recommendation=recommendation,
         recommendation_reason=reason,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         provenance=provenance,
         fact_push_results=fact_push_results,
         certification=certification,
@@ -388,9 +380,7 @@ def write_scorecard(scorecard: Scorecard, reports_dir: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Aggregate gate results into unified scorecard"
-    )
+    parser = argparse.ArgumentParser(description="Aggregate gate results into unified scorecard")
     parser.add_argument(
         "--submission-dir",
         type=Path,
@@ -439,7 +429,7 @@ def main() -> int:
         type=str,
         default=None,
         help="Certification profile name (e.g., 'skill', 'agent', 'mcp_server'). "
-             "Provides default checks per artifact type. Overridden by submission's metadata.yaml.",
+        "Provides default checks per artifact type. Overridden by submission's metadata.yaml.",
     )
 
     args = parser.parse_args()

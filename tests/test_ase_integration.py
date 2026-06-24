@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from abevalflow.schemas import EvalEngine, SubmissionMetadata
 from abevalflow.report import AnalysisResult, Provenance
-from scripts.validate import validate_submission, main as validate_main
+from abevalflow.schemas import EvalEngine, SubmissionMetadata
 from scripts.aggregate_ase import build_ase_analysis, render_markdown
-
+from scripts.validate import main as validate_main
+from scripts.validate import validate_submission
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -113,47 +113,59 @@ def ase_results_dir(tmp_path: Path) -> Path:
         ws = skill_dir / "with_skill"
         ws.mkdir(parents=True)
         pass_rate = 0.8 + (i * 0.04)
-        (ws / "grading.json").write_text(json.dumps({
-            "assertion_results": [
-                {"text": "A1", "passed": True, "evidence": "ok"},
-                {"text": "A2", "passed": True, "evidence": "ok"},
-                {"text": "A3", "passed": True, "evidence": "ok"},
-                {"text": "A4", "passed": i != 2, "evidence": "ok"},
-                {"text": "A5", "passed": i == 3, "evidence": "ok"},
-            ],
-            "summary": {
-                "passed": 3 + (1 if i != 2 else 0) + (1 if i == 3 else 0),
-                "failed": 5 - (3 + (1 if i != 2 else 0) + (1 if i == 3 else 0)),
-                "total": 5,
-                "pass_rate": pass_rate,
-            },
-        }))
+        (ws / "grading.json").write_text(
+            json.dumps(
+                {
+                    "assertion_results": [
+                        {"text": "A1", "passed": True, "evidence": "ok"},
+                        {"text": "A2", "passed": True, "evidence": "ok"},
+                        {"text": "A3", "passed": True, "evidence": "ok"},
+                        {"text": "A4", "passed": i != 2, "evidence": "ok"},
+                        {"text": "A5", "passed": i == 3, "evidence": "ok"},
+                    ],
+                    "summary": {
+                        "passed": 3 + (1 if i != 2 else 0) + (1 if i == 3 else 0),
+                        "failed": 5 - (3 + (1 if i != 2 else 0) + (1 if i == 3 else 0)),
+                        "total": 5,
+                        "pass_rate": pass_rate,
+                    },
+                }
+            )
+        )
 
         wos = skill_dir / "without_skill"
         wos.mkdir(parents=True)
-        (wos / "grading.json").write_text(json.dumps({
-            "assertion_results": [
-                {"text": "A1", "passed": True, "evidence": "ok"},
-                {"text": "A2", "passed": False, "evidence": "no"},
-                {"text": "A3", "passed": False, "evidence": "no"},
-                {"text": "A4", "passed": False, "evidence": "no"},
-                {"text": "A5", "passed": False, "evidence": "no"},
-            ],
-            "summary": {
-                "passed": 1,
-                "failed": 4,
-                "total": 5,
-                "pass_rate": 0.2,
-            },
-        }))
+        (wos / "grading.json").write_text(
+            json.dumps(
+                {
+                    "assertion_results": [
+                        {"text": "A1", "passed": True, "evidence": "ok"},
+                        {"text": "A2", "passed": False, "evidence": "no"},
+                        {"text": "A3", "passed": False, "evidence": "no"},
+                        {"text": "A4", "passed": False, "evidence": "no"},
+                        {"text": "A5", "passed": False, "evidence": "no"},
+                    ],
+                    "summary": {
+                        "passed": 1,
+                        "failed": 4,
+                        "total": 5,
+                        "pass_rate": 0.2,
+                    },
+                }
+            )
+        )
 
-        (iter_dir / "benchmark.json").write_text(json.dumps({
-            "run_summary": {
-                "with_skill": {"pass_rate": {"mean": pass_rate, "stddev": 0}},
-                "without_skill": {"pass_rate": {"mean": 0.2, "stddev": 0}},
-                "delta": {"pass_rate": pass_rate - 0.2},
-            },
-        }))
+        (iter_dir / "benchmark.json").write_text(
+            json.dumps(
+                {
+                    "run_summary": {
+                        "with_skill": {"pass_rate": {"mean": pass_rate, "stddev": 0}},
+                        "without_skill": {"pass_rate": {"mean": 0.2, "stddev": 0}},
+                        "delta": {"pass_rate": pass_rate - 0.2},
+                    },
+                }
+            )
+        )
 
     return results
 

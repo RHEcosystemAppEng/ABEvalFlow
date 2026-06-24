@@ -7,7 +7,7 @@ The scorecard also computes certification levels (Foundational, Trusted, Certifi
 based on which checks pass. See abevalflow.certification for level definitions.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field, computed_field
 from abevalflow.certification import (
     CertificationLevel,
     CertificationResult,
-    compute_certification,
 )
 from abevalflow.compass_facts import CertificationFactPushResult, FactPushResult
 from abevalflow.gates.base import GateMode, GateResult
@@ -52,15 +51,13 @@ class Scorecard(BaseModel):
         description="Policy that was applied for this evaluation",
     )
 
-    recommendation: Recommendation = Field(
-        description="Unified verdict: pass, warn, or fail"
-    )
+    recommendation: Recommendation = Field(description="Unified verdict: pass, warn, or fail")
     recommendation_reason: str = Field(
         description="Human-readable explanation of the recommendation",
     )
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Timestamp when the scorecard was created",
     )
 

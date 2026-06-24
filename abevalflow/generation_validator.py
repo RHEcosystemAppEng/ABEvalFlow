@@ -58,6 +58,7 @@ def _parse_json_or_text(response_text: str, label: str = "Review") -> dict:
     logger.warning("%s ambiguous, treating as pass: %s", label, response_text[:200])
     return {"passed": True, "issues": []}
 
+
 CONTENT_CHECK_SYSTEM_PROMPT = """\
 You are a QA gate for AI-generated skill evaluation files.
 
@@ -120,10 +121,7 @@ def scenario_coherence_check(
         if basename not in instruction:
             missing_in_instruction.append(filepath)
     if missing_in_instruction:
-        errors.append(
-            f"Instruction is missing project files from scenario brief: "
-            f"{missing_in_instruction}"
-        )
+        errors.append(f"Instruction is missing project files from scenario brief: {missing_in_instruction}")
 
     missing_in_tests = []
     for field, value in expected.items():
@@ -133,10 +131,7 @@ def scenario_coherence_check(
         if val_str not in test_content:
             missing_in_tests.append(f"{field}={val_str}")
     if missing_in_tests:
-        errors.append(
-            f"Tests are missing expected_outputs from scenario brief: "
-            f"{missing_in_tests}"
-        )
+        errors.append(f"Tests are missing expected_outputs from scenario brief: {missing_in_tests}")
 
     missing_in_instruction_outputs = []
     for field, value in expected.items():
@@ -146,10 +141,7 @@ def scenario_coherence_check(
         if val_str not in instruction:
             missing_in_instruction_outputs.append(f"{field}={val_str}")
     if missing_in_instruction_outputs:
-        errors.append(
-            f"Instruction is missing expected_outputs from scenario brief: "
-            f"{missing_in_instruction_outputs}"
-        )
+        errors.append(f"Instruction is missing expected_outputs from scenario brief: {missing_in_instruction_outputs}")
 
     return errors
 
@@ -264,7 +256,8 @@ Output ONLY valid JSON:
 
 Be strict but pragmatic — minor style issues are acceptable."""
 
-_COVERAGE_REVIEWER_SYSTEM = """\
+_COVERAGE_REVIEWER_SYSTEM = (
+    """\
 You are a **test coverage reviewer** for AI-generated skill evaluation files.
 
 You will receive a skill definition (SKILL.md), a generated task instruction \
@@ -275,9 +268,12 @@ Focus exclusively on test coverage:
 2. Are edge cases and error paths tested?
 3. Are there any untested requirements?
 4. Do the tests actually assert meaningful outcomes (not just "assert True")?
-""" + _REVIEWER_JSON_INSTRUCTION
+"""
+    + _REVIEWER_JSON_INSTRUCTION
+)
 
-_ALIGNMENT_REVIEWER_SYSTEM = """\
+_ALIGNMENT_REVIEWER_SYSTEM = (
+    """\
 You are a **skill alignment reviewer** for AI-generated skill evaluation files.
 
 You will receive a skill definition (SKILL.md), a generated task instruction \
@@ -300,9 +296,12 @@ tables), flag it as a skill leakage issue.
 hardcoded scenario with no room for the agent to demonstrate genuine \
 understanding? Tests should verify correct behavior, not just pattern-match \
 against pre-embedded answers from the instruction.
-""" + _REVIEWER_JSON_INSTRUCTION
+"""
+    + _REVIEWER_JSON_INSTRUCTION
+)
 
-_FEASIBILITY_REVIEWER_SYSTEM = """\
+_FEASIBILITY_REVIEWER_SYSTEM = (
+    """\
 You are a **feasibility reviewer** for AI-generated skill evaluation files.
 
 You will receive a skill definition (SKILL.md), a generated task instruction \
@@ -313,7 +312,9 @@ Focus exclusively on practical feasibility:
 2. Are the tests deterministic (no randomness, timing, or external dependencies)?
 3. Do the tests import from /workspace correctly?
 4. Are there any circular or impossible requirements?
-""" + _REVIEWER_JSON_INSTRUCTION
+"""
+    + _REVIEWER_JSON_INSTRUCTION
+)
 
 _REVIEWERS = [
     ("coverage", _COVERAGE_REVIEWER_SYSTEM),
@@ -323,7 +324,9 @@ _REVIEWERS = [
 
 
 def _run_single_review(
-    reviewer_name: str, system_prompt: str, user_prompt: str,
+    reviewer_name: str,
+    system_prompt: str,
+    user_prompt: str,
 ) -> tuple[str, dict]:
     """Execute a single LLM reviewer call. Returns (name, result_dict)."""
     response_text = llm_client.chat_completion(
@@ -479,7 +482,8 @@ If the evals pass review, use: {"pass": true, "issues": []}
 If there are problems, list them: {"pass": false, "issues": ["specific issue"]}
 """
 
-_ASE_SKILL_SPECIFICITY_REVIEWER = """\
+_ASE_SKILL_SPECIFICITY_REVIEWER = (
+    """\
 You are a reviewer checking whether ASE eval assertions test SKILL-SPECIFIC knowledge.
 
 Your job: verify that the assertions differentiate a skill-enhanced LLM from a generic one.
@@ -493,9 +497,12 @@ FAIL if:
 - Assertions test only generic LLM capabilities (e.g., "responds politely")
 - Any LLM could pass without reading the skill document
 - Assertions are too vague to meaningfully evaluate skill knowledge
-""" + _ASE_REVIEWER_JSON_INSTRUCTION
+"""
+    + _ASE_REVIEWER_JSON_INSTRUCTION
+)
 
-_ASE_PROMPT_QUALITY_REVIEWER = """\
+_ASE_PROMPT_QUALITY_REVIEWER = (
+    """\
 You are a reviewer checking whether ASE eval prompts are clear and testable.
 
 Your job: verify that prompts will elicit skill-relevant responses.
@@ -509,9 +516,12 @@ FAIL if:
 - Prompts are vague or could be interpreted multiple ways
 - Prompts don't relate to the skill's core functionality
 - Prompts are too complex or combine too many concepts
-""" + _ASE_REVIEWER_JSON_INSTRUCTION
+"""
+    + _ASE_REVIEWER_JSON_INSTRUCTION
+)
 
-_ASE_ASSERTION_ALIGNMENT_REVIEWER = """\
+_ASE_ASSERTION_ALIGNMENT_REVIEWER = (
+    """\
 You are a reviewer checking whether ASE assertions align with the expected_output.
 
 Your job: verify assertions match what a correct response should contain.
@@ -525,7 +535,9 @@ FAIL if:
 - Assertions don't match what expected_output describes
 - Assertions are redundant or overlap significantly
 - Assertions would pass for incorrect responses
-""" + _ASE_REVIEWER_JSON_INSTRUCTION
+"""
+    + _ASE_REVIEWER_JSON_INSTRUCTION
+)
 
 _ASE_REVIEWERS = [
     ("skill_specificity", _ASE_SKILL_SPECIFICITY_REVIEWER),

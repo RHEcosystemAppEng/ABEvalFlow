@@ -60,6 +60,7 @@ VARIANTS = ("treatment", "control")
 # Security scan parsing
 # ---------------------------------------------------------------------------
 
+
 def parse_security_scan(report_dir: Path, scan_mode: str | None) -> SecurityScanResult | None:
     """Parse security-scan.json if it exists in the report directory.
 
@@ -83,15 +84,19 @@ def parse_security_scan(report_dir: Path, scan_mode: str | None) -> SecurityScan
     for f in data.get("findings", []):
         try:
             sev_str = f.get("severity", "info").lower()
-            severity = SecuritySeverity(sev_str) if sev_str in SecuritySeverity.__members__.values() else SecuritySeverity.INFO
-            findings.append(SecurityFinding(
-                rule_id=f.get("rule_id", f.get("id", "unknown")),
-                severity=severity,
-                message=f.get("message", f.get("description", "")),
-                file_path=f.get("file_path", f.get("location", {}).get("file")),
-                line_number=f.get("line_number", f.get("location", {}).get("line")),
-                scanner="cisco",
-            ))
+            severity = (
+                SecuritySeverity(sev_str) if sev_str in SecuritySeverity.__members__.values() else SecuritySeverity.INFO
+            )
+            findings.append(
+                SecurityFinding(
+                    rule_id=f.get("rule_id", f.get("id", "unknown")),
+                    severity=severity,
+                    message=f.get("message", f.get("description", "")),
+                    file_path=f.get("file_path", f.get("location", {}).get("file")),
+                    line_number=f.get("line_number", f.get("location", {}).get("line")),
+                    scanner="cisco",
+                )
+            )
         except Exception as e:
             logger.warning("Failed to parse finding: %s", e)
 
@@ -109,6 +114,7 @@ def parse_security_scan(report_dir: Path, scan_mode: str | None) -> SecurityScan
 # ---------------------------------------------------------------------------
 # Result parsing
 # ---------------------------------------------------------------------------
+
 
 def _extract_reward(result: dict) -> float | None:
     """Extract reward from a Harbor result.json.
@@ -160,10 +166,7 @@ def is_a2a_results(results_dir: Path) -> bool:
     a2a_dir = results_dir / "a2a-eval"
     if not a2a_dir.is_dir():
         return False
-    has_ab_variants = (
-        (results_dir / "treatment").is_dir()
-        or (results_dir / "control").is_dir()
-    )
+    has_ab_variants = (results_dir / "treatment").is_dir() or (results_dir / "control").is_dir()
     return not has_ab_variants
 
 
@@ -189,7 +192,8 @@ def build_a2a_analysis(
     if 0 < summary.n_trials < _MIN_TRIALS_FOR_RELIABLE_STATS:
         logger.warning(
             "A2A has only %d trials (< %d) — statistics may be unreliable",
-            summary.n_trials, _MIN_TRIALS_FOR_RELIABLE_STATS,
+            summary.n_trials,
+            _MIN_TRIALS_FOR_RELIABLE_STATS,
         )
 
     if summary.n_trials == 0:
@@ -201,9 +205,7 @@ def build_a2a_analysis(
     else:
         pass_threshold = threshold if threshold > 0 else 0.5
         mean_r = summary.mean_reward or 0.0
-        recommendation = (
-            Recommendation.PASS if mean_r >= pass_threshold else Recommendation.FAIL
-        )
+        recommendation = Recommendation.PASS if mean_r >= pass_threshold else Recommendation.FAIL
 
     return AnalysisResult(
         submission_name=submission_name,
@@ -226,6 +228,7 @@ def build_a2a_analysis(
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
+
 
 def compute_variant_summary(trials: list[TrialResult]) -> VariantSummary:
     """Compute aggregate stats from a list of trial results."""
@@ -252,8 +255,7 @@ def compute_variant_summary(trials: list[TrialResult]) -> VariantSummary:
     )
 
 
-def compute_ttest(treatment_trials: list[TrialResult],
-                  control_trials: list[TrialResult]) -> float | None:
+def compute_ttest(treatment_trials: list[TrialResult], control_trials: list[TrialResult]) -> float | None:
     """Welch's t-test on continuous reward scores between variants."""
     t_rewards = [t.reward for t in treatment_trials if t.reward is not None]
     c_rewards = [t.reward for t in control_trials if t.reward is not None]
@@ -265,8 +267,7 @@ def compute_ttest(treatment_trials: list[TrialResult],
     return float(p)
 
 
-def compute_fisher(treatment_summary: VariantSummary,
-                   control_summary: VariantSummary) -> float | None:
+def compute_fisher(treatment_summary: VariantSummary, control_summary: VariantSummary) -> float | None:
     """Fisher's exact test on the 2x2 pass/fail contingency table.
 
     Error trials (missing/corrupt results) are excluded from the table so
@@ -286,6 +287,7 @@ def compute_fisher(treatment_summary: VariantSummary,
 # ---------------------------------------------------------------------------
 # Degradation merge
 # ---------------------------------------------------------------------------
+
 
 def degradation_from_monitor(monitor_data: dict) -> DegradationResult:
     """Build a DegradationResult from monitor.py JSON output."""
@@ -320,6 +322,7 @@ def merge_degradation_into_report(
 # Report generation
 # ---------------------------------------------------------------------------
 
+
 def build_analysis(
     results_dir: Path,
     submission_name: str,
@@ -351,7 +354,9 @@ def build_analysis(
         if 0 < vs.n_trials < _MIN_TRIALS_FOR_RELIABLE_STATS:
             logger.warning(
                 "%s has only %d trials (< %d) — statistical tests may be unreliable",
-                label, vs.n_trials, _MIN_TRIALS_FOR_RELIABLE_STATS,
+                label,
+                vs.n_trials,
+                _MIN_TRIALS_FOR_RELIABLE_STATS,
             )
 
     uplift = t_summary.pass_rate - c_summary.pass_rate
@@ -467,12 +472,8 @@ def render_markdown(result: AnalysisResult) -> str:
             lines.append(f"- **Mean reward gap (Uplift):** {s.mean_reward_gap:+.4f}")
         else:
             lines.append(f"- **Uplift (pass rate gap):** {s.uplift:+.4f}")
-        lines.append(
-            f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}"
-        )
-        lines.append(
-            f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}"
-        )
+        lines.append(f"- **Welch's t-test p-value:** {_fmt(s.ttest_p_value)}{_sig_marker(s.ttest_p_value)}")
+        lines.append(f"- **Fisher's exact p-value:** {_fmt(s.fisher_p_value)}{_sig_marker(s.fisher_p_value)}")
     lines.append(f"- **Recommendation:** **{s.recommendation.value.upper()}**")
     lines.append("")
 
@@ -566,6 +567,7 @@ def render_markdown(result: AnalysisResult) -> str:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -573,11 +575,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Analyze A/B evaluation results and produce JSON + Markdown reports",
     )
     parser.add_argument(
-        "--results-dir", type=Path,
+        "--results-dir",
+        type=Path,
         help="Path to the results directory containing treatment/ and control/ subdirs",
     )
     parser.add_argument(
-        "--output-dir", type=Path,
+        "--output-dir",
+        type=Path,
         help="Directory to write report.json and report.md",
     )
     parser.add_argument(
@@ -585,15 +589,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Name of the submission being analyzed",
     )
     parser.add_argument(
-        "--merge-degradation-from", type=Path, default=None,
+        "--merge-degradation-from",
+        type=Path,
+        default=None,
         help="Path to monitor.py JSON output to merge into an existing report.json",
     )
     parser.add_argument(
-        "--report-json", type=Path, default=None,
+        "--report-json",
+        type=Path,
+        default=None,
         help="Path to report.json when merging degradation results",
     )
     parser.add_argument(
-        "--threshold", type=float, default=0.0,
+        "--threshold",
+        type=float,
+        default=0.0,
         help="Minimum uplift for a 'pass' recommendation (default: 0.0)",
     )
     parser.add_argument("--commit-sha", default=None)
@@ -635,10 +645,7 @@ def main(argv: list[str] | None = None) -> int:
         if report_path is None and args.output_dir is not None:
             report_path = args.output_dir / "report.json"
         if report_path is None or not report_path.is_file():
-            logger.error(
-                "report.json not found for degradation merge "
-                "(use --report-json or --output-dir)"
-            )
+            logger.error("report.json not found for degradation merge (use --report-json or --output-dir)")
             return 1
         if not args.merge_degradation_from.is_file():
             logger.error("Monitor output file does not exist: %s", args.merge_degradation_from)
@@ -647,9 +654,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.results_dir is None or args.output_dir is None or args.submission_name is None:
-        logger.error(
-            "--results-dir, --output-dir, and --submission-name are required for analysis"
-        )
+        logger.error("--results-dir, --output-dir, and --submission-name are required for analysis")
         return 1
 
     if not args.results_dir.is_dir():

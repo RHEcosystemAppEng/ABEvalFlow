@@ -145,7 +145,9 @@ def _copy_submission_files(
         scripts_src = submission_dir / "scripts"
         if scripts_src.is_dir():
             shutil.copytree(
-                scripts_src, build_context_dir / "scripts", dirs_exist_ok=True,
+                scripts_src,
+                build_context_dir / "scripts",
+                dirs_exist_ok=True,
             )
 
 
@@ -202,7 +204,10 @@ def scaffold_submission(
         ("control", control_dir),
     ):
         context = _build_template_context(
-            metadata, submission_dir, variant, strategy,
+            metadata,
+            submission_dir,
+            variant,
+            strategy,
         )
         # Control is a vanilla agent: no supportive files, no scripts,
         # no CLAUDE.md. Only instruction.md and tests are shared.
@@ -273,9 +278,7 @@ def main() -> int:
         logger.error("Submission directory does not exist: %s", args.submission_dir)
         return 1
 
-    treatment_dir, control_dir = scaffold_submission(
-        args.submission_dir, args.output_dir, args.templates_dir
-    )
+    treatment_dir, control_dir = scaffold_submission(args.submission_dir, args.output_dir, args.templates_dir)
     logger.info("Treatment: %s", treatment_dir)
     logger.info("Control:   %s", control_dir)
     return 0

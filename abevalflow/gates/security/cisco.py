@@ -104,13 +104,15 @@ class CiscoGate(SecurityGate):
             if severity.value in severity_counts:
                 severity_counts[severity.value] += 1
 
-            findings.append(Finding(
-                severity=severity,
-                message=f.get("message", f.get("description", "")),
-                location=f.get("file_path", f.get("location", {}).get("file")),
-                rule_id=f.get("rule_id", f.get("id", "unknown")),
-                details=f,
-            ))
+            findings.append(
+                Finding(
+                    severity=severity,
+                    message=f.get("message", f.get("description", "")),
+                    location=f.get("file_path", f.get("location", {}).get("file")),
+                    rule_id=f.get("rule_id", f.get("id", "unknown")),
+                    details=f,
+                )
+            )
 
         high_or_critical = severity_counts["critical"] + severity_counts["high"]
 
@@ -124,11 +126,11 @@ class CiscoGate(SecurityGate):
             score = 1.0
         else:
             weighted_score = (
-                severity_counts["critical"] * 0.0 +
-                severity_counts["high"] * 0.25 +
-                severity_counts["medium"] * 0.5 +
-                severity_counts["low"] * 0.75 +
-                severity_counts["info"] * 0.9
+                severity_counts["critical"] * 0.0
+                + severity_counts["high"] * 0.25
+                + severity_counts["medium"] * 0.5
+                + severity_counts["low"] * 0.75
+                + severity_counts["info"] * 0.9
             )
             score = weighted_score / total_findings if total_findings > 0 else 1.0
 

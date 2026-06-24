@@ -275,8 +275,7 @@ class CertificationLevelPolicy(BaseModel):
         for check_id, threshold in v.items():
             if check_id not in valid_check_ids:
                 raise ValueError(
-                    f"Invalid threshold key '{check_id}'. "
-                    f"Must be a valid CheckId. Valid IDs: {sorted(valid_check_ids)}"
+                    f"Invalid threshold key '{check_id}'. Must be a valid CheckId. Valid IDs: {sorted(valid_check_ids)}"
                 )
             if not 0.0 <= threshold <= 1.0:
                 raise ValueError(f"Threshold for {check_id} must be between 0.0 and 1.0")
@@ -404,9 +403,7 @@ class ExperimentConfig(BaseModel):
         default=ExperimentType.SKILL,
         description="Experiment type: skill, model, prompt, custom",
     )
-    n_trials: int = Field(
-        default=20, gt=0, le=100, description="Number of trials per variant"
-    )
+    n_trials: int = Field(default=20, gt=0, le=100, description="Number of trials per variant")
     treatment: VariantSpec = Field(
         default_factory=lambda: VariantSpec(
             copy=[
@@ -445,7 +442,9 @@ class SubmissionMetadata(BaseModel):
             raise ValueError("schema_version must be in 'MAJOR.MINOR' format (e.g. '1.0')")
         return v
 
-    name: str = Field(min_length=1, description="Submission name (OCI-safe: lowercase, alphanumeric, hyphens, dots, underscores)")
+    name: str = Field(
+        min_length=1, description="Submission name (OCI-safe: lowercase, alphanumeric, hyphens, dots, underscores)"
+    )
 
     @field_validator("name")
     @classmethod
@@ -475,16 +474,14 @@ class SubmissionMetadata(BaseModel):
     skip_llm_judge: bool = Field(
         default=False,
         description=(
-            "Set to true to skip LLM judge generation in AI mode. "
-            "By default the pipeline generates tests/llm_judge.py."
+            "Set to true to skip LLM judge generation in AI mode. By default the pipeline generates tests/llm_judge.py."
         ),
     )
 
     experiment: ExperimentConfig = Field(
         default_factory=ExperimentConfig,
         description=(
-            "A/B experiment configuration. Omit entirely to use the default "
-            "skill experiment with N=20 trials."
+            "A/B experiment configuration. Omit entirely to use the default skill experiment with N=20 trials."
         ),
     )
 

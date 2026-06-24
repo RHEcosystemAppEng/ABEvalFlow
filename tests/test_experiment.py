@@ -13,7 +13,6 @@ from abevalflow.experiment import (
 from abevalflow.schemas import (
     CopySpec,
     ExperimentConfig,
-    ExperimentType,
     VariantSpec,
 )
 
@@ -79,7 +78,8 @@ class TestGetStrategy:
 
 class TestSkillExperimentStrategy:
     def test_treatment_copy_specs_include_skills_and_docs(
-        self, submission_dir: Path,
+        self,
+        submission_dir: Path,
     ) -> None:
         config = ExperimentConfig()
         strategy = SkillExperimentStrategy(config)
@@ -89,7 +89,8 @@ class TestSkillExperimentStrategy:
         assert "docs" in srcs
 
     def test_control_copy_specs_empty_by_default(
-        self, submission_dir: Path,
+        self,
+        submission_dir: Path,
     ) -> None:
         config = ExperimentConfig()
         strategy = SkillExperimentStrategy(config)
@@ -97,7 +98,8 @@ class TestSkillExperimentStrategy:
         assert specs == []
 
     def test_treatment_skips_missing_dirs(
-        self, submission_dir_no_docs: Path,
+        self,
+        submission_dir_no_docs: Path,
     ) -> None:
         config = ExperimentConfig()
         strategy = SkillExperimentStrategy(config)
@@ -136,7 +138,8 @@ class TestSkillExperimentStrategy:
         assert "skills_dir" not in base
 
     def test_treatment_context_filters_missing_docs(
-        self, submission_dir_no_docs: Path,
+        self,
+        submission_dir_no_docs: Path,
     ) -> None:
         """copy_pairs must not include dirs that don't exist in submission."""
         config = ExperimentConfig()

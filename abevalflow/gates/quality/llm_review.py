@@ -126,13 +126,15 @@ class LLMReviewGate(QualityGate):
                 severity = Severity.INFO
 
             if dim_score < 0.6 and dim_finding:
-                findings.append(Finding(
-                    severity=severity,
-                    message=f"{dim_name}: {dim_finding}",
-                    location=dim_name,
-                    rule_id=f"quality-{dim_name}",
-                    details={"score": dim_score},
-                ))
+                findings.append(
+                    Finding(
+                        severity=severity,
+                        message=f"{dim_name}: {dim_finding}",
+                        location=dim_name,
+                        rule_id=f"quality-{dim_name}",
+                        details={"score": dim_score},
+                    )
+                )
 
         # In BLOCK mode, threshold is authoritative for pass/fail
         # In WARN mode, only hard "fail" recommendations fail the gate
@@ -143,10 +145,7 @@ class LLMReviewGate(QualityGate):
             passed = recommendation != "fail"
 
         summary = review_data.get("summary", "")
-        dimension_scores = {
-            name: data.get("score", 0.0)
-            for name, data in dimensions.items()
-        }
+        dimension_scores = {name: data.get("score", 0.0) for name, data in dimensions.items()}
 
         comparison = ">=" if passed else "<"
         message = (

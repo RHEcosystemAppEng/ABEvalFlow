@@ -18,7 +18,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from abevalflow.mcpchecker_report import (
@@ -47,7 +47,7 @@ def parse_mcpchecker_output(output_path: Path) -> dict:
 
 def extract_task_results(raw_output: dict) -> list[MCPCheckerTaskResult]:
     """Extract task results from MCPChecker output format.
-    
+
     Handles multiple MCPChecker output formats:
     - v1alpha2 format: results[] with taskName, taskPassed, callHistory, assertionResults
     - Legacy format: taskResults[] with taskId, status, toolCalls, llmJudgeResults
@@ -90,15 +90,15 @@ def extract_task_results(raw_output: dict) -> list[MCPCheckerTaskResult]:
         # Fallback to legacy toolCalls field
         if not tool_calls_data:
             tool_calls_data = task_data.get("toolCalls") or []
-        
+
         tool_call_records = []
-        for tc in (tool_calls_data or []):
+        for tc in tool_calls_data or []:
             if isinstance(tc, dict):
                 # Extract arguments from request.Params.arguments if present
                 request = tc.get("request") or {}
                 params = request.get("Params") or {}
                 arguments = params.get("arguments") or tc.get("arguments") or tc.get("params")
-                
+
                 tool_call_records.append(
                     ToolCallRecord(
                         server=tc.get("serverName", tc.get("server", tc.get("mcpServer", "unknown"))),
@@ -110,14 +110,14 @@ def extract_task_results(raw_output: dict) -> list[MCPCheckerTaskResult]:
 
         # Handle judge/assertion results (v1alpha2 uses assertionResults, legacy uses llmJudgeResults)
         llm_judge_data = (
-            task_data.get("llmJudgeResults") or 
-            task_data.get("verifyResults") or 
-            task_data.get("assertionResults") or 
-            []
+            task_data.get("llmJudgeResults")
+            or task_data.get("verifyResults")
+            or task_data.get("assertionResults")
+            or []
         )
 
         llm_judge_results = []
-        for judge in (llm_judge_data or []):
+        for judge in llm_judge_data or []:
             if isinstance(judge, dict):
                 llm_judge_results.append(
                     LLMJudgeResult(
@@ -181,7 +181,7 @@ def aggregate_mcpchecker_results(
             total_duration_ms = sum(task_durations)
 
     provenance = Provenance(
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         commit_sha=commit_sha,
         pipeline_run_id=pipeline_run_id,
         eval_engine="mcpchecker",
@@ -204,9 +204,7 @@ def aggregate_mcpchecker_results(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Aggregate MCPChecker output into report format"
-    )
+    parser = argparse.ArgumentParser(description="Aggregate MCPChecker output into report format")
     parser.add_argument(
         "--output-json",
         type=Path,
@@ -254,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
 
     with open(report_path, "w") as f:
         f.write(result.model_dump_json(indent=2))
-    
+
     # Also write to report.json for compatibility with analyze task
     with open(compat_report_path, "w") as f:
         f.write(result.model_dump_json(indent=2))
@@ -268,13 +266,17 @@ def main(argv: list[str] | None = None) -> int:
         result.recommendation,
     )
 
-    print(json.dumps({
-        "report_path": str(report_path),
-        "overall_score": result.overall_score,
-        "passed_tasks": result.passed_tasks,
-        "total_tasks": result.total_tasks,
-        "recommendation": result.recommendation,
-    }))
+    print(
+        json.dumps(
+            {
+                "report_path": str(report_path),
+                "overall_score": result.overall_score,
+                "passed_tasks": result.passed_tasks,
+                "total_tasks": result.total_tasks,
+                "recommendation": result.recommendation,
+            }
+        )
+    )
 
     return 0
 

@@ -19,7 +19,6 @@ Usage in Harbor config YAML:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -141,14 +140,10 @@ class A2AAgent(BaseAgent):
 
         try:
             response_data = await self._send_request(payload)
-            await self._process_response(
-                response_data, environment, context, instruction
-            )
-        except asyncio.TimeoutError:
+            await self._process_response(response_data, environment, context, instruction)
+        except TimeoutError:
             self.logger.error(f"A2A request timed out after {self.timeout}s")
-            await self._write_error_response(
-                environment, f"Request timed out after {self.timeout} seconds"
-            )
+            await self._write_error_response(environment, f"Request timed out after {self.timeout} seconds")
             raise
         except aiohttp.ClientError as e:
             self.logger.error(f"A2A request failed: {e}")
@@ -207,9 +202,7 @@ class A2AAgent(BaseAgent):
         state = status.get("state", "unknown")
 
         if state == "failed":
-            error_msg = status.get("message", {}).get("parts", [{}])[0].get(
-                "text", "Agent task failed"
-            )
+            error_msg = status.get("message", {}).get("parts", [{}])[0].get("text", "Agent task failed")
             self.logger.error(f"A2A agent task failed: {error_msg}")
 
         agent_response_text = self._extract_response_text(result)
@@ -232,9 +225,7 @@ class A2AAgent(BaseAgent):
         return bool(metadata.get("adk_thought"))
 
     @classmethod
-    def _split_text_parts(
-        cls, parts: list[dict[str, Any]]
-    ) -> tuple[str, str | None]:
+    def _split_text_parts(cls, parts: list[dict[str, Any]]) -> tuple[str, str | None]:
         """Split text parts into visible message text and reasoning content."""
         message_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -328,9 +319,7 @@ class A2AAgent(BaseAgent):
 
         return parts
 
-    def _build_trajectory(
-        self, result: dict[str, Any], instruction: str
-    ) -> dict[str, Any]:
+    def _build_trajectory(self, result: dict[str, Any], instruction: str) -> dict[str, Any]:
         """Build an ATIF v1.7 trajectory from the A2A task result."""
         session_id = result.get("id") or result.get("contextId") or str(uuid.uuid4())
 
@@ -356,9 +345,7 @@ class A2AAgent(BaseAgent):
                     )
                     step_id += 1
                 elif role == "agent":
-                    steps.append(
-                        self._history_message_to_agent_step(parts, step_id)
-                    )
+                    steps.append(self._history_message_to_agent_step(parts, step_id))
                     step_id += 1
         else:
             steps.append(
@@ -372,9 +359,7 @@ class A2AAgent(BaseAgent):
 
             response_parts = self._collect_response_parts(result)
             if response_parts:
-                steps.append(
-                    self._history_message_to_agent_step(response_parts, step_id)
-                )
+                steps.append(self._history_message_to_agent_step(response_parts, step_id))
             else:
                 steps.append(
                     {
@@ -388,12 +373,8 @@ class A2AAgent(BaseAgent):
         final_metrics: dict[str, Any] = {"total_steps": len(steps)}
         if usage:
             final_metrics["total_prompt_tokens"] = usage.get("promptTokenCount")
-            final_metrics["total_completion_tokens"] = usage.get(
-                "candidatesTokenCount"
-            )
-            final_metrics["total_cached_tokens"] = usage.get(
-                "cachedContentTokenCount"
-            )
+            final_metrics["total_completion_tokens"] = usage.get("candidatesTokenCount")
+            final_metrics["total_cached_tokens"] = usage.get("cachedContentTokenCount")
 
         agent_info: dict[str, Any] = {
             "name": self.name(),
@@ -497,14 +478,10 @@ class A2AAgent(BaseAgent):
         )
 
         if EnvironmentPaths is None:
-            self.logger.warning(
-                "Harbor not available, skipping trajectory container upload"
-            )
+            self.logger.warning("Harbor not available, skipping trajectory container upload")
             return
 
-        trajectory_path_agent = str(
-            EnvironmentPaths.agent_dir / A2A_TRAJECTORY_FILE
-        )
+        trajectory_path_agent = str(EnvironmentPaths.agent_dir / A2A_TRAJECTORY_FILE)
 
         if environment.capabilities.mounted:
             return

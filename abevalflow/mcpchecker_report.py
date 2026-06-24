@@ -10,7 +10,6 @@ the mcpchecker-eval task.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
@@ -21,9 +20,7 @@ from abevalflow.report import Provenance
 class LLMJudgeResult(BaseModel):
     """Result from a single LLM judge verification check."""
 
-    check_type: Literal["contains", "exact"] = Field(
-        description="Type of LLM judge check: 'contains' or 'exact'"
-    )
+    check_type: Literal["contains", "exact"] = Field(description="Type of LLM judge check: 'contains' or 'exact'")
     expected: str = Field(description="Expected content or reference answer")
     passed: bool = Field(description="Whether the check passed")
     reason: str | None = Field(
@@ -46,9 +43,7 @@ class MCPCheckerTaskResult(BaseModel):
 
     task_id: str = Field(description="Unique task identifier from metadata.name")
     task_name: str = Field(description="Human-readable task name")
-    status: Literal["passed", "failed", "error", "skipped"] = Field(
-        description="Task execution status"
-    )
+    status: Literal["passed", "failed", "error", "skipped"] = Field(description="Task execution status")
     tool_calls: int = Field(default=0, description="Number of tool calls made")
     tool_call_records: list[ToolCallRecord] = Field(
         default_factory=list,

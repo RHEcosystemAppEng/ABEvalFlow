@@ -9,7 +9,7 @@ Three types exist:
 Each gate produces a GateResult with a normalized score and pass/fail status.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -80,9 +80,7 @@ class GateResult(BaseModel):
     """
 
     gate_type: GateType = Field(description="Type of gate: engine, security, or quality")
-    gate_name: str = Field(
-        description="Category name of the gate (e.g., 'evaluation', 'security', 'quality')"
-    )
+    gate_name: str = Field(description="Category name of the gate (e.g., 'evaluation', 'security', 'quality')")
     policy_key: str | None = Field(
         default=None,
         description="Implementation name for policy lookup (e.g., 'harbor', 'cisco'). "
@@ -115,7 +113,7 @@ class GateResult(BaseModel):
         description="Human-readable summary of the gate result",
     )
     evaluated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Timestamp when the gate was evaluated",
     )
 
