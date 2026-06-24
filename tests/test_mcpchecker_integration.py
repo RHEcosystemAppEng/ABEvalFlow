@@ -1,7 +1,6 @@
 """Tests for MCPChecker integration (validation, aggregation, storage)."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,6 @@ from abevalflow.mcpchecker_report import (
     MCPCheckerResult,
     MCPCheckerTaskResult,
 )
-from abevalflow.report import Provenance
 from abevalflow.schemas import EvalEngine
 from scripts.aggregate_mcpchecker import aggregate_mcpchecker_results, extract_task_results
 from scripts.validate import validate_submission
@@ -92,6 +90,7 @@ spec:
     def test_missing_tasks_dir(self, mcpchecker_submission_dir: Path):
         """Missing tasks/ directory should fail validation."""
         import shutil
+
         shutil.rmtree(mcpchecker_submission_dir / "tasks")
         errors = validate_submission(mcpchecker_submission_dir, EvalEngine.MCPCHECKER)
         assert any("tasks/ directory is required" in e for e in errors)
@@ -137,11 +136,14 @@ class TestMCPCheckerAggregation:
                     "taskId": "task-1",
                     "taskName": "Health Check",
                     "status": "passed",
-                    "toolCalls": [
-                        {"server": "test-server", "tool": "health", "success": True}
-                    ],
+                    "toolCalls": [{"server": "test-server", "tool": "health", "success": True}],
                     "llmJudgeResults": [
-                        {"type": "contains", "expected": "healthy", "passed": True, "reason": "Output contains 'healthy'"}
+                        {
+                            "type": "contains",
+                            "expected": "healthy",
+                            "passed": True,
+                            "reason": "Output contains 'healthy'",
+                        }
                     ],
                     "durationMs": 1500,
                 },
@@ -149,9 +151,7 @@ class TestMCPCheckerAggregation:
                     "taskId": "task-2",
                     "taskName": "Data Query",
                     "status": "failed",
-                    "toolCalls": [
-                        {"server": "test-server", "tool": "query", "success": False}
-                    ],
+                    "toolCalls": [{"server": "test-server", "tool": "query", "success": False}],
                     "llmJudgeResults": [
                         {"type": "exact", "expected": "success", "passed": False, "reason": "Output does not match"}
                     ],
@@ -206,12 +206,9 @@ class TestMCPCheckerAggregation:
         output = {
             "evalName": "score-test",
             "taskResults": [
-                {"taskId": f"t{i}", "taskName": f"Task {i}", "status": "passed", "toolCalls": []}
-                for i in range(7)
-            ] + [
-                {"taskId": f"t{i}", "taskName": f"Task {i}", "status": "failed", "toolCalls": []}
-                for i in range(7, 10)
+                {"taskId": f"t{i}", "taskName": f"Task {i}", "status": "passed", "toolCalls": []} for i in range(7)
             ]
+            + [{"taskId": f"t{i}", "taskName": f"Task {i}", "status": "failed", "toolCalls": []} for i in range(7, 10)],
         }
         output_file = tmp_path / "out.json"
         output_file.write_text(json.dumps(output))
@@ -230,7 +227,7 @@ class TestMCPCheckerAggregation:
             "taskResults": [
                 {"taskId": str(i), "taskName": f"Task {i}", "status": "passed" if i < 7 else "failed", "toolCalls": []}
                 for i in range(10)
-            ]
+            ],
         }
         output_file = tmp_path / "pass.json"
         output_file.write_text(json.dumps(output_pass))
@@ -243,7 +240,7 @@ class TestMCPCheckerAggregation:
             "taskResults": [
                 {"taskId": str(i), "taskName": f"Task {i}", "status": "passed" if i < 6 else "failed", "toolCalls": []}
                 for i in range(10)
-            ]
+            ],
         }
         output_file = tmp_path / "fail.json"
         output_file.write_text(json.dumps(output_fail))

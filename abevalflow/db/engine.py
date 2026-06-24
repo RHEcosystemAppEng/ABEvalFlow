@@ -6,8 +6,8 @@ import logging
 import os
 
 from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from abevalflow.db.models import Base

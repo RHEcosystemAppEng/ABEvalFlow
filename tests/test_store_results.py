@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import json
-import uuid
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from abevalflow.db.models import Base, EvaluationRun, Trial
-from abevalflow.db.observer import ResultsObserver
 from abevalflow.report import (
     AnalysisResult,
     AnalysisSummary,
@@ -67,14 +63,8 @@ def _sample_result(name: str = "my-submission") -> AnalysisResult:
             recommendation=Recommendation.PASS,
         ),
         trials={
-            "treatment": [
-                TrialResult(trial_name=f"t-{i:03d}", reward=0.7 + 0.02 * i)
-                for i in range(5)
-            ],
-            "control": [
-                TrialResult(trial_name=f"c-{i:03d}", reward=0.3 + 0.03 * i)
-                for i in range(5)
-            ],
+            "treatment": [TrialResult(trial_name=f"t-{i:03d}", reward=0.7 + 0.02 * i) for i in range(5)],
+            "control": [TrialResult(trial_name=f"c-{i:03d}", reward=0.3 + 0.03 * i) for i in range(5)],
         },
     )
 
@@ -130,9 +120,7 @@ class TestMapping:
 
     def test_map_trial_with_null_reward(self):
         result = _sample_result()
-        result.trials["treatment"].append(
-            TrialResult(trial_name="error-trial", reward=None)
-        )
+        result.trials["treatment"].append(TrialResult(trial_name="error-trial", reward=None))
         run = map_result_to_run(result, "run-001")
         trials = map_trials(result, run)
         error_trial = [t for t in trials if t.trial_name == "error-trial"][0]

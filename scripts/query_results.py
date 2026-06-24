@@ -80,8 +80,7 @@ def cmd_list(session_factory) -> None:
         select(EvaluationRun)
         .join(
             subq,
-            (EvaluationRun.submission_name == subq.c.submission_name)
-            & (EvaluationRun.created_at == subq.c.latest),
+            (EvaluationRun.submission_name == subq.c.submission_name) & (EvaluationRun.created_at == subq.c.latest),
         )
         .order_by(desc(EvaluationRun.created_at))
     )
@@ -119,22 +118,30 @@ def cmd_latest(session_factory, name: str) -> None:
         print(f"Uplift:        {run.uplift:.4f}")
         print()
         print("Treatment:")
-        print(f"  Trials: {run.treatment_n_trials}  "
-              f"Pass: {run.treatment_n_passed}  "
-              f"Fail: {run.treatment_n_failed}  "
-              f"Errors: {run.treatment_n_errors}")
-        print(f"  Pass rate: {run.treatment_pass_rate:.4f}  "
-              f"Mean reward: {run.treatment_mean_reward or '—'}  "
-              f"Std: {run.treatment_std_reward or '—'}")
+        print(
+            f"  Trials: {run.treatment_n_trials}  "
+            f"Pass: {run.treatment_n_passed}  "
+            f"Fail: {run.treatment_n_failed}  "
+            f"Errors: {run.treatment_n_errors}"
+        )
+        print(
+            f"  Pass rate: {run.treatment_pass_rate:.4f}  "
+            f"Mean reward: {run.treatment_mean_reward or '—'}  "
+            f"Std: {run.treatment_std_reward or '—'}"
+        )
         print()
         print("Control:")
-        print(f"  Trials: {run.control_n_trials}  "
-              f"Pass: {run.control_n_passed}  "
-              f"Fail: {run.control_n_failed}  "
-              f"Errors: {run.control_n_errors}")
-        print(f"  Pass rate: {run.control_pass_rate:.4f}  "
-              f"Mean reward: {run.control_mean_reward or '—'}  "
-              f"Std: {run.control_std_reward or '—'}")
+        print(
+            f"  Trials: {run.control_n_trials}  "
+            f"Pass: {run.control_n_passed}  "
+            f"Fail: {run.control_n_failed}  "
+            f"Errors: {run.control_n_errors}"
+        )
+        print(
+            f"  Pass rate: {run.control_pass_rate:.4f}  "
+            f"Mean reward: {run.control_mean_reward or '—'}  "
+            f"Std: {run.control_std_reward or '—'}"
+        )
         print()
         print(f"t-test p-value:  {run.ttest_p_value or '—'}")
         print(f"Fisher p-value:  {run.fisher_p_value or '—'}")
@@ -144,11 +151,7 @@ def cmd_latest(session_factory, name: str) -> None:
 
 def cmd_history(session_factory, name: str) -> None:
     """Show all runs for a submission."""
-    stmt = (
-        select(EvaluationRun)
-        .where(EvaluationRun.submission_name == name)
-        .order_by(desc(EvaluationRun.created_at))
-    )
+    stmt = select(EvaluationRun).where(EvaluationRun.submission_name == name).order_by(desc(EvaluationRun.created_at))
 
     with session_factory() as session:
         runs = session.execute(stmt).scalars().all()
@@ -164,11 +167,7 @@ def cmd_history(session_factory, name: str) -> None:
 
 def cmd_compare(session_factory, name: str) -> None:
     """Show pass_rate and uplift trend over time."""
-    stmt = (
-        select(EvaluationRun)
-        .where(EvaluationRun.submission_name == name)
-        .order_by(EvaluationRun.created_at)
-    )
+    stmt = select(EvaluationRun).where(EvaluationRun.submission_name == name).order_by(EvaluationRun.created_at)
 
     with session_factory() as session:
         runs = session.execute(stmt).scalars().all()
@@ -177,10 +176,7 @@ def cmd_compare(session_factory, name: str) -> None:
             return
 
         print(f"Trend for '{name}' ({len(runs)} runs, oldest first):\n")
-        print(
-            f"{'Date':<20} {'Rec':<6} {'Uplift':>8} "
-            f"{'T.Rate':>7} {'C.Rate':>7} {'T.N':>4} {'C.N':>4}"
-        )
+        print(f"{'Date':<20} {'Rec':<6} {'Uplift':>8} {'T.Rate':>7} {'C.Rate':>7} {'T.N':>4} {'C.N':>4}")
         print("-" * 75)
         for r in runs:
             ts = r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "—"

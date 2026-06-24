@@ -8,11 +8,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from scripts.validate import (
-    MAX_SUPPORTIVE_SIZE_BYTES,
-    main,
-    validate_submission,
-)
 from abevalflow.schemas import (
     CopySpec,
     ExperimentConfig,
@@ -20,6 +15,11 @@ from abevalflow.schemas import (
     GenerationMode,
     SubmissionMetadata,
     VariantSpec,
+)
+from scripts.validate import (
+    MAX_SUPPORTIVE_SIZE_BYTES,
+    main,
+    validate_submission,
 )
 
 VALID_METADATA = {
@@ -207,9 +207,7 @@ class TestVariantSpec:
         assert len(vs.copy_dirs) == 2
 
     def test_copy_dirs_via_field_name(self) -> None:
-        vs = VariantSpec(
-            copy_dirs=[CopySpec(src="skills", dest="/skills")]
-        )
+        vs = VariantSpec(copy_dirs=[CopySpec(src="skills", dest="/skills")])
         assert len(vs.copy_dirs) == 1
 
     def test_duplicate_src_rejected(self) -> None:
@@ -222,9 +220,7 @@ class TestVariantSpec:
             )
 
     def test_env_from_secrets(self) -> None:
-        vs = VariantSpec(
-            env_from_secrets={"ANTHROPIC_API_KEY": "llm-keys/anthropic-key"}
-        )
+        vs = VariantSpec(env_from_secrets={"ANTHROPIC_API_KEY": "llm-keys/anthropic-key"})
         assert vs.env_from_secrets["ANTHROPIC_API_KEY"] == "llm-keys/anthropic-key"
 
 
@@ -276,12 +272,8 @@ class TestExperimentConfig:
         ec = ExperimentConfig(
             type="model",
             n_trials=10,
-            treatment=VariantSpec(
-                env_from_secrets={"MODEL_ENDPOINT": "models/endpoint-a"}
-            ),
-            control=VariantSpec(
-                env_from_secrets={"MODEL_ENDPOINT": "models/endpoint-b"}
-            ),
+            treatment=VariantSpec(env_from_secrets={"MODEL_ENDPOINT": "models/endpoint-a"}),
+            control=VariantSpec(env_from_secrets={"MODEL_ENDPOINT": "models/endpoint-b"}),
         )
         assert ec.type == ExperimentType.MODEL
         assert ec.n_trials == 10
@@ -311,12 +303,8 @@ class TestSubmissionMetadataExperiment:
             "experiment": {
                 "type": "model",
                 "n_trials": 5,
-                "treatment": {
-                    "env_from_secrets": {"MODEL": "models/gpt-4o"}
-                },
-                "control": {
-                    "env_from_secrets": {"MODEL": "models/gpt-3.5"}
-                },
+                "treatment": {"env_from_secrets": {"MODEL": "models/gpt-4o"}},
+                "control": {"env_from_secrets": {"MODEL": "models/gpt-3.5"}},
             },
         }
         model = SubmissionMetadata(**data)
@@ -328,9 +316,7 @@ class TestSubmissionMetadataExperiment:
             **VALID_METADATA,
             "experiment": {
                 "type": "custom",
-                "treatment": {
-                    "copy": [{"src": "skills", "dest": "/skills"}]
-                },
+                "treatment": {"copy": [{"src": "skills", "dest": "/skills"}]},
             },
         }
         model = SubmissionMetadata(**data)

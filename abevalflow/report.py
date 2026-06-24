@@ -7,7 +7,7 @@ step and any downstream consumers (DB persistence, PR comments, dashboards).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, computed_field
@@ -111,7 +111,7 @@ class VariantSummary(BaseModel):
 class Provenance(BaseModel):
     """Run provenance metadata for reproducibility."""
 
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     commit_sha: str | None = None
     pipeline_run_id: str | None = None
     treatment_image_ref: str | None = None

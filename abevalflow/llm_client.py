@@ -31,7 +31,7 @@ def _resolve_config() -> dict:
     return {"base_url": base_url, "api_key": api_key}
 
 
-def get_client() -> "OpenAI":
+def get_client() -> OpenAI:
     """Return a configured OpenAI client."""
     from openai import OpenAI
 

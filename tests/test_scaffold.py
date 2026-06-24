@@ -62,13 +62,9 @@ def full_submission(valid_submission: Path) -> Path:
     supportive_docs.mkdir()
     (supportive_docs / "guide.md").write_text("# Guide\nOperational knowledge.\n")
 
-    (valid_submission / "tests" / "llm_judge.py").write_text(
-        "def judge(): return {'score': 1.0, 'rationale': 'ok'}\n"
-    )
+    (valid_submission / "tests" / "llm_judge.py").write_text("def judge(): return {'score': 1.0, 'rationale': 'ok'}\n")
 
-    (valid_submission / "CLAUDE.md").write_text(
-        "# System Prompt\nYou are an SRE assistant.\n"
-    )
+    (valid_submission / "CLAUDE.md").write_text("# System Prompt\nYou are an SRE assistant.\n")
 
     return valid_submission
 
@@ -166,9 +162,7 @@ class TestScaffoldTaskToml:
         assert '"test"' in content
         assert '"demo"' in content
 
-    def test_task_toml_is_valid_toml_without_llm_judge(
-        self, valid_submission: Path, tmp_path: Path
-    ):
+    def test_task_toml_is_valid_toml_without_llm_judge(self, valid_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         treatment, control = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
         for d in (treatment, control):
@@ -238,9 +232,7 @@ class TestScaffoldOptionalDirs:
         assert (treatment / "environment" / "docs" / "reference.md").is_file()
         assert not (control / "environment" / "docs").exists()
 
-    def test_dockerfile_includes_supportive_when_present(
-        self, full_submission: Path, tmp_path: Path
-    ):
+    def test_dockerfile_includes_supportive_when_present(self, full_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)
         content = (treatment / "environment" / "Dockerfile").read_text()
@@ -432,6 +424,7 @@ class TestScaffoldExperimentConfig:
         meta_path.write_text(yaml.dump(meta))
 
         from abevalflow.schemas import SubmissionMetadata
+
         parsed = SubmissionMetadata(**yaml.safe_load(meta_path.read_text()))
         assert parsed.experiment.n_trials == 42
 
@@ -457,7 +450,9 @@ class TestScaffoldExperimentConfig:
         assert skill_ctrl == prompt_ctrl
 
     def test_missing_configured_dir_not_copied(
-        self, valid_submission: Path, tmp_path: Path,
+        self,
+        valid_submission: Path,
+        tmp_path: Path,
     ):
         """Configured copy dirs that don't exist in submission must not be copied."""
         meta_path = valid_submission / "metadata.yaml"
@@ -481,7 +476,9 @@ class TestScaffoldExperimentConfig:
         assert not (treatment / "environment" / "nonexistent").exists()
 
     def test_control_with_skills_treatment_without(
-        self, valid_submission: Path, tmp_path: Path,
+        self,
+        valid_submission: Path,
+        tmp_path: Path,
     ):
         """Asymmetric config: control gets skills, treatment does not."""
         meta_path = valid_submission / "metadata.yaml"
@@ -507,7 +504,10 @@ class TestNonClaudeSkillWarning:
     """Verify the loud warning when skills_dir is used with a non-Claude agent."""
 
     def test_non_claude_agent_with_skills_warns(
-        self, valid_submission: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+        self,
+        valid_submission: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ):
         meta_path = valid_submission / "metadata.yaml"
         meta = yaml.safe_load(meta_path.read_text())
@@ -516,6 +516,7 @@ class TestNonClaudeSkillWarning:
 
         output = tmp_path / "output"
         import logging
+
         with caplog.at_level(logging.WARNING):
             scaffold_submission(valid_submission, output, TEMPLATES_DIR)
 
@@ -523,17 +524,24 @@ class TestNonClaudeSkillWarning:
         assert any("OPENCODE" in msg for msg in caplog.messages)
 
     def test_claude_agent_no_warning(
-        self, valid_submission: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+        self,
+        valid_submission: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ):
         output = tmp_path / "output"
         import logging
+
         with caplog.at_level(logging.WARNING):
             scaffold_submission(valid_submission, output, TEMPLATES_DIR)
 
         assert not any("NON-CLAUDE AGENT WRAPPER" in msg for msg in caplog.messages)
 
     def test_non_claude_without_skills_no_warning(
-        self, valid_submission: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+        self,
+        valid_submission: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Non-Claude agent with no skills_dir should not warn."""
         meta_path = valid_submission / "metadata.yaml"
@@ -548,6 +556,7 @@ class TestNonClaudeSkillWarning:
 
         output = tmp_path / "output"
         import logging
+
         with caplog.at_level(logging.WARNING):
             scaffold_submission(valid_submission, output, TEMPLATES_DIR)
 

@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from scripts.generate_tests import (
-    DEFAULT_MAX_RETRIES,
     _correction_pass,
     generate,
     main,
@@ -36,11 +35,13 @@ When asked to review code, follow these guidelines:
 - Verify error handling
 """
 
-MOCK_ANALYSIS = json.dumps({
-    "novel_aspects": ["Check for anti-patterns specific to this project"],
-    "common_knowledge": ["Basic code review practices"],
-    "test_focus_areas": ["Verify anti-pattern detection covers project-specific cases"],
-})
+MOCK_ANALYSIS = json.dumps(
+    {
+        "novel_aspects": ["Check for anti-patterns specific to this project"],
+        "common_knowledge": ["Basic code review practices"],
+        "test_focus_areas": ["Verify anti-pattern detection covers project-specific cases"],
+    }
+)
 
 MOCK_INSTRUCTION = (
     "# Code Review Task\n\n"
@@ -62,10 +63,12 @@ MOCK_TEST = (
     "    assert isinstance(result, list)\n"
 )
 
-MOCK_SCENARIO_BRIEF = json.dumps({
-    "project_files": {"review.py": "Main module"},
-    "expected_outputs": {"review_result": "list of issues"},
-})
+MOCK_SCENARIO_BRIEF = json.dumps(
+    {
+        "project_files": {"review.py": "Main module"},
+        "expected_outputs": {"review_result": "list of issues"},
+    }
+)
 
 MOCK_JUDGE_SKIP = "SKIP"
 MOCK_JUDGE_CODE = "score = 0.9\n"
@@ -76,6 +79,7 @@ REVIEW_FAIL = {
     "issues": ["[coverage] instruction does not match skill"],
     "reviewer_results": {},
 }
+
 
 def _five_step_responses(
     analysis: str = MOCK_ANALYSIS,
@@ -248,9 +252,7 @@ class TestGenerate:
     ) -> None:
         skill_cache = tmp_path / "_skill_cache" / "agentic-contribution-skill"
         skill_cache.mkdir(parents=True)
-        (skill_cache / "SKILL.md").write_text(
-            "---\nname: test\n---\n\n## Workflow\n\nDo good work.\n"
-        )
+        (skill_cache / "SKILL.md").write_text("---\nname: test\n---\n\n## Workflow\n\nDo good work.\n")
         mock_fetch.return_value = skill_cache / "SKILL.md"
         mock_chat.side_effect = _five_step_responses()
 
@@ -596,9 +598,7 @@ class TestRetryLoop:
 
         retry_instruction_call = mock_chat.call_args_list[5]
         messages = (
-            retry_instruction_call.args[0]
-            if retry_instruction_call.args
-            else retry_instruction_call.kwargs["messages"]
+            retry_instruction_call.args[0] if retry_instruction_call.args else retry_instruction_call.kwargs["messages"]
         )
         user_msg = messages[1]["content"]
         assert "Previous Attempt Issues" in user_msg
@@ -724,12 +724,8 @@ class TestOracleMode:
         oracle = sub / "oracle"
         oracle.mkdir()
         (oracle / "instruction.md").write_text("<!-- #ai-generated-oracle -->\n# Task\nDo it.\n")
-        (oracle / "test_outputs.py").write_text(
-            "# #ai-generated-oracle\ndef test_ok(): assert True\n"
-        )
-        (oracle / "llm_judge.py").write_text(
-            "# #ai-generated-oracle\nscore = 0.9\n"
-        )
+        (oracle / "test_outputs.py").write_text("# #ai-generated-oracle\ndef test_ok(): assert True\n")
+        (oracle / "llm_judge.py").write_text("# #ai-generated-oracle\nscore = 0.9\n")
         return sub
 
     @patch("scripts.generate_tests.pytest_collect_check", return_value=[])

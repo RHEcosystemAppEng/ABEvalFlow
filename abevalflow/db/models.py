@@ -9,7 +9,7 @@ Three tables:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -32,7 +32,7 @@ class Base(DeclarativeBase):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # Portable JSON that upgrades to JSONB on PostgreSQL
@@ -44,22 +44,16 @@ class EvaluationRun(Base):
 
     __tablename__ = "evaluation_runs"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     submission_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    pipeline_run_id: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False
-    )
+    pipeline_run_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
     # Provenance
     commit_sha: Mapped[str | None] = mapped_column(String(64))
     treatment_image_ref: Mapped[str | None] = mapped_column(Text)
     control_image_ref: Mapped[str | None] = mapped_column(Text)
     harbor_fork_revision: Mapped[str | None] = mapped_column(String(64))
-    eval_engine: Mapped[str] = mapped_column(
-        String(10), nullable=False, default="harbor"
-    )
+    eval_engine: Mapped[str] = mapped_column(String(10), nullable=False, default="harbor")
 
     # Summary
     recommendation: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -91,13 +85,9 @@ class EvaluationRun(Base):
     # Full report for flexibility / future queries
     report_json: Mapped[dict] = mapped_column(_JsonVariant, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
-    trials: Mapped[list[Trial]] = relationship(
-        back_populates="run", cascade="all, delete-orphan"
-    )
+    trials: Mapped[list[Trial]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_evaluation_runs_submission_name", "submission_name"),
@@ -109,10 +99,7 @@ class EvaluationRun(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<EvaluationRun {self.submission_name!r} "
-            f"recommendation={self.recommendation!r}>"
-        )
+        return f"<EvaluationRun {self.submission_name!r} recommendation={self.recommendation!r}>"
 
 
 class Trial(Base):
@@ -120,9 +107,7 @@ class Trial(Base):
 
     __tablename__ = "trials"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
     )
@@ -131,9 +116,7 @@ class Trial(Base):
     reward: Mapped[float | None] = mapped_column(Float)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     run: Mapped[EvaluationRun] = relationship(back_populates="trials")
 
@@ -143,10 +126,7 @@ class Trial(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<Trial {self.trial_name!r} variant={self.variant!r} "
-            f"reward={self.reward!r}>"
-        )
+        return f"<Trial {self.trial_name!r} variant={self.variant!r} reward={self.reward!r}>"
 
 
 class SecurityScan(Base):
@@ -158,12 +138,8 @@ class SecurityScan(Base):
 
     __tablename__ = "security_scans"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4
-    )
-    pipeline_run_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    pipeline_run_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     submission_name: Mapped[str] = mapped_column(String(255), nullable=False)
 
     scanner: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -178,9 +154,7 @@ class SecurityScan(Base):
 
     findings_json: Mapped[list] = mapped_column(_JsonVariant, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
         Index("ix_security_scans_submission_name", "submission_name"),
@@ -207,12 +181,8 @@ class MCPCheckerRun(Base):
 
     __tablename__ = "mcpchecker_results"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4
-    )
-    pipeline_run_id: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    pipeline_run_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     submission_name: Mapped[str] = mapped_column(String(255), nullable=False)
     eval_name: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -227,13 +197,9 @@ class MCPCheckerRun(Base):
 
     raw_output_json: Mapped[dict] = mapped_column(_JsonVariant, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
-    tasks: Mapped[list[MCPCheckerTask]] = relationship(
-        back_populates="run", cascade="all, delete-orphan"
-    )
+    tasks: Mapped[list[MCPCheckerTask]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_mcpchecker_results_submission_name", "submission_name"),
@@ -256,9 +222,7 @@ class MCPCheckerTask(Base):
 
     __tablename__ = "mcpchecker_tasks"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("mcpchecker_results.id", ondelete="CASCADE"), nullable=False
     )
@@ -275,9 +239,7 @@ class MCPCheckerTask(Base):
 
     details_json: Mapped[dict | None] = mapped_column(_JsonVariant, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     run: Mapped[MCPCheckerRun] = relationship(back_populates="tasks")
 

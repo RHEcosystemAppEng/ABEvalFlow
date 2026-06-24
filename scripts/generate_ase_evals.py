@@ -24,16 +24,14 @@ import sys
 from pathlib import Path
 
 # Import from generate_tests to reuse the existing infrastructure
-from scripts.generate_tests import generate_ase_evals, _load_submission
+from scripts.generate_tests import _load_submission, generate_ase_evals
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate evals/evals.json from SKILL.md for ASE evaluation"
-    )
+    parser = argparse.ArgumentParser(description="Generate evals/evals.json from SKILL.md for ASE evaluation")
     parser.add_argument(
         "submission_dir",
         type=Path,

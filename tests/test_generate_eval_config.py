@@ -74,8 +74,12 @@ class TestBuildVariantConfigPrebuilt:
     def test_basic_structure(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
         )
         assert config["job_name"] == "my-submission-treatment"
         assert config["n_attempts"] == 20
@@ -87,16 +91,24 @@ class TestBuildVariantConfigPrebuilt:
     def test_image_ref_in_env_kwargs(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
         )
         assert config["environment"]["kwargs"]["image_ref"] == TREATMENT_REF
 
     def test_control_variant_naming(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "control", CONTROL_DIR, "prebuilt",
-            jobs_dir="results/control", image_ref=CONTROL_REF,
+            meta,
+            "control",
+            CONTROL_DIR,
+            "prebuilt",
+            jobs_dir="results/control",
+            image_ref=CONTROL_REF,
         )
         assert config["job_name"] == "my-submission-control"
         assert config["tasks"][0]["path"] == CONTROL_DIR
@@ -104,8 +116,12 @@ class TestBuildVariantConfigPrebuilt:
     def test_no_force_build(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
         )
         assert "force_build" not in config["environment"]
 
@@ -113,8 +129,12 @@ class TestBuildVariantConfigPrebuilt:
         meta = load_metadata(minimal_submission)
         with pytest.raises(ValueError, match="image_ref is required"):
             build_variant_config(
-                meta, "treatment", TREATMENT_DIR, "prebuilt",
-                jobs_dir="results/treatment", image_ref="",
+                meta,
+                "treatment",
+                TREATMENT_DIR,
+                "prebuilt",
+                jobs_dir="results/treatment",
+                image_ref="",
             )
 
 
@@ -122,7 +142,10 @@ class TestBuildVariantConfigLocalBuild:
     def test_kwargs_without_image_ref(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="results/treatment",
         )
         kwargs = config["environment"]["kwargs"]
@@ -133,7 +156,10 @@ class TestBuildVariantConfigLocalBuild:
     def test_force_build_enabled(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="results/treatment",
         )
         assert config["environment"]["force_build"] is True
@@ -143,7 +169,10 @@ class TestCustomMetadataFields:
     def test_n_trials_from_metadata(self, custom_submission: Path):
         meta = load_metadata(custom_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="results/treatment",
         )
         assert config["n_attempts"] == 10
@@ -151,7 +180,10 @@ class TestCustomMetadataFields:
     def test_resource_overrides(self, custom_submission: Path):
         meta = load_metadata(custom_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="results/treatment",
         )
         assert config["environment"]["override_memory_mb"] == 4096
@@ -160,7 +192,10 @@ class TestCustomMetadataFields:
     def test_timeout_multipliers(self, custom_submission: Path):
         meta = load_metadata(custom_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="results/treatment",
         )
         assert config["agent_timeout_multiplier"] == pytest.approx(2.0)
@@ -171,7 +206,10 @@ class TestCustomMetadataFields:
     def test_default_timeouts_produce_1x_multiplier(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="results/treatment",
         )
         assert config["agent_timeout_multiplier"] == pytest.approx(1.0)
@@ -182,7 +220,10 @@ class TestCustomMetadataFields:
     def test_custom_jobs_dir(self, minimal_submission: Path):
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "local-build",
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "local-build",
             jobs_dir="/workspace/results/treatment",
         )
         assert config["jobs_dir"] == "/workspace/results/treatment"
@@ -193,8 +234,12 @@ class TestAgentConfig:
         """No LLM params at all -> oracle agent (empty dict)."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
         )
         assert config["agents"] == [{}]
 
@@ -202,8 +247,12 @@ class TestAgentConfig:
         """Model without wrapper -> claude-code agent with Anthropic env."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
             llm_api_key="mock",
@@ -218,8 +267,12 @@ class TestAgentConfig:
         """Model without api_base or key -> claude-code, model_name, no env."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
         )
         agent = config["agents"][0]
@@ -231,8 +284,12 @@ class TestAgentConfig:
         """Wrapper agent -> opencode with OPENAI_BASE_URL."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_agent_wrapper="opencode",
             llm_model="openai/llama3",
             llm_api_base="http://litellm:4000",
@@ -246,8 +303,12 @@ class TestAgentConfig:
         """Wrapper agent with model but no api_base -> no env block."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_agent_wrapper="opencode",
             llm_model="openai/gpt-4o",
         )
@@ -257,7 +318,9 @@ class TestAgentConfig:
         assert "env" not in agent
 
     def test_llm_config_in_generated_yaml(
-        self, minimal_submission: Path, tmp_path: Path,
+        self,
+        minimal_submission: Path,
+        tmp_path: Path,
     ):
         out_dir = tmp_path / "configs"
         configs = generate_eval_configs(
@@ -277,9 +340,7 @@ class TestAgentConfig:
             agent = configs[variant]["agents"][0]
             assert agent["name"] == "claude-code"
             assert agent["model_name"] == "claude-sonnet"
-            loaded = yaml.safe_load(
-                (out_dir / f"{variant}-config.yaml").read_text()
-            )
+            loaded = yaml.safe_load((out_dir / f"{variant}-config.yaml").read_text())
             assert loaded["agents"][0]["name"] == "claude-code"
             assert loaded["agents"][0]["model_name"] == "claude-sonnet"
 
@@ -318,8 +379,12 @@ class TestMetadataLlmOverrides:
         """Metadata switches from claude-code default to opencode wrapper."""
         meta = load_metadata(submission_with_wrapper_override)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
             llm_api_key="mock",
@@ -333,8 +398,12 @@ class TestMetadataLlmOverrides:
         """Overriding only model keeps claude-code as the agent."""
         meta = load_metadata(submission_model_override)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
             llm_api_key="mock",
@@ -349,8 +418,12 @@ class TestMetadataLlmOverrides:
         """No llm: in metadata -> pipeline defaults (claude-code) used."""
         meta = load_metadata(minimal_submission)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
             llm_api_key="mock",
@@ -370,8 +443,12 @@ class TestMetadataLlmOverrides:
         (sub / "metadata.yaml").write_text(yaml.dump(meta))
         meta = load_metadata(sub)
         config = build_variant_config(
-            meta, "treatment", TREATMENT_DIR, "prebuilt",
-            jobs_dir="results/treatment", image_ref=TREATMENT_REF,
+            meta,
+            "treatment",
+            TREATMENT_DIR,
+            "prebuilt",
+            jobs_dir="results/treatment",
+            image_ref=TREATMENT_REF,
             llm_model="claude-sonnet",
             llm_api_base="http://litellm:4000",
             llm_api_key="mock",
@@ -399,7 +476,9 @@ class TestGenerateEvalConfigs:
         assert "control" in configs
 
     def test_variant_jobs_dirs_are_separate(
-        self, minimal_submission: Path, tmp_path: Path,
+        self,
+        minimal_submission: Path,
+        tmp_path: Path,
     ):
         out_dir = tmp_path / "configs"
         configs = generate_eval_configs(
@@ -416,7 +495,9 @@ class TestGenerateEvalConfigs:
         assert configs["control"]["jobs_dir"] == "eval-results/control"
 
     def test_each_config_has_single_task(
-        self, minimal_submission: Path, tmp_path: Path,
+        self,
+        minimal_submission: Path,
+        tmp_path: Path,
     ):
         out_dir = tmp_path / "configs"
         configs = generate_eval_configs(
@@ -445,9 +526,7 @@ class TestGenerateEvalConfigs:
             control_image_ref=CONTROL_REF,
         )
         for variant in ("treatment", "control"):
-            loaded = yaml.safe_load(
-                (out_dir / f"{variant}-config.yaml").read_text()
-            )
+            loaded = yaml.safe_load((out_dir / f"{variant}-config.yaml").read_text())
             assert loaded["job_name"] == configs[variant]["job_name"]
             assert loaded["n_attempts"] == configs[variant]["n_attempts"]
 
@@ -467,54 +546,86 @@ class TestGenerateEvalConfigs:
 class TestMainCLI:
     def test_prebuilt_mode(self, minimal_submission: Path, tmp_path: Path):
         out_dir = tmp_path / "out"
-        rc = main([
-            "--submission-dir", str(minimal_submission),
-            "--treatment-task-dir", TREATMENT_DIR,
-            "--control-task-dir", CONTROL_DIR,
-            "--output-dir", str(out_dir),
-            "--eval-mode", "prebuilt",
-            "--treatment-image-ref", TREATMENT_REF,
-            "--control-image-ref", CONTROL_REF,
-        ])
+        rc = main(
+            [
+                "--submission-dir",
+                str(minimal_submission),
+                "--treatment-task-dir",
+                TREATMENT_DIR,
+                "--control-task-dir",
+                CONTROL_DIR,
+                "--output-dir",
+                str(out_dir),
+                "--eval-mode",
+                "prebuilt",
+                "--treatment-image-ref",
+                TREATMENT_REF,
+                "--control-image-ref",
+                CONTROL_REF,
+            ]
+        )
         assert rc == 0
         t_config = yaml.safe_load((out_dir / "treatment-config.yaml").read_text())
         assert t_config["environment"]["kwargs"]["image_ref"] == TREATMENT_REF
 
     def test_local_build_mode(self, minimal_submission: Path, tmp_path: Path):
         out_dir = tmp_path / "out"
-        rc = main([
-            "--submission-dir", str(minimal_submission),
-            "--treatment-task-dir", TREATMENT_DIR,
-            "--control-task-dir", CONTROL_DIR,
-            "--output-dir", str(out_dir),
-            "--eval-mode", "local-build",
-        ])
+        rc = main(
+            [
+                "--submission-dir",
+                str(minimal_submission),
+                "--treatment-task-dir",
+                TREATMENT_DIR,
+                "--control-task-dir",
+                CONTROL_DIR,
+                "--output-dir",
+                str(out_dir),
+                "--eval-mode",
+                "local-build",
+            ]
+        )
         assert rc == 0
         t_config = yaml.safe_load((out_dir / "treatment-config.yaml").read_text())
         assert "image_ref" not in t_config["environment"].get("kwargs", {})
         assert t_config["environment"]["kwargs"]["memory_limit_multiplier"] == 1.5
 
     def test_prebuilt_missing_refs_exits_error(
-        self, minimal_submission: Path, tmp_path: Path,
+        self,
+        minimal_submission: Path,
+        tmp_path: Path,
     ):
         out_dir = tmp_path / "out"
         with pytest.raises(SystemExit) as exc_info:
-            main([
-                "--submission-dir", str(minimal_submission),
-                "--treatment-task-dir", TREATMENT_DIR,
-                "--control-task-dir", CONTROL_DIR,
-                "--output-dir", str(out_dir),
-                "--eval-mode", "prebuilt",
-            ])
+            main(
+                [
+                    "--submission-dir",
+                    str(minimal_submission),
+                    "--treatment-task-dir",
+                    TREATMENT_DIR,
+                    "--control-task-dir",
+                    CONTROL_DIR,
+                    "--output-dir",
+                    str(out_dir),
+                    "--eval-mode",
+                    "prebuilt",
+                ]
+            )
         assert exc_info.value.code == 2
 
     def test_nonexistent_submission_dir(self, tmp_path: Path):
         out_dir = tmp_path / "out"
-        rc = main([
-            "--submission-dir", str(tmp_path / "no-such-dir"),
-            "--treatment-task-dir", TREATMENT_DIR,
-            "--control-task-dir", CONTROL_DIR,
-            "--output-dir", str(out_dir),
-            "--eval-mode", "local-build",
-        ])
+        rc = main(
+            [
+                "--submission-dir",
+                str(tmp_path / "no-such-dir"),
+                "--treatment-task-dir",
+                TREATMENT_DIR,
+                "--control-task-dir",
+                CONTROL_DIR,
+                "--output-dir",
+                str(out_dir),
+                "--eval-mode",
+                "local-build",
+            ]
+        )
         assert rc == 1

@@ -23,7 +23,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -65,13 +65,13 @@ class FactPushResult(BaseModel):
     success: bool = Field(description="Whether the push succeeded")
     error: str | None = Field(default=None, description="Error message if push failed")
     pushed_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Timestamp of the push attempt",
     )
 
 
 def _build_fact_payload(
-    gate_result: "GateResult",
+    gate_result: GateResult,
     entity_ref: str,
     fact_ref: str,
 ) -> dict[str, Any]:
@@ -100,7 +100,7 @@ def _build_fact_payload(
                     "evaluated_at": (
                         gate_result.evaluated_at.isoformat()
                         if gate_result.evaluated_at
-                        else datetime.now(timezone.utc).isoformat()
+                        else datetime.now(UTC).isoformat()
                     ),
                 },
             }
@@ -109,7 +109,7 @@ def _build_fact_payload(
 
 
 def push_gate_fact(
-    gate_result: "GateResult",
+    gate_result: GateResult,
     endpoint: str,
     entity_ref: str,
     fact_ref: str,
@@ -139,7 +139,7 @@ def push_gate_fact(
         }
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
-            
+
         request = urllib.request.Request(
             endpoint,
             data=data,
@@ -210,8 +210,8 @@ def push_gate_fact(
 
 
 def push_gate_fact_from_config(
-    gate_result: "GateResult",
-    push_facts_config: "PushFactsConfig",
+    gate_result: GateResult,
+    push_facts_config: PushFactsConfig,
 ) -> FactPushResult:
     """Push a gate result using PushFactsConfig settings.
 
@@ -250,7 +250,7 @@ def push_gate_fact_from_config(
 
 
 def validate_push_facts_config(
-    push_facts_config: "PushFactsConfig | None",
+    push_facts_config: PushFactsConfig | None,
     gates_with_push_fact: list[str],
 ) -> None:
     """Validate push_facts configuration and warn if misconfigured.
@@ -280,13 +280,13 @@ class CertificationFactPushResult(BaseModel):
     success: bool = Field(description="Whether the push succeeded")
     error: str | None = Field(default=None, description="Error message if push failed")
     pushed_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Timestamp of the push attempt",
     )
 
 
 def _build_certification_level_payload(
-    level_result: "LevelResult",
+    level_result: LevelResult,
     entity_ref: str,
     fact_ref: str,
 ) -> dict[str, Any]:
@@ -302,14 +302,16 @@ def _build_certification_level_payload(
     """
     checks_data = []
     for check in level_result.checks:
-        checks_data.append({
-            "check_id": check.check_id.value,
-            "name": check.name,
-            "passed": check.passed,
-            "score": check.score,
-            "message": check.message,
-            "source_gate": check.source_gate,
-        })
+        checks_data.append(
+            {
+                "check_id": check.check_id.value,
+                "name": check.name,
+                "passed": check.passed,
+                "score": check.score,
+                "message": check.message,
+                "source_gate": check.source_gate,
+            }
+        )
 
     # Determine if this level failed due to hierarchy (all checks passed but level failed)
     all_checks_passed = level_result.checks_total > 0 and level_result.checks_passed == level_result.checks_total
@@ -322,7 +324,7 @@ def _build_certification_level_payload(
         "checks_total": level_result.checks_total,
         "overall_score": level_result.overall_score,
         "checks": checks_data,
-        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "evaluated_at": datetime.now(UTC).isoformat(),
     }
 
     if hierarchy_forced_failure:
@@ -340,7 +342,7 @@ def _build_certification_level_payload(
 
 
 def _build_certification_summary_payload(
-    certification_result: "CertificationResult",
+    certification_result: CertificationResult,
     entity_ref: str,
     fact_ref: str,
 ) -> dict[str, Any]:
@@ -371,7 +373,7 @@ def _build_certification_summary_payload(
                     "trusted_score": certification_result.trusted.overall_score,
                     "certified_passed": certification_result.certified.passed,
                     "certified_score": certification_result.certified.overall_score,
-                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                    "evaluated_at": datetime.now(UTC).isoformat(),
                 },
             }
         ]
@@ -379,7 +381,7 @@ def _build_certification_summary_payload(
 
 
 def push_certification_level_fact(
-    level_result: "LevelResult",
+    level_result: LevelResult,
     endpoint: str,
     entity_ref: str,
     fact_ref: str,
@@ -534,8 +536,8 @@ def _push_raw_fact(
 
 
 def push_certification_facts(
-    certification_result: "CertificationResult",
-    push_facts_config: "PushFactsConfig",
+    certification_result: CertificationResult,
+    push_facts_config: PushFactsConfig,
 ) -> list[CertificationFactPushResult]:
     """Push all certification level facts to Compass.
 

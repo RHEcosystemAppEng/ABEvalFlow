@@ -77,9 +77,7 @@ def check_degradation(
     min_runs = 1 if external_current_score else 2
 
     with Session(engine) as session:
-        stmt = select(EvaluationRun).where(
-            EvaluationRun.submission_name == submission_name
-        )
+        stmt = select(EvaluationRun).where(EvaluationRun.submission_name == submission_name)
         if eval_engine is not None:
             stmt = stmt.where(EvaluationRun.eval_engine == eval_engine)
         stmt = stmt.order_by(EvaluationRun.created_at.desc()).limit(limit)
@@ -90,20 +88,13 @@ def check_degradation(
             submission_name=submission_name,
             degraded=False,
             current_score=(
-                current_score
-                if current_score is not None
-                else (runs[0].treatment_pass_rate if runs else None)
+                current_score if current_score is not None else (runs[0].treatment_pass_rate if runs else None)
             ),
             previous_score=None,
             ratio=None,
             threshold=threshold,
-            message=(
-                f"Not enough data: found {len(runs)} run(s), "
-                f"need at least {min_runs}"
-            ),
-            current_run_id=None if external_current_score else (
-                runs[0].pipeline_run_id if runs else None
-            ),
+            message=(f"Not enough data: found {len(runs)} run(s), need at least {min_runs}"),
+            current_run_id=None if external_current_score else (runs[0].pipeline_run_id if runs else None),
             previous_run_id=None,
         )
 
@@ -128,10 +119,7 @@ def check_degradation(
             f"to {current_score:.2%} (ratio: {ratio:.2f} < {threshold})"
         )
     else:
-        message = (
-            f"No degradation: score is {current_score:.2%} "
-            f"(ratio: {ratio:.2f} >= {threshold})"
-        )
+        message = f"No degradation: score is {current_score:.2%} (ratio: {ratio:.2f} >= {threshold})"
 
     return MonitorResult(
         submission_name=submission_name,

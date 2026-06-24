@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -75,9 +75,7 @@ class TestEvaluationRun:
         session.commit()
 
         loaded = session.execute(
-            select(EvaluationRun).where(
-                EvaluationRun.pipeline_run_id == run.pipeline_run_id
-            )
+            select(EvaluationRun).where(EvaluationRun.pipeline_run_id == run.pipeline_run_id)
         ).scalar_one()
         assert loaded.submission_name == "test-submission"
         assert loaded.recommendation == "pass"
@@ -93,7 +91,7 @@ class TestEvaluationRun:
         # Just verify the timestamp is recent (within last 60s).
         from datetime import timedelta
 
-        assert abs((datetime.now(timezone.utc).replace(tzinfo=None) - run.created_at.replace(tzinfo=None))) < timedelta(seconds=60)
+        assert abs(datetime.now(UTC).replace(tzinfo=None) - run.created_at.replace(tzinfo=None)) < timedelta(seconds=60)
 
     def test_unique_pipeline_run_id(self, session: Session):
         run_id = "duplicate-run"
@@ -137,7 +135,7 @@ class TestEvaluationRun:
 class TestTrial:
     def test_create_trial(self, session: Session):
         run = _make_run()
-        trial = Trial(
+        _trial = Trial(  # Created via run relationship, loaded separately below
             run=run,
             variant="treatment",
             trial_name="trial-001",
@@ -147,9 +145,7 @@ class TestTrial:
         session.add(run)
         session.commit()
 
-        loaded = session.execute(
-            select(Trial).where(Trial.trial_name == "trial-001")
-        ).scalar_one()
+        loaded = session.execute(select(Trial).where(Trial.trial_name == "trial-001")).scalar_one()
         assert loaded.variant == "treatment"
         assert loaded.reward == pytest.approx(0.85)
         assert loaded.passed is True
@@ -190,8 +186,8 @@ class TestTrial:
 
     def test_relationship_back_populates(self, session: Session):
         run = _make_run()
-        t1 = Trial(run=run, variant="treatment", trial_name="t1", reward=0.9, passed=True)
-        t2 = Trial(run=run, variant="control", trial_name="c1", reward=0.0, passed=False)
+        _t1 = Trial(run=run, variant="treatment", trial_name="t1", reward=0.9, passed=True)
+        _t2 = Trial(run=run, variant="control", trial_name="c1", reward=0.0, passed=False)
         session.add(run)
         session.commit()
 
@@ -199,9 +195,7 @@ class TestTrial:
         assert {t.trial_name for t in run.trials} == {"t1", "c1"}
 
     def test_repr(self):
-        t = Trial(
-            variant="treatment", trial_name="t-001", reward=0.75, passed=True
-        )
+        t = Trial(variant="treatment", trial_name="t-001", reward=0.75, passed=True)
         r = repr(t)
         assert "t-001" in r
         assert "treatment" in r
@@ -252,12 +246,8 @@ def _sample_result() -> AnalysisResult:
         submission_name="obs-test",
         provenance=Provenance(),
         summary=AnalysisSummary(
-            treatment=VariantSummary(
-                n_trials=10, n_passed=8, n_failed=2, pass_rate=0.8
-            ),
-            control=VariantSummary(
-                n_trials=10, n_passed=5, n_failed=5, pass_rate=0.5
-            ),
+            treatment=VariantSummary(n_trials=10, n_passed=8, n_failed=2, pass_rate=0.8),
+            control=VariantSummary(n_trials=10, n_passed=5, n_failed=5, pass_rate=0.5),
             uplift=0.3,
             recommendation=Recommendation.PASS,
         ),

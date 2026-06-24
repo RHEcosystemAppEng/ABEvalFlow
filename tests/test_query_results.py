@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -56,7 +56,7 @@ def session_factory():
 @pytest.fixture()
 def seeded_factory(session_factory):
     """Seed 3 runs: 2 for 'alpha', 1 for 'beta'."""
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     with session_factory() as session:
         session.add(
             _make_run(

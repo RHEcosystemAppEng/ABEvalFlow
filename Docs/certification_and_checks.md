@@ -42,14 +42,16 @@ Levels are **hierarchical**: Certified requires Trusted, Trusted requires Founda
 
 ## Artifact Applicability Matrix
 
-Different artifact types benefit from different checks:
+Different artifact types benefit from different checks. Each artifact type has a dedicated certification profile (see `config/certification_profiles.yaml`) that defines which checks apply at each level.
 
-| Artifact Type | Focus Area | Key Checks |
-|---------------|------------|------------|
-| **Skills** (Prompt + Code) | A/B gap testing, execution isolation | Functional Validation, Execution Validation |
-| **MCP Servers** (Tool APIs) | API contracts, schema accuracy | Resilience/Chaos Testing, Operational Policy |
-| **Plugins** (REST APIs) | OpenAPI validation, auth flows | Security Validation, Metadata Compliance |
-| **Agent Evals** (Autonomous) | Reasoning trace, multi-turn | Advanced Agent Validation, Safety Guardrails |
+| Artifact Type | Focus Area | Foundational | Trusted | Certified |
+|---------------|------------|--------------|---------|-----------|
+| **Skills** (Prompt + Code) | A/B gap testing, execution isolation | Structure, Security, Execution, Quality, Metadata | Eval Assets, Functional, Instruction Quality | Enterprise Structure, Advanced Agent |
+| **MCP Servers** (Tool APIs) | API contracts, operational stability | Structure, Security, Metadata | Eval Assets, Functional | Enterprise Structure, Enterprise Security |
+| **Plugins** (REST APIs) | OpenAPI validation, auth flows | Structure, Security, Metadata | Eval Assets, Advanced Security, Functional | Enterprise Structure, Enterprise Security |
+| **Agent Evals** (Autonomous) | Reasoning, safety, multi-turn | Structure, Security, Execution, Metadata | Eval Assets, Functional, Instruction Quality | Enterprise Structure, Advanced Agent |
+
+**Profile selection** is done at pipeline deployment level via `--certification-profile=<type>`. Default is `skill`.
 
 ---
 

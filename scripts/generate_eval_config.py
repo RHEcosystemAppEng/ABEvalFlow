@@ -109,12 +109,14 @@ def build_variant_config(
     directory and trial classification is unambiguous.
     """
     if eval_mode == "prebuilt" and not image_ref:
-        raise ValueError(
-            f"image_ref is required for variant '{variant}' in prebuilt mode"
-        )
+        raise ValueError(f"image_ref is required for variant '{variant}' in prebuilt mode")
 
     llm_model, llm_api_base, llm_api_key, llm_agent_wrapper = _resolve_llm_params(
-        metadata, llm_model, llm_api_base, llm_api_key, llm_agent_wrapper,
+        metadata,
+        llm_model,
+        llm_api_base,
+        llm_api_key,
+        llm_agent_wrapper,
     )
 
     task: dict[str, Any] = {"path": task_dir}
@@ -138,18 +140,10 @@ def build_variant_config(
     if eval_mode != "prebuilt":
         env_block["force_build"] = True
 
-    agent_mult = _timeout_multiplier(
-        metadata.agent_timeout_sec, _HARBOR_DEFAULT_AGENT_TIMEOUT
-    )
-    verifier_mult = _timeout_multiplier(
-        metadata.verifier_timeout_sec, _HARBOR_DEFAULT_VERIFIER_TIMEOUT
-    )
-    setup_mult = _timeout_multiplier(
-        metadata.agent_setup_timeout_sec, _HARBOR_DEFAULT_SETUP_TIMEOUT
-    )
-    build_mult = _timeout_multiplier(
-        metadata.build_timeout_sec, _HARBOR_DEFAULT_BUILD_TIMEOUT
-    )
+    agent_mult = _timeout_multiplier(metadata.agent_timeout_sec, _HARBOR_DEFAULT_AGENT_TIMEOUT)
+    verifier_mult = _timeout_multiplier(metadata.verifier_timeout_sec, _HARBOR_DEFAULT_VERIFIER_TIMEOUT)
+    setup_mult = _timeout_multiplier(metadata.agent_setup_timeout_sec, _HARBOR_DEFAULT_SETUP_TIMEOUT)
+    build_mult = _timeout_multiplier(metadata.build_timeout_sec, _HARBOR_DEFAULT_BUILD_TIMEOUT)
 
     agent_config: dict[str, Any] = {}
     if llm_agent_wrapper:
@@ -205,11 +199,12 @@ def generate_eval_configs(
     metadata = load_metadata(submission_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    variant_args = dict(zip(
-        VARIANTS,
-        ((treatment_task_dir, treatment_image_ref),
-         (control_task_dir, control_image_ref)),
-    ))
+    variant_args = dict(
+        zip(
+            VARIANTS,
+            ((treatment_task_dir, treatment_image_ref), (control_task_dir, control_image_ref)),
+        )
+    )
 
     configs: dict[str, dict[str, Any]] = {}
     for variant, (task_dir, img_ref) in variant_args.items():
@@ -309,10 +304,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.eval_mode == "prebuilt":
         if not args.treatment_image_ref or not args.control_image_ref:
-            parser.error(
-                "--treatment-image-ref and --control-image-ref are required "
-                "when --eval-mode is 'prebuilt'"
-            )
+            parser.error("--treatment-image-ref and --control-image-ref are required when --eval-mode is 'prebuilt'")
 
     if not args.submission_dir.is_dir():
         logger.error("Submission directory does not exist: %s", args.submission_dir)

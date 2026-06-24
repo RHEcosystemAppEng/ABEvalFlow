@@ -240,8 +240,7 @@ class TestComputeCertification:
             has_eval_assets=True,
         )
         valid_structure_check = next(
-            c for c in result.foundational.checks
-            if c.check_id == CheckId.VALID_SKILL_STRUCTURE
+            c for c in result.foundational.checks if c.check_id == CheckId.VALID_SKILL_STRUCTURE
         )
         assert valid_structure_check.passed is False
 
@@ -252,10 +251,7 @@ class TestComputeCertification:
             metadata_valid=False,
             has_eval_assets=True,
         )
-        metadata_check = next(
-            c for c in result.foundational.checks
-            if c.check_id == CheckId.METADATA_COMPLIANCE
-        )
+        metadata_check = next(c for c in result.foundational.checks if c.check_id == CheckId.METADATA_COMPLIANCE)
         assert metadata_check.passed is False
 
     def test_missing_eval_assets_affects_trusted(self) -> None:
@@ -265,10 +261,7 @@ class TestComputeCertification:
             metadata_valid=True,
             has_eval_assets=False,
         )
-        eval_assets_check = next(
-            c for c in result.trusted.checks
-            if c.check_id == CheckId.EVALUATION_ASSETS
-        )
+        eval_assets_check = next(c for c in result.trusted.checks if c.check_id == CheckId.EVALUATION_ASSETS)
         assert eval_assets_check.passed is False
 
     def test_high_score_engine_provides_advanced_validation(self) -> None:
@@ -285,10 +278,7 @@ class TestComputeCertification:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        advanced_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION
-        )
+        advanced_check = next(c for c in result.certified.checks if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION)
         assert advanced_check.passed is True
 
     def test_low_score_engine_fails_advanced_validation(self) -> None:
@@ -305,10 +295,7 @@ class TestComputeCertification:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        advanced_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION
-        )
+        advanced_check = next(c for c in result.certified.checks if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION)
         assert advanced_check.passed is False
 
     def test_security_findings_affect_enterprise_review(self) -> None:
@@ -333,10 +320,7 @@ class TestComputeCertification:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        enterprise_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
-        )
+        enterprise_check = next(c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW)
         assert enterprise_check.passed is False
 
     def test_default_checks_are_valid_check_ids(self) -> None:
@@ -429,15 +413,11 @@ class TestCertificationPolicy:
 
     def test_custom_checks_for_certified(self) -> None:
         """Custom check list for certified level respects hierarchy.
-        
+
         Even if certified's own checks pass, certified.passed is False
         if foundational or trusted fail (hierarchy enforcement).
         """
-        policy = CertificationPolicy(
-            certified=CertificationLevelPolicy(
-                checks=["advanced_agent_validation"]
-            )
-        )
+        policy = CertificationPolicy(certified=CertificationLevelPolicy(checks=["advanced_agent_validation"]))
         engine_gate = GateResult(
             gate_name="evaluation",
             gate_type=GateType.ENGINE,
@@ -462,11 +442,7 @@ class TestCertificationPolicy:
 
     def test_threshold_override_for_advanced_agent_validation(self) -> None:
         """Override threshold for advanced_agent_validation."""
-        policy = CertificationPolicy(
-            certified=CertificationLevelPolicy(
-                thresholds={"advanced_agent_validation": 0.5}
-            )
-        )
+        policy = CertificationPolicy(certified=CertificationLevelPolicy(thresholds={"advanced_agent_validation": 0.5}))
         engine_gate = GateResult(
             gate_name="evaluation",
             gate_type=GateType.ENGINE,
@@ -481,19 +457,12 @@ class TestCertificationPolicy:
             has_eval_assets=True,
             policy=policy,
         )
-        advanced_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION
-        )
+        advanced_check = next(c for c in result.certified.checks if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION)
         assert advanced_check.passed is True
 
     def test_threshold_override_fails_when_below(self) -> None:
         """Score below overridden threshold should fail."""
-        policy = CertificationPolicy(
-            certified=CertificationLevelPolicy(
-                thresholds={"advanced_agent_validation": 0.9}
-            )
-        )
+        policy = CertificationPolicy(certified=CertificationLevelPolicy(thresholds={"advanced_agent_validation": 0.9}))
         engine_gate = GateResult(
             gate_name="evaluation",
             gate_type=GateType.ENGINE,
@@ -508,10 +477,7 @@ class TestCertificationPolicy:
             has_eval_assets=True,
             policy=policy,
         )
-        advanced_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION
-        )
+        advanced_check = next(c for c in result.certified.checks if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION)
         assert advanced_check.passed is False
         assert "0.90" in advanced_check.message
 
@@ -545,11 +511,7 @@ class TestCertificationPolicy:
 
     def test_threshold_override_for_instruction_quality(self) -> None:
         """Override threshold for instruction_quality check."""
-        policy = CertificationPolicy(
-            trusted=CertificationLevelPolicy(
-                thresholds={"instruction_quality": 0.5}
-            )
-        )
+        policy = CertificationPolicy(trusted=CertificationLevelPolicy(thresholds={"instruction_quality": 0.5}))
         quality_gate = GateResult(
             gate_name="quality",
             gate_type=GateType.QUALITY,
@@ -564,19 +526,12 @@ class TestCertificationPolicy:
             has_eval_assets=True,
             policy=policy,
         )
-        instruction_check = next(
-            c for c in result.trusted.checks
-            if c.check_id == CheckId.INSTRUCTION_QUALITY
-        )
+        instruction_check = next(c for c in result.trusted.checks if c.check_id == CheckId.INSTRUCTION_QUALITY)
         assert instruction_check.passed is True
 
     def test_threshold_override_for_advanced_security(self) -> None:
         """Override threshold for advanced_security_validation check."""
-        policy = CertificationPolicy(
-            trusted=CertificationLevelPolicy(
-                thresholds={"advanced_security_validation": 0.7}
-            )
-        )
+        policy = CertificationPolicy(trusted=CertificationLevelPolicy(thresholds={"advanced_security_validation": 0.7}))
         security_gate = GateResult(
             gate_name="security",
             gate_type=GateType.SECURITY,
@@ -593,16 +548,13 @@ class TestCertificationPolicy:
             policy=policy,
         )
         adv_security_check = next(
-            c for c in result.trusted.checks
-            if c.check_id == CheckId.ADVANCED_SECURITY_VALIDATION
+            c for c in result.trusted.checks if c.check_id == CheckId.ADVANCED_SECURITY_VALIDATION
         )
         assert adv_security_check.passed is True
 
     def test_custom_checks_empty_list(self) -> None:
         """Empty check list should fail the level (no checks = cannot pass)."""
-        policy = CertificationPolicy(
-            foundational=CertificationLevelPolicy(checks=[])
-        )
+        policy = CertificationPolicy(foundational=CertificationLevelPolicy(checks=[]))
         result = compute_certification(
             gates=[],
             validation_passed=True,
@@ -663,16 +615,12 @@ class TestInvalidThresholdKeyValidation:
     def test_invalid_threshold_key_raises_error(self) -> None:
         """Invalid threshold key should raise ValueError during validation."""
         with pytest.raises(ValueError) as exc_info:
-            CertificationLevelPolicy(
-                thresholds={"invalid_check_name": 0.5}
-            )
+            CertificationLevelPolicy(thresholds={"invalid_check_name": 0.5})
         assert "Invalid threshold key 'invalid_check_name'" in str(exc_info.value)
 
     def test_valid_threshold_key_passes(self) -> None:
         """Valid threshold key should pass validation."""
-        policy = CertificationLevelPolicy(
-            thresholds={"advanced_agent_validation": 0.5}
-        )
+        policy = CertificationLevelPolicy(thresholds={"advanced_agent_validation": 0.5})
         assert policy.thresholds["advanced_agent_validation"] == 0.5
 
     def test_multiple_valid_threshold_keys(self) -> None:
@@ -717,10 +665,7 @@ class TestEnterpriseSecurityReviewMessage:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        enterprise_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
-        )
+        enterprise_check = next(c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW)
         assert enterprise_check.passed is False
         assert "Score" in enterprise_check.message
         assert "below threshold" in enterprise_check.message
@@ -741,10 +686,7 @@ class TestEnterpriseSecurityReviewMessage:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        enterprise_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
-        )
+        enterprise_check = next(c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW)
         assert enterprise_check.passed is True
         assert enterprise_check.message == "No security findings"
 
@@ -768,10 +710,7 @@ class TestEnterpriseSecurityReviewMessage:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        enterprise_check = next(
-            c for c in result.certified.checks
-            if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW
-        )
+        enterprise_check = next(c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_SECURITY_REVIEW)
         assert enterprise_check.passed is False
         assert "2 findings require review" in enterprise_check.message
 
@@ -782,12 +721,8 @@ class TestCertificationPolicyGetThreshold:
     def test_get_threshold_last_wins(self) -> None:
         """Later level threshold should override earlier level."""
         policy = CertificationPolicy(
-            foundational=CertificationLevelPolicy(
-                thresholds={"advanced_agent_validation": 0.5}
-            ),
-            certified=CertificationLevelPolicy(
-                thresholds={"advanced_agent_validation": 0.9}
-            ),
+            foundational=CertificationLevelPolicy(thresholds={"advanced_agent_validation": 0.5}),
+            certified=CertificationLevelPolicy(thresholds={"advanced_agent_validation": 0.9}),
         )
         assert policy.get_threshold("advanced_agent_validation") == 0.9
 
@@ -799,9 +734,7 @@ class TestCertificationPolicyGetThreshold:
     def test_get_threshold_from_single_level(self) -> None:
         """Should return threshold from whichever level defines it."""
         policy = CertificationPolicy(
-            trusted=CertificationLevelPolicy(
-                thresholds={"instruction_quality": 0.6}
-            ),
+            trusted=CertificationLevelPolicy(thresholds={"instruction_quality": 0.6}),
         )
         assert policy.get_threshold("instruction_quality") == 0.6
 
@@ -835,10 +768,7 @@ class TestBothModeCheckMerging:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        exec_check = next(
-            c for c in result.foundational.checks
-            if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION
-        )
+        exec_check = next(c for c in result.foundational.checks if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION)
         assert exec_check.passed is False
         assert exec_check.details.get("source_implementation") == "ase"
 
@@ -866,10 +796,7 @@ class TestBothModeCheckMerging:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        func_check = next(
-            c for c in result.trusted.checks
-            if c.check_id == CheckId.FUNCTIONAL_VALIDATION
-        )
+        func_check = next(c for c in result.trusted.checks if c.check_id == CheckId.FUNCTIONAL_VALIDATION)
         assert func_check.passed is False
         assert func_check.details.get("source_implementation") == "ase"
 
@@ -897,10 +824,7 @@ class TestBothModeCheckMerging:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        exec_check = next(
-            c for c in result.foundational.checks
-            if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION
-        )
+        exec_check = next(c for c in result.foundational.checks if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION)
         assert exec_check.passed is False
         assert exec_check.details.get("source_implementation") == "harbor"
 
@@ -920,24 +844,21 @@ class TestBothModeCheckMerging:
             metadata_valid=True,
             has_eval_assets=True,
         )
-        exec_check = next(
-            c for c in result.foundational.checks
-            if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION
-        )
+        exec_check = next(c for c in result.foundational.checks if c.check_id == CheckId.BASIC_EXECUTION_VALIDATION)
         assert "source_implementation" in exec_check.details
         assert exec_check.details["source_implementation"] == "harbor"
 
 
 class TestHierarchyEnforcement:
     """Tests for certification hierarchy enforcement in compute_certification.
-    
+
     The hierarchy is: Foundational < Trusted < Certified
     If a lower level fails, higher levels must also fail even if their own checks pass.
     """
 
     def test_trusted_fails_certified_cascades(self) -> None:
         """If trusted's own checks fail, certified should also fail.
-        
+
         Scenario: foundational passes, trusted fails its own checks
         Expected: certified.passed should be False
         """
@@ -952,17 +873,11 @@ class TestHierarchyEnforcement:
         # trusted needs functional_validation which will pass from engine gate,
         # BUT also needs advanced_security_validation which won't be satisfied
         policy = CertificationPolicy(
-            foundational=CertificationLevelPolicy(
-                checks=["valid_skill_structure", "metadata_compliance"]
-            ),
-            trusted=CertificationLevelPolicy(
-                checks=["functional_validation", "advanced_security_validation"]
-            ),
-            certified=CertificationLevelPolicy(
-                checks=["advanced_agent_validation"]
-            ),
+            foundational=CertificationLevelPolicy(checks=["valid_skill_structure", "metadata_compliance"]),
+            trusted=CertificationLevelPolicy(checks=["functional_validation", "advanced_security_validation"]),
+            certified=CertificationLevelPolicy(checks=["advanced_agent_validation"]),
         )
-        
+
         result = compute_certification(
             gates=[engine_gate],
             validation_passed=True,
@@ -970,7 +885,7 @@ class TestHierarchyEnforcement:
             has_eval_assets=True,
             policy=policy,
         )
-        
+
         # Foundational should pass (only needs structure/metadata)
         assert result.foundational.passed is True
         # Trusted should fail (advanced_security_validation not satisfied)
@@ -981,7 +896,7 @@ class TestHierarchyEnforcement:
 
     def test_foundational_fails_trusted_cascades(self) -> None:
         """If foundational fails, trusted should also fail even if its own checks pass.
-        
+
         Scenario: foundational fails (validation_passed=False), provide gates for trusted
         Expected: trusted.passed should be False despite its checks being satisfied
         """
@@ -1000,14 +915,14 @@ class TestHierarchyEnforcement:
             score=0.85,
             mode=GateMode.BLOCK,
         )
-        
+
         result = compute_certification(
             gates=[security_gate, engine_gate],
             validation_passed=False,  # This causes foundational to fail
             metadata_valid=True,
             has_eval_assets=True,
         )
-        
+
         # Foundational fails because validation_passed=False
         assert result.foundational.passed is False
         # Trusted should fail due to hierarchy even if its checks might pass
@@ -1018,7 +933,7 @@ class TestHierarchyEnforcement:
 
     def test_foundational_fails_trusted_checks_still_preserved(self) -> None:
         """When hierarchy forces trusted to fail, individual check results are preserved.
-        
+
         This allows consumers to see what would have passed if foundational passed.
         """
         # Provide gates that satisfy trusted checks
@@ -1036,21 +951,18 @@ class TestHierarchyEnforcement:
             score=0.85,
             mode=GateMode.BLOCK,
         )
-        
+
         result = compute_certification(
             gates=[security_gate, engine_gate],
             validation_passed=False,  # Causes foundational to fail
             metadata_valid=True,
             has_eval_assets=True,
         )
-        
+
         # Trusted level fails due to hierarchy
         assert result.trusted.passed is False
         # But individual checks that could be evaluated are still present
-        func_check = next(
-            (c for c in result.trusted.checks if c.check_id == CheckId.FUNCTIONAL_VALIDATION),
-            None
-        )
+        func_check = next((c for c in result.trusted.checks if c.check_id == CheckId.FUNCTIONAL_VALIDATION), None)
         assert func_check is not None
         # The check itself passed (from the engine gate)
         assert func_check.passed is True
@@ -1080,17 +992,11 @@ class TestHierarchyEnforcement:
         )
         # Use policy to simplify check requirements
         policy = CertificationPolicy(
-            foundational=CertificationLevelPolicy(
-                checks=["valid_skill_structure", "metadata_compliance"]
-            ),
-            trusted=CertificationLevelPolicy(
-                checks=["functional_validation"]
-            ),
-            certified=CertificationLevelPolicy(
-                checks=["advanced_agent_validation"]
-            ),
+            foundational=CertificationLevelPolicy(checks=["valid_skill_structure", "metadata_compliance"]),
+            trusted=CertificationLevelPolicy(checks=["functional_validation"]),
+            certified=CertificationLevelPolicy(checks=["advanced_agent_validation"]),
         )
-        
+
         result = compute_certification(
             gates=[security_gate, quality_gate, engine_gate],
             validation_passed=True,
@@ -1098,7 +1004,7 @@ class TestHierarchyEnforcement:
             has_eval_assets=True,
             policy=policy,
         )
-        
+
         assert result.foundational.passed is True
         assert result.trusted.passed is True
         assert result.certified.passed is True
@@ -1111,10 +1017,10 @@ class TestProfileLoading:
     def test_load_profile_skill(self) -> None:
         """Load the default 'skill' profile."""
         from abevalflow.certification import clear_profiles_cache, load_profile
-        
+
         clear_profiles_cache()
         policy = load_profile("skill")
-        
+
         assert policy is not None
         assert policy.foundational is not None
         assert "valid_skill_structure" in policy.foundational.checks
@@ -1123,10 +1029,10 @@ class TestProfileLoading:
     def test_load_profile_agent(self) -> None:
         """Load the 'agent' profile with agent-specific checks."""
         from abevalflow.certification import clear_profiles_cache, load_profile
-        
+
         clear_profiles_cache()
         policy = load_profile("agent")
-        
+
         assert policy is not None
         assert policy.certified is not None
         assert "advanced_agent_validation" in policy.certified.checks
@@ -1135,10 +1041,10 @@ class TestProfileLoading:
     def test_load_profile_mcp_server(self) -> None:
         """Load the 'mcp_server' profile with API-focused checks."""
         from abevalflow.certification import clear_profiles_cache, load_profile
-        
+
         clear_profiles_cache()
         policy = load_profile("mcp_server")
-        
+
         assert policy is not None
         assert policy.certified is not None
         assert "enterprise_security_review" in policy.certified.checks
@@ -1146,7 +1052,7 @@ class TestProfileLoading:
     def test_load_profile_invalid_raises(self) -> None:
         """Loading a non-existent profile raises ValueError."""
         from abevalflow.certification import clear_profiles_cache, load_profile
-        
+
         clear_profiles_cache()
         with pytest.raises(ValueError, match="Unknown certification profile"):
             load_profile("nonexistent_profile")
@@ -1154,10 +1060,10 @@ class TestProfileLoading:
     def test_get_available_profiles(self) -> None:
         """Get list of available profile names."""
         from abevalflow.certification import clear_profiles_cache, get_available_profiles
-        
+
         clear_profiles_cache()
         profiles = get_available_profiles()
-        
+
         assert "skill" in profiles
         assert "agent" in profiles
         assert "mcp_server" in profiles
@@ -1166,19 +1072,19 @@ class TestProfileLoading:
     def test_get_default_profile_name(self) -> None:
         """Get the default profile name from configuration."""
         from abevalflow.certification import clear_profiles_cache, get_default_profile_name
-        
+
         clear_profiles_cache()
         default = get_default_profile_name()
-        
+
         assert default == "skill"
 
     def test_load_profile_none_uses_default(self) -> None:
         """Loading with None uses the default profile."""
         from abevalflow.certification import clear_profiles_cache, load_profile
-        
+
         clear_profiles_cache()
         policy = load_profile(None)
-        
+
         # Should load 'skill' profile (the default)
         assert policy is not None
         assert policy.foundational is not None
@@ -1187,10 +1093,10 @@ class TestProfileLoading:
     def test_profile_integrates_with_compute_certification(self) -> None:
         """Profile-loaded policy works with compute_certification."""
         from abevalflow.certification import clear_profiles_cache, load_profile
-        
+
         clear_profiles_cache()
         policy = load_profile("skill")
-        
+
         engine_gate = GateResult(
             gate_name="evaluation",
             gate_type=GateType.ENGINE,
@@ -1198,7 +1104,7 @@ class TestProfileLoading:
             score=0.9,
             mode=GateMode.BLOCK,
         )
-        
+
         result = compute_certification(
             gates=[engine_gate],
             validation_passed=True,
@@ -1206,7 +1112,7 @@ class TestProfileLoading:
             has_eval_assets=True,
             policy=policy,
         )
-        
+
         # Should use skill profile's check configuration
         assert result is not None
         assert result.foundational is not None

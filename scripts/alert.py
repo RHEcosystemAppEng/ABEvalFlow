@@ -15,10 +15,9 @@ import argparse
 import json
 import logging
 import sys
-from typing import Any
-
-import urllib.request
 import urllib.error
+import urllib.request
+from typing import Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,9 +61,7 @@ def format_slack_message(
         header_text = f"✅ [{engine_label}] Monitoring Pass"
 
     run_id_text = (
-        f"<{pipeline_run_url}|{current_run_id}>"
-        if pipeline_run_url and current_run_id != "N/A"
-        else current_run_id
+        f"<{pipeline_run_url}|{current_run_id}>" if pipeline_run_url and current_run_id != "N/A" else current_run_id
     )
 
     fields = [

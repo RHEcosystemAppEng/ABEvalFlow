@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -176,11 +175,11 @@ def review_submission(submission_dir: Path) -> dict:
 
     skill_md_path = _find_skill_md(submission_dir)
     skill_content = _read_file_safe(skill_md_path) if skill_md_path else "(file not present)"
-    
+
     # Detect ASE vs Harbor format
     evals_path = submission_dir / "evals" / "evals.json"
     is_ase = evals_path.is_file()
-    
+
     if is_ase:
         # ASE format: uses evals/evals.json
         evals_content = _read_file_safe(evals_path)
@@ -198,9 +197,7 @@ def review_submission(submission_dir: Path) -> dict:
         llm_judge_path = submission_dir / "tests" / "llm_judge.py"
         llm_judge_section = ""
         if llm_judge_path.is_file():
-            llm_judge_section = (
-                f"## tests/llm_judge.py\n```python\n{llm_judge_path.read_text()}\n```"
-            )
+            llm_judge_section = f"## tests/llm_judge.py\n```python\n{llm_judge_path.read_text()}\n```"
 
         system_prompt = REVIEW_SYSTEM_PROMPT_HARBOR
         user_prompt = REVIEW_USER_TEMPLATE_HARBOR.format(
@@ -224,6 +221,7 @@ def review_submission(submission_dir: Path) -> dict:
         assessment = json.loads(response_text)
     except json.JSONDecodeError:
         import re
+
         json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if json_match:
             assessment = json.loads(json_match.group())
@@ -273,8 +271,9 @@ def main(argv: list[str] | None = None) -> int:
     # Always return 0 - this review is advisory (non-blocking)
     # The assessment result is logged but doesn't fail the pipeline
     if not assessment.get("passed", False):
-        logger.warning("Quality review recommendation: %s (advisory, non-blocking)",
-                       assessment.get("recommendation", "unknown"))
+        logger.warning(
+            "Quality review recommendation: %s (advisory, non-blocking)", assessment.get("recommendation", "unknown")
+        )
     return 0
 
 

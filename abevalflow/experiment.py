@@ -18,7 +18,9 @@ class ExperimentStrategy(Protocol):
     """Protocol for experiment variant strategies."""
 
     def variant_copy_specs(
-        self, submission_dir: Path, variant: str,
+        self,
+        submission_dir: Path,
+        variant: str,
     ) -> list[CopySpec]:
         """Return copy specs for this variant ('control' or 'treatment').
 
@@ -27,7 +29,10 @@ class ExperimentStrategy(Protocol):
         ...
 
     def customize_context(
-        self, base_context: dict, variant: str, submission_dir: Path,
+        self,
+        base_context: dict,
+        variant: str,
+        submission_dir: Path,
     ) -> dict:
         """Adjust template context per variant.
 
@@ -67,13 +72,18 @@ class SkillExperimentStrategy:
         self._config = config
 
     def variant_copy_specs(
-        self, submission_dir: Path, variant: str,
+        self,
+        submission_dir: Path,
+        variant: str,
     ) -> list[CopySpec]:
         specs = _get_variant_spec(self._config, variant).copy_dirs
         return _filter_specs(specs, submission_dir)
 
     def customize_context(
-        self, base_context: dict, variant: str, submission_dir: Path,
+        self,
+        base_context: dict,
+        variant: str,
+        submission_dir: Path,
     ) -> dict:
         filtered = self.variant_copy_specs(submission_dir, variant)
         ctx = {**base_context}
@@ -94,13 +104,18 @@ class _PerVariantStrategy:
         self._config = config
 
     def variant_copy_specs(
-        self, submission_dir: Path, variant: str,
+        self,
+        submission_dir: Path,
+        variant: str,
     ) -> list[CopySpec]:
         specs = _get_variant_spec(self._config, variant).copy_dirs
         return _filter_specs(specs, submission_dir)
 
     def customize_context(
-        self, base_context: dict, variant: str, submission_dir: Path,
+        self,
+        base_context: dict,
+        variant: str,
+        submission_dir: Path,
     ) -> dict:
         variant_spec = _get_variant_spec(self._config, variant)
         filtered = _filter_specs(variant_spec.copy_dirs, submission_dir)
