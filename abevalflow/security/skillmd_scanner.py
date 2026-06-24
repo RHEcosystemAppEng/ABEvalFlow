@@ -186,9 +186,7 @@ def scan_file(file_path: Path, relative_to: Path | None = None) -> list[dict]:
                         {
                             "severity": severity,
                             "rule_id": _make_rule_id(category, label),
-                            "message": (
-                                f"Line {line_num}: {category.replace('_', ' ')} pattern '{label}'"
-                            ),
+                            "message": (f"Line {line_num}: {category.replace('_', ' ')} pattern '{label}'"),
                             "file_path": display_path,
                             "category": category,
                             "line": line_num,
