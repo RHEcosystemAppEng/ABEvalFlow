@@ -49,6 +49,7 @@ def get_all_security_gate_names() -> list[str]:
 
 
 from abevalflow.gates.security.cisco import CiscoGate
+from abevalflow.gates.security.skillmd_scanner import SkillMdScannerGate
 
 __all__ = [
     "register_security_gate",
@@ -56,4 +57,5 @@ __all__ = [
     "get_all_security_gates",
     "get_all_security_gate_names",
     "CiscoGate",
+    "SkillMdScannerGate",
 ]

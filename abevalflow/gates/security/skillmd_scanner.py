@@ -1,4 +1,8 @@
-"""Cisco security scanner gate."""
+"""SKILL.md security scanner gate.
+
+Reads skillmd-security-scan.json produced by the skillmd-security-scan
+pipeline task. Patterns ported from harness-eval-lab (setup-eval).
+"""
 
 from __future__ import annotations
 
@@ -10,23 +14,23 @@ from abevalflow.gates.security.base import SecurityGate
 from abevalflow.schemas import GatePolicy
 
 
-@register_security_gate("cisco")
-class CiscoGate(SecurityGate):
-    """Cisco AI Skill Scanner security gate.
+@register_security_gate("skillmd-scanner")
+class SkillMdScannerGate(SecurityGate):
+    """SKILL.md content security scanner gate.
 
-    Reads security-scan.json produced by the test phase's security scan step.
+    Reads skillmd-security-scan.json produced by the test phase's scan step.
     Pass/fail depends on mode:
     - warn: always passes (findings are advisory)
     - block: fails if HIGH or CRITICAL findings exist
     """
 
-    name = "cisco"
-    scan_filename = "security-scan.json"
+    name = "skillmd-scanner"
+    scan_filename = "skillmd-security-scan.json"
 
     def evaluate(
         self,
         reports_dir: Path,
         policy: GatePolicy,
     ) -> GateResult:
-        """Evaluate Cisco security scan results."""
+        """Evaluate SKILL.md security scan results."""
         return self.evaluate_scan_json(reports_dir, policy)
