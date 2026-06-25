@@ -138,7 +138,7 @@ class SecurityGate(ABC):
         }
 
         for f in scan_data.get("findings", []):
-            sev_str = f.get("severity", "info").lower()
+            sev_str = f.get("severity", "info").lower().strip()
             try:
                 severity = Severity(sev_str)
             except ValueError:
