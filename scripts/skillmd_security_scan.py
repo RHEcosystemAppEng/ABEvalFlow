@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run SKILL.md security scan on a submission directory.
 
-Scans all markdown files for prompt injection, credential access,
-data exfiltration, reverse shell, and obfuscation patterns.
+Deterministic regex checks run always. LLM semantic review runs by default
+and can be disabled with --no-llm.
 
 Produces a JSON report compatible with the SecurityGate interface.
 
@@ -17,7 +17,10 @@ import logging
 import sys
 from pathlib import Path
 
-from abevalflow.security.skillmd_scanner import scan_directory
+from abevalflow.security.skillmd_scanner import (
+    llm_security_review,
+    scan_directory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="Path to write the JSON report",
     )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Skip LLM semantic security review",
+    )
     args = parser.parse_args(argv)
 
     if not args.submission_dir.is_dir():
@@ -48,6 +56,13 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         logger.exception("Scan failed")
         return 1
+
+    if not args.no_llm:
+        try:
+            llm_findings = llm_security_review(args.submission_dir)
+            result["findings"].extend(llm_findings)
+        except Exception:
+            logger.exception("LLM review failed, continuing with deterministic results")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2))
