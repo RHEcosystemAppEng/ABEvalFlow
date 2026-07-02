@@ -49,6 +49,7 @@ def get_all_quality_gate_names() -> list[str]:
 
 
 from abevalflow.gates.quality.llm_review import LLMReviewGate
+from abevalflow.gates.quality.skillmd_quality import SkillMdQualityGate
 
 __all__ = [
     "register_quality_gate",
@@ -56,4 +57,5 @@ __all__ = [
     "get_all_quality_gates",
     "get_all_quality_gate_names",
     "LLMReviewGate",
+    "SkillMdQualityGate",
 ]
