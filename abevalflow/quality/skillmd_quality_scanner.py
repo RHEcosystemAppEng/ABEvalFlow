@@ -387,6 +387,108 @@ def check_generic_advice(
     return findings
 
 
+# --- Circular reference patterns ---
+
+_SKILL_REF_PATTERNS = [
+    re.compile(r"/(\w[\w-]+)(?:\s|$|[),\]])"),
+    re.compile(r"(?:skill|command)[:\s]+[\"']?(\w[\w-]+)[\"']?", re.I),
+    re.compile(
+        r"(?:invokes?|calls?|triggers?|runs?)\s+[\"'`]?/?(\w[\w-]+)[\"'`]?",
+        re.I,
+    ),
+]
+
+
+def _extract_skill_references(body: str, own_name: str) -> set[str]:
+    refs: set[str] = set()
+    for pattern in _SKILL_REF_PATTERNS:
+        for match in pattern.finditer(body):
+            name = match.group(1)
+            if name != own_name and len(name) > 1:
+                refs.add(name)
+    return refs
+
+
+def _find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
+    visited: set[str] = set()
+    on_stack: set[str] = set()
+    cycles: list[list[str]] = []
+    path: list[str] = []
+
+    def dfs(node: str) -> None:
+        visited.add(node)
+        on_stack.add(node)
+        path.append(node)
+
+        for neighbor in graph.get(node, set()):
+            if neighbor not in graph:
+                continue
+            if neighbor not in visited:
+                dfs(neighbor)
+            elif neighbor in on_stack:
+                cycle_start = path.index(neighbor)
+                cycle = path[cycle_start:] + [neighbor]
+                cycles.append(cycle)
+
+        path.pop()
+        on_stack.discard(node)
+
+    for node in graph:
+        if node not in visited:
+            dfs(node)
+
+    return cycles
+
+
+def check_circular_references(directory: Path) -> list[dict]:
+    """Detect circular reference chains between skills in a submission."""
+    skills_dir = directory / "skills"
+    if not skills_dir.is_dir():
+        return []
+
+    graph: dict[str, set[str]] = {}
+    file_map: dict[str, str] = {}
+
+    for skill_md in skills_dir.rglob("SKILL.md"):
+        skill_name = skill_md.parent.name
+        if skill_name == "skills":
+            skill_name = "root"
+        try:
+            content = skill_md.read_text(encoding="utf-8", errors="replace")
+            body = re.sub(r"^---.*?---\s*", "", content, flags=re.DOTALL)
+            refs = _extract_skill_references(body, skill_name)
+            graph[skill_name] = refs
+            file_map[skill_name] = str(skill_md.relative_to(directory))
+        except OSError:
+            continue
+
+    if len(graph) < 2:
+        return []
+
+    findings: list[dict] = []
+    seen_cycles: set[str] = set()
+
+    for cycle in _find_cycles(graph):
+        key = " -> ".join(sorted(set(cycle[:-1])))
+        if key in seen_cycles:
+            continue
+        seen_cycles.add(key)
+
+        chain = " -> ".join(cycle)
+        first = cycle[0]
+        findings.append(
+            {
+                "severity": "medium",
+                "rule_id": "quality-circular-reference",
+                "message": f"Circular reference detected: {chain}",
+                "file_path": file_map.get(first, ""),
+                "category": "circular_reference",
+            }
+        )
+
+    return findings
+
+
 # --- Main entry point ---
 
 
@@ -409,6 +511,7 @@ def scan_directory(directory: Path) -> dict:
         all_findings.extend(check_generic_advice(md_file, relative_to=directory))
 
     all_findings.extend(check_file_completeness(directory))
+    all_findings.extend(check_circular_references(directory))
 
     logger.info(
         "Quality scan: %d files, %d findings",

@@ -12,6 +12,7 @@ from abevalflow.gates.quality import (
 )
 from abevalflow.quality.skillmd_quality_scanner import (
     check_broken_references,
+    check_circular_references,
     check_description_quality,
     check_file_completeness,
     check_generic_advice,
@@ -235,6 +236,47 @@ class TestGenericAdvice:
         p = tmp_path / "SKILL.md"
         p.write_text("---\nname: x\ndescription: y\n---\n\n```\n# follow best practices\n```")
         assert len(check_generic_advice(p)) == 0
+
+
+# ---------------------------------------------------------------------------
+# scan_directory tests
+# ---------------------------------------------------------------------------
+# Circular references tests
+# ---------------------------------------------------------------------------
+
+
+class TestCircularReferences:
+    def test_no_cycle(self, tmp_path):
+        skills = tmp_path / "skills"
+        (skills / "skill-a").mkdir(parents=True)
+        (skills / "skill-b").mkdir(parents=True)
+        (skills / "skill-a" / "SKILL.md").write_text(
+            "---\nname: skill-a\ndescription: A\n---\n\nThis skill calls /skill-b."
+        )
+        (skills / "skill-b" / "SKILL.md").write_text("---\nname: skill-b\ndescription: B\n---\n\nA standalone skill.")
+        assert len(check_circular_references(tmp_path)) == 0
+
+    def test_cycle_detected(self, tmp_path):
+        skills = tmp_path / "skills"
+        (skills / "skill-a").mkdir(parents=True)
+        (skills / "skill-b").mkdir(parents=True)
+        (skills / "skill-a" / "SKILL.md").write_text(
+            "---\nname: skill-a\ndescription: A\n---\n\nThis skill calls /skill-b."
+        )
+        (skills / "skill-b" / "SKILL.md").write_text(
+            "---\nname: skill-b\ndescription: B\n---\n\nThis skill invokes /skill-a."
+        )
+        findings = check_circular_references(tmp_path)
+        assert any(f["rule_id"] == "quality-circular-reference" for f in findings)
+
+    def test_single_skill_no_cycle(self, tmp_path):
+        skills = tmp_path / "skills"
+        skills.mkdir()
+        (skills / "SKILL.md").write_text("---\nname: my-skill\ndescription: Solo\n---\n\nA single skill.")
+        assert len(check_circular_references(tmp_path)) == 0
+
+    def test_no_skills_dir(self, tmp_path):
+        assert len(check_circular_references(tmp_path)) == 0
 
 
 # ---------------------------------------------------------------------------
