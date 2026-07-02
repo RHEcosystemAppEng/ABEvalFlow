@@ -38,6 +38,8 @@ Evaluate the following dimensions and assign each a score from 0.0 to 1.0:
 3. **clarity** — Are the instruction and tests clear and unambiguous?
 4. **feasibility** — Can an AI agent reasonably complete the task in a single session?
 5. **robustness** — Do the tests cover edge cases and failure modes?
+6. **specificity** — Is the instruction concrete enough that an agent knows what to do, or vague?
+7. **completeness** — Does the instruction cover everything SKILL.md claims? Any gaps?
 
 For each dimension, provide a brief finding (1-2 sentences).
 
@@ -53,7 +55,9 @@ Output ONLY valid JSON with this structure:
     "coverage": {"score": 0.0, "finding": "..."},
     "clarity": {"score": 0.0, "finding": "..."},
     "feasibility": {"score": 0.0, "finding": "..."},
-    "robustness": {"score": 0.0, "finding": "..."}
+    "robustness": {"score": 0.0, "finding": "..."},
+    "specificity": {"score": 0.0, "finding": "..."},
+    "completeness": {"score": 0.0, "finding": "..."}
   },
   "overall_score": 0.0,
   "recommendation": "pass|warn|fail",
@@ -74,6 +78,8 @@ Evaluate the following dimensions and assign each a score from 0.0 to 1.0:
 3. **clarity** — Are the prompts and assertions clear and unambiguous?
 4. **feasibility** — Can an AI agent reasonably complete the tasks?
 5. **robustness** — Do the evals cover different scenarios and edge cases?
+6. **specificity** — Are the eval prompts concrete enough, or do they rely on vague language?
+7. **completeness** — Do the evals cover all capabilities described in SKILL.md, or are some untested?
 
 For each dimension, provide a brief finding (1-2 sentences).
 
@@ -89,7 +95,9 @@ Output ONLY valid JSON with this structure:
     "coverage": {"score": 0.0, "finding": "..."},
     "clarity": {"score": 0.0, "finding": "..."},
     "feasibility": {"score": 0.0, "finding": "..."},
-    "robustness": {"score": 0.0, "finding": "..."}
+    "robustness": {"score": 0.0, "finding": "..."},
+    "specificity": {"score": 0.0, "finding": "..."},
+    "completeness": {"score": 0.0, "finding": "..."}
   },
   "overall_score": 0.0,
   "recommendation": "pass|warn|fail",
