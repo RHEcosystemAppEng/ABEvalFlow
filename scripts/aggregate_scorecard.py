@@ -33,6 +33,7 @@ from pathlib import Path
 import yaml
 
 from abevalflow.certification import compute_certification, load_profile
+from abevalflow.operational_policy import check_operational_policy
 from abevalflow.compass_facts import (
     CertificationFactPushResult,
     FactPushResult,
@@ -315,12 +316,16 @@ def aggregate_scorecard(
 
     has_eval_assets = (submission_dir / "evals" / "evals.json").exists() or (submission_dir / "tests").exists()
 
+    operational_policy_result = check_operational_policy(submission_dir)
+    logger.info("Operational policy: passed=%s, score=%.3f", operational_policy_result.passed, operational_policy_result.score)
+
     certification = compute_certification(
         gates=gates,
         validation_passed=validation_passed,
         metadata_valid=metadata_valid,
         has_eval_assets=has_eval_assets,
         policy=certification_policy,
+        operational_policy_result=operational_policy_result,
     )
     logger.info(
         "Certification levels: foundational=%s, trusted=%s, certified=%s (highest=%s)",
