@@ -20,7 +20,7 @@ import yaml
 from pydantic import ValidationError
 
 from abevalflow.certification import CheckId, CheckResult
-from abevalflow.schemas import SubmissionMetadata
+from abevalflow.schemas import OperationalLimits, SubmissionMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -36,23 +36,39 @@ LOGGING_SUPPRESSION_PATTERNS = [
     re.compile(r"\bturn\s+off\s+log", re.IGNORECASE),
 ]
 
+SECURITY_QUALIFIERS = re.compile(
+    r"\b(passwords?|credentials?|secrets?|pii|tokens?|sensitive|personal)\b",
+    re.IGNORECASE,
+)
 
-def _check_resource_limits(metadata: SubmissionMetadata) -> list[str]:
+
+EXPECTED_RESOURCE_FIELDS = ["cpus", "memory_mb", "agent_timeout_sec"]
+
+
+def _check_resource_declaration(raw_data: dict) -> list[str]:
+    """Check that resource fields are explicitly declared, not just using defaults."""
+    missing = [f for f in EXPECTED_RESOURCE_FIELDS if f not in raw_data]
+    if missing:
+        return [f"Resource fields not explicitly declared: {', '.join(missing)}"]
+    return []
+
+
+def _check_resource_limits(metadata: SubmissionMetadata, limits: OperationalLimits) -> list[str]:
     """Check that resource requests are within policy limits."""
     issues = []
-    if metadata.cpus > MAX_CPUS:
-        issues.append(f"CPU request ({metadata.cpus}) exceeds max allowed ({MAX_CPUS})")
-    if metadata.memory_mb > MAX_MEMORY_MB:
-        issues.append(f"Memory request ({metadata.memory_mb}MB) exceeds max allowed ({MAX_MEMORY_MB}MB)")
+    if metadata.cpus > limits.max_cpus:
+        issues.append(f"CPU request ({metadata.cpus}) exceeds max allowed ({limits.max_cpus})")
+    if metadata.memory_mb > limits.max_memory_mb:
+        issues.append(f"Memory request ({metadata.memory_mb}MB) exceeds max allowed ({limits.max_memory_mb}MB)")
     return issues
 
 
-def _check_timeout_compliance(metadata: SubmissionMetadata) -> list[str]:
+def _check_timeout_compliance(metadata: SubmissionMetadata, limits: OperationalLimits) -> list[str]:
     """Check that timeouts are within reasonable bounds."""
     issues = []
-    if metadata.agent_timeout_sec > MAX_AGENT_TIMEOUT_SEC:
+    if metadata.agent_timeout_sec > limits.max_agent_timeout_sec:
         issues.append(
-            f"Agent timeout ({metadata.agent_timeout_sec}s) exceeds max allowed ({MAX_AGENT_TIMEOUT_SEC}s)"
+            f"Agent timeout ({metadata.agent_timeout_sec}s) exceeds max allowed ({limits.max_agent_timeout_sec}s)"
         )
     return issues
 
@@ -88,39 +104,53 @@ def _check_error_handling(test_file: Path) -> list[str]:
 
 
 def _check_logging_suppression(skill_path: Path) -> list[str]:
-    """Check SKILL.md for patterns that suppress agent logging."""
+    """Check SKILL.md for patterns that suppress agent logging.
+
+    Skips lines that contain security qualifiers (e.g., "Do not log passwords")
+    since those are legitimate security instructions, not logging suppression.
+    """
     issues = []
     if not skill_path.exists():
         return issues
 
     content = skill_path.read_text()
-    for pattern in LOGGING_SUPPRESSION_PATTERNS:
-        match = pattern.search(content)
-        if match:
-            issues.append(f"Logging suppression pattern found: '{match.group()}'")
+    for line in content.splitlines():
+        for pattern in LOGGING_SUPPRESSION_PATTERNS:
+            match = pattern.search(line)
+            if match and not SECURITY_QUALIFIERS.search(line):
+                issues.append(f"Logging suppression pattern found: '{match.group()}'")
 
     return issues
 
 
-def check_operational_policy(submission_dir: Path) -> CheckResult:
+def check_operational_policy(
+    submission_dir: Path,
+    limits: OperationalLimits | None = None,
+) -> CheckResult:
     """Run all operational policy checks on a submission.
 
     Args:
         submission_dir: Path to the submission directory containing
             metadata.yaml, skills/SKILL.md, and tests/test_outputs.py.
+        limits: Optional configurable limits from CertificationPolicy.
+            Uses OperationalLimits defaults if not provided.
 
     Returns:
         CheckResult with aggregated pass/fail, score, and message.
     """
+    if limits is None:
+        limits = OperationalLimits()
+
     all_issues: list[str] = []
 
     metadata_path = submission_dir / "metadata.yaml"
     if metadata_path.exists():
         try:
-            data = yaml.safe_load(metadata_path.read_text())
-            metadata = SubmissionMetadata(**(data or {}))
-            all_issues.extend(_check_resource_limits(metadata))
-            all_issues.extend(_check_timeout_compliance(metadata))
+            data = yaml.safe_load(metadata_path.read_text()) or {}
+            all_issues.extend(_check_resource_declaration(data))
+            metadata = SubmissionMetadata(**data)
+            all_issues.extend(_check_resource_limits(metadata, limits))
+            all_issues.extend(_check_timeout_compliance(metadata, limits))
         except (ValidationError, yaml.YAMLError) as e:
             logger.warning("Failed to parse metadata.yaml for policy check: %s", e)
     else:

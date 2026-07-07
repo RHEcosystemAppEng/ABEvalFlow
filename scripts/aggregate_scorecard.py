@@ -316,7 +316,8 @@ def aggregate_scorecard(
 
     has_eval_assets = (submission_dir / "evals" / "evals.json").exists() or (submission_dir / "tests").exists()
 
-    operational_policy_result = check_operational_policy(submission_dir)
+    operational_limits = certification_policy.get_operational_limits() if certification_policy else None
+    operational_policy_result = check_operational_policy(submission_dir, limits=operational_limits)
     logger.info(
         "Operational policy: passed=%s, score=%.3f",
         operational_policy_result.passed,

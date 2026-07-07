@@ -13,11 +13,12 @@ from abevalflow.operational_policy import (
     MAX_MEMORY_MB,
     _check_error_handling,
     _check_logging_suppression,
+    _check_resource_declaration,
     _check_resource_limits,
     _check_timeout_compliance,
     check_operational_policy,
 )
-from abevalflow.schemas import SubmissionMetadata
+from abevalflow.schemas import OperationalLimits, SubmissionMetadata
 
 
 def _make_metadata(**overrides) -> SubmissionMetadata:
@@ -39,49 +40,72 @@ def _write_submission(tmp_path: Path, metadata: dict | None = None, skill_conten
         (tests_dir / "test_outputs.py").write_text(test_content)
 
 
+class TestResourceDeclaration:
+    def test_all_declared(self):
+        data = {"name": "test", "cpus": 2, "memory_mb": 4096, "agent_timeout_sec": 600}
+        issues = _check_resource_declaration(data)
+        assert issues == []
+
+    def test_none_declared(self):
+        data = {"name": "test"}
+        issues = _check_resource_declaration(data)
+        assert len(issues) == 1
+        assert "cpus" in issues[0]
+        assert "memory_mb" in issues[0]
+        assert "agent_timeout_sec" in issues[0]
+
+    def test_partial_declared(self):
+        data = {"name": "test", "cpus": 2}
+        issues = _check_resource_declaration(data)
+        assert len(issues) == 1
+        assert "memory_mb" in issues[0]
+        assert "agent_timeout_sec" in issues[0]
+        assert "cpus" not in issues[0]
+
+
 class TestResourceLimits:
     def test_default_values_pass(self):
         metadata = _make_metadata()
-        issues = _check_resource_limits(metadata)
+        issues = _check_resource_limits(metadata, OperationalLimits())
         assert issues == []
 
     def test_within_limits_pass(self):
         metadata = _make_metadata(cpus=MAX_CPUS, memory_mb=MAX_MEMORY_MB)
-        issues = _check_resource_limits(metadata)
+        issues = _check_resource_limits(metadata, OperationalLimits())
         assert issues == []
 
     def test_cpu_exceeds_limit(self):
         metadata = _make_metadata(cpus=MAX_CPUS + 1)
-        issues = _check_resource_limits(metadata)
+        issues = _check_resource_limits(metadata, OperationalLimits())
         assert len(issues) == 1
         assert "CPU" in issues[0]
 
     def test_memory_exceeds_limit(self):
         metadata = _make_metadata(memory_mb=MAX_MEMORY_MB + 1)
-        issues = _check_resource_limits(metadata)
+        issues = _check_resource_limits(metadata, OperationalLimits())
         assert len(issues) == 1
         assert "Memory" in issues[0]
 
     def test_both_exceed(self):
         metadata = _make_metadata(cpus=MAX_CPUS + 1, memory_mb=MAX_MEMORY_MB + 1)
-        issues = _check_resource_limits(metadata)
+        issues = _check_resource_limits(metadata, OperationalLimits())
         assert len(issues) == 2
 
 
 class TestTimeoutCompliance:
     def test_default_timeout_passes(self):
         metadata = _make_metadata()
-        issues = _check_timeout_compliance(metadata)
+        issues = _check_timeout_compliance(metadata, OperationalLimits())
         assert issues == []
 
     def test_within_limit_passes(self):
         metadata = _make_metadata(agent_timeout_sec=MAX_AGENT_TIMEOUT_SEC)
-        issues = _check_timeout_compliance(metadata)
+        issues = _check_timeout_compliance(metadata, OperationalLimits())
         assert issues == []
 
     def test_exceeds_limit(self):
         metadata = _make_metadata(agent_timeout_sec=MAX_AGENT_TIMEOUT_SEC + 1)
-        issues = _check_timeout_compliance(metadata)
+        issues = _check_timeout_compliance(metadata, OperationalLimits())
         assert len(issues) == 1
         assert "timeout" in issues[0].lower()
 
@@ -196,12 +220,30 @@ class TestLoggingSuppression:
         issues = _check_logging_suppression(skill_file)
         assert len(issues) == 1
 
+    def test_security_qualified_not_flagged(self, tmp_path: Path):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text("# My Skill\n\nDo not log passwords or PII.\n")
+        issues = _check_logging_suppression(skill_file)
+        assert issues == []
+
+    def test_security_qualified_credentials(self, tmp_path: Path):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text("# My Skill\n\nNo logging of credentials.\n")
+        issues = _check_logging_suppression(skill_file)
+        assert issues == []
+
+    def test_security_qualified_tokens(self, tmp_path: Path):
+        skill_file = tmp_path / "SKILL.md"
+        skill_file.write_text("# My Skill\n\nDo not log sensitive tokens.\n")
+        issues = _check_logging_suppression(skill_file)
+        assert issues == []
+
 
 class TestCheckOperationalPolicy:
     def test_all_pass(self, tmp_path: Path):
         _write_submission(
             tmp_path,
-            metadata={"name": "good-skill"},
+            metadata={"name": "good-skill", "cpus": 2, "memory_mb": 4096, "agent_timeout_sec": 600},
             skill_content="# Good Skill\n\nHelps with testing.\n",
             test_content="def test_ok():\n    assert True\n",
         )
@@ -268,3 +310,31 @@ class TestCheckOperationalPolicy:
         result = check_operational_policy(tmp_path)
         assert result.passed is False
         assert result.score < 1.0
+
+
+class TestCustomLimits:
+    _full_resources = {"cpus": 2, "memory_mb": 4096, "agent_timeout_sec": 600}
+
+    def test_custom_limits_allow_higher_cpu(self, tmp_path: Path):
+        meta = {"name": "big-skill", **self._full_resources, "cpus": 8}
+        _write_submission(tmp_path, metadata=meta)
+        result = check_operational_policy(tmp_path, limits=OperationalLimits(max_cpus=10))
+        assert result.passed is True
+
+    def test_custom_limits_still_enforce(self, tmp_path: Path):
+        meta = {"name": "big-skill", **self._full_resources, "cpus": 8}
+        _write_submission(tmp_path, metadata=meta)
+        result = check_operational_policy(tmp_path, limits=OperationalLimits(max_cpus=4))
+        assert result.passed is False
+
+    def test_custom_memory_limit(self, tmp_path: Path):
+        meta = {"name": "big-skill", **self._full_resources, "memory_mb": 16384}
+        _write_submission(tmp_path, metadata=meta)
+        result = check_operational_policy(tmp_path, limits=OperationalLimits(max_memory_mb=32768))
+        assert result.passed is True
+
+    def test_custom_timeout_limit(self, tmp_path: Path):
+        meta = {"name": "big-skill", **self._full_resources, "agent_timeout_sec": 7200}
+        _write_submission(tmp_path, metadata=meta)
+        result = check_operational_policy(tmp_path, limits=OperationalLimits(max_agent_timeout_sec=10000))
+        assert result.passed is True

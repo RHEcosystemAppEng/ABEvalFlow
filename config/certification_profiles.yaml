@@ -25,6 +25,7 @@ profiles:
         - evaluation_assets
         - functional_validation
         - instruction_quality
+        - operational_policy_compliance
     certified:
       checks:
         - enterprise_structure_validation
@@ -81,6 +82,7 @@ profiles:
         - evaluation_assets
         - functional_validation
         - instruction_quality
+        - operational_policy_compliance
     certified:
       checks:
         - enterprise_structure_validation
