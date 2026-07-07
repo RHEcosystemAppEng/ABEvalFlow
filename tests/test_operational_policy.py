@@ -8,9 +8,6 @@ import yaml
 
 from abevalflow.certification import CheckId
 from abevalflow.operational_policy import (
-    MAX_AGENT_TIMEOUT_SEC,
-    MAX_CPUS,
-    MAX_MEMORY_MB,
     _check_error_handling,
     _check_logging_suppression,
     _check_resource_declaration,
@@ -19,6 +16,11 @@ from abevalflow.operational_policy import (
     check_operational_policy,
 )
 from abevalflow.schemas import OperationalLimits, SubmissionMetadata
+
+_DEFAULTS = OperationalLimits()
+MAX_CPUS = _DEFAULTS.max_cpus
+MAX_MEMORY_MB = _DEFAULTS.max_memory_mb
+MAX_AGENT_TIMEOUT_SEC = _DEFAULTS.max_agent_timeout_sec
 
 
 def _make_metadata(**overrides) -> SubmissionMetadata:

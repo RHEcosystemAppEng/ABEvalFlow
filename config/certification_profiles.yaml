@@ -63,6 +63,7 @@ profiles:
         - evaluation_assets
         - advanced_security_validation
         - functional_validation
+        - operational_policy_compliance
     certified:
       checks:
         - enterprise_structure_validation

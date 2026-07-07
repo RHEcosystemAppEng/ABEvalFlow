@@ -24,10 +24,6 @@ from abevalflow.schemas import OperationalLimits, SubmissionMetadata
 
 logger = logging.getLogger(__name__)
 
-MAX_CPUS = 4
-MAX_MEMORY_MB = 8192
-MAX_AGENT_TIMEOUT_SEC = 3600.0
-
 LOGGING_SUPPRESSION_PATTERNS = [
     re.compile(r"\bdo\s+not\s+log\b", re.IGNORECASE),
     re.compile(r"\bdisable\s+logging\b", re.IGNORECASE),
