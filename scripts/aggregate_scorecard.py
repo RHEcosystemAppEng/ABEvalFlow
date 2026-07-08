@@ -379,6 +379,53 @@ def write_scorecard(scorecard: Scorecard, reports_dir: Path) -> Path:
     return output_path
 
 
+def write_certification(scorecard: Scorecard, reports_dir: Path) -> Path | None:
+    """Write standalone certification.json file.
+
+    Creates a separate certification.json alongside scorecard.json for easier
+    consumption by systems that only need certification status.
+
+    Returns:
+        Path to certification.json, or None if no certification data.
+    """
+    if scorecard.certification is None:
+        logger.info("No certification data to write")
+        return None
+
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    output_path = reports_dir / "certification.json"
+
+    cert_data = {
+        "submission_name": scorecard.submission_name,
+        "pipeline_run_id": scorecard.pipeline_run_id,
+        "highest_level": scorecard.highest_certification.value,
+        "levels": {
+            "foundational": {
+                "passed": scorecard.certification.foundational.passed,
+                "checks": [c.model_dump() for c in scorecard.certification.foundational.checks],
+                "failure_reasons": scorecard.certification.foundational.failure_reasons,
+            },
+            "trusted": {
+                "passed": scorecard.certification.trusted.passed,
+                "checks": [c.model_dump() for c in scorecard.certification.trusted.checks],
+                "failure_reasons": scorecard.certification.trusted.failure_reasons,
+            },
+            "certified": {
+                "passed": scorecard.certification.certified.passed,
+                "checks": [c.model_dump() for c in scorecard.certification.certified.checks],
+                "failure_reasons": scorecard.certification.certified.failure_reasons,
+            },
+        },
+        "created_at": scorecard.created_at.isoformat(),
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(cert_data, f, indent=2)
+
+    logger.info("Wrote certification to %s", output_path)
+    return output_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Aggregate gate results into unified scorecard")
     parser.add_argument(
@@ -446,6 +493,7 @@ def main() -> int:
         )
 
         write_scorecard(scorecard, args.reports_dir)
+        write_certification(scorecard, args.reports_dir)
 
         if args.output_tekton_results:
             results_dir = args.output_tekton_results
