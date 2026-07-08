@@ -274,6 +274,83 @@ class TestScaffoldOptionalDirs:
         content = (treatment / "environment" / "Dockerfile").read_text()
         assert "COPY supportive/" not in content
 
+    def test_mcp_json_at_root_copied_only_for_treatment(self, tmp_path: Path):
+        """.mcp.json at submission root is copied only for treatment."""
+        sub = tmp_path / "mcp-skill"
+        sub.mkdir()
+        (sub / "instruction.md").write_text("Do it.\n")
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text("# Skill\n")
+        (sub / "tests").mkdir()
+        (sub / "tests" / "test_outputs.py").write_text("def test(): pass\n")
+        (sub / ".mcp.json").write_text('{"mcpServers": {}}\n')
+        (sub / "metadata.yaml").write_text(yaml.dump({"name": "mcp-skill"}))
+
+        output = tmp_path / "output"
+        treatment, control = scaffold_submission(sub, output, TEMPLATES_DIR)
+        assert (treatment / "environment" / ".mcp.json").is_file()
+        assert not (control / "environment" / ".mcp.json").exists()
+
+    def test_mcp_json_in_supportive_copied_only_for_treatment(self, tmp_path: Path):
+        """.mcp.json in supportive/ (legacy location) is copied only for treatment."""
+        sub = tmp_path / "mcp-skill-legacy"
+        sub.mkdir()
+        (sub / "instruction.md").write_text("Do it.\n")
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text("# Skill\n")
+        (sub / "tests").mkdir()
+        (sub / "tests" / "test_outputs.py").write_text("def test(): pass\n")
+        supportive = sub / "supportive"
+        supportive.mkdir()
+        (supportive / ".mcp.json").write_text('{"mcpServers": {}}\n')
+        (sub / "metadata.yaml").write_text(yaml.dump({"name": "mcp-skill-legacy"}))
+
+        output = tmp_path / "output"
+        treatment, control = scaffold_submission(sub, output, TEMPLATES_DIR)
+        assert (treatment / "environment" / ".mcp.json").is_file()
+        assert not (control / "environment" / ".mcp.json").exists()
+
+    def test_dockerfile_includes_mcp_json_for_treatment(self, tmp_path: Path):
+        """Dockerfile includes COPY .mcp.json when present."""
+        sub = tmp_path / "mcp-skill"
+        sub.mkdir()
+        (sub / "instruction.md").write_text("Do it.\n")
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text("# Skill\n")
+        (sub / "tests").mkdir()
+        (sub / "tests" / "test_outputs.py").write_text("def test(): pass\n")
+        (sub / ".mcp.json").write_text('{"mcpServers": {}}\n')
+        (sub / "metadata.yaml").write_text(yaml.dump({"name": "mcp-skill"}))
+
+        output = tmp_path / "output"
+        treatment, _ = scaffold_submission(sub, output, TEMPLATES_DIR)
+        content = (treatment / "environment" / "Dockerfile").read_text()
+        assert "COPY .mcp.json /workspace/.mcp.json" in content
+
+    def test_dockerfile_excludes_mcp_json_for_control(self, tmp_path: Path):
+        """Dockerfile excludes .mcp.json for control variant."""
+        sub = tmp_path / "mcp-skill"
+        sub.mkdir()
+        (sub / "instruction.md").write_text("Do it.\n")
+        (sub / "skills").mkdir()
+        (sub / "skills" / "SKILL.md").write_text("# Skill\n")
+        (sub / "tests").mkdir()
+        (sub / "tests" / "test_outputs.py").write_text("def test(): pass\n")
+        (sub / ".mcp.json").write_text('{"mcpServers": {}}\n')
+        (sub / "metadata.yaml").write_text(yaml.dump({"name": "mcp-skill"}))
+
+        output = tmp_path / "output"
+        _, control = scaffold_submission(sub, output, TEMPLATES_DIR)
+        content = (control / "environment" / "Dockerfile").read_text()
+        assert "COPY .mcp.json" not in content
+
+    def test_no_mcp_json_in_dockerfile_when_absent(self, valid_submission: Path, tmp_path: Path):
+        """Dockerfile excludes .mcp.json when not present in submission."""
+        output = tmp_path / "output"
+        treatment, _ = scaffold_submission(valid_submission, output, TEMPLATES_DIR)
+        content = (treatment / "environment" / "Dockerfile").read_text()
+        assert "COPY .mcp.json" not in content
+
     def test_test_sh_includes_llm_judge_when_present(self, full_submission: Path, tmp_path: Path):
         output = tmp_path / "output"
         treatment, _ = scaffold_submission(full_submission, output, TEMPLATES_DIR)

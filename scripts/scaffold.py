@@ -52,6 +52,12 @@ def _build_template_context(
     tags = metadata.tags or []
     has_llm_judge = (submission_dir / "tests" / "llm_judge.py").is_file()
 
+    # .mcp.json can be at root or inside supportive/ (legacy location)
+    has_mcp_json = (
+        (submission_dir / ".mcp.json").is_file()
+        or (submission_dir / "supportive" / ".mcp.json").is_file()
+    )
+
     base_context = {
         "submission_name": metadata.name,
         "persona": metadata.persona or "general",
@@ -62,6 +68,7 @@ def _build_template_context(
         "has_supportive": (submission_dir / "supportive").is_dir(),
         "has_scripts": (submission_dir / "scripts").is_dir(),
         "has_claude_md": (submission_dir / "CLAUDE.md").is_file(),
+        "has_mcp_json": has_mcp_json,
         "has_llm_judge": has_llm_judge,
         # These were formerly ad-hoc dict reads from raw metadata; they are
         # not SubmissionMetadata fields (extra="forbid" rejects them), so the
@@ -135,12 +142,19 @@ def _copy_submission_files(
 
     _copy_supportive(submission_dir, build_context_dir, variant)
 
-    # Treatment-only assets: CLAUDE.md, scripts/, docs, and skills are
+    # Treatment-only assets: CLAUDE.md, .mcp.json, scripts/, docs, and skills are
     # skill knowledge that only the treatment variant should receive.
     if variant == "treatment":
         claude_md = submission_dir / "CLAUDE.md"
         if claude_md.is_file():
             shutil.copy2(claude_md, build_context_dir / "CLAUDE.md")
+
+        # .mcp.json: check root first, fall back to supportive/ (legacy location)
+        mcp_json = submission_dir / ".mcp.json"
+        if not mcp_json.is_file():
+            mcp_json = submission_dir / "supportive" / ".mcp.json"
+        if mcp_json.is_file():
+            shutil.copy2(mcp_json, build_context_dir / ".mcp.json")
 
         scripts_src = submission_dir / "scripts"
         if scripts_src.is_dir():
@@ -210,11 +224,12 @@ def scaffold_submission(
             strategy,
         )
         # Control is a vanilla agent: no supportive files, no scripts,
-        # no CLAUDE.md. Only instruction.md and tests are shared.
+        # no CLAUDE.md, no .mcp.json. Only instruction.md and tests are shared.
         if variant == "control":
             context["has_supportive"] = False
             context["has_scripts"] = False
             context["has_claude_md"] = False
+            context["has_mcp_json"] = False
         rendered = _render_templates(jinja_env, context)
 
         target_dir.mkdir(parents=True, exist_ok=True)
