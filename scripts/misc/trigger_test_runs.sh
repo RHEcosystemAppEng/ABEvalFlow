@@ -64,7 +64,7 @@ spec:
     - name: repo-url
       value: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
     - name: revision
-      value: "b63b022"
+      value: "main"
     - name: submission-dir
       value: "a2a-agent-eval"
     - name: eval-engine
@@ -184,7 +184,7 @@ spec:
     - name: repo-url
       value: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
     - name: revision
-      value: "b63b022"
+      value: "main"
     - name: submission-dir
       value: "a2a-agent-eval"
     - name: eval-engine
