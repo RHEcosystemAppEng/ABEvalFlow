@@ -395,26 +395,24 @@ def write_certification(scorecard: Scorecard, reports_dir: Path) -> Path | None:
     reports_dir.mkdir(parents=True, exist_ok=True)
     output_path = reports_dir / "certification.json"
 
+    def _level_data(level_result):
+        failed_checks = [c.check_id.value for c in level_result.checks if not c.passed]
+        return {
+            "passed": level_result.passed,
+            "checks_total": level_result.checks_total,
+            "checks_passed": level_result.checks_passed,
+            "checks": [c.model_dump() for c in level_result.checks],
+            "failed_checks": failed_checks,
+        }
+
     cert_data = {
         "submission_name": scorecard.submission_name,
         "pipeline_run_id": scorecard.pipeline_run_id,
         "highest_level": scorecard.highest_certification.value,
         "levels": {
-            "foundational": {
-                "passed": scorecard.certification.foundational.passed,
-                "checks": [c.model_dump() for c in scorecard.certification.foundational.checks],
-                "failure_reasons": scorecard.certification.foundational.failure_reasons,
-            },
-            "trusted": {
-                "passed": scorecard.certification.trusted.passed,
-                "checks": [c.model_dump() for c in scorecard.certification.trusted.checks],
-                "failure_reasons": scorecard.certification.trusted.failure_reasons,
-            },
-            "certified": {
-                "passed": scorecard.certification.certified.passed,
-                "checks": [c.model_dump() for c in scorecard.certification.certified.checks],
-                "failure_reasons": scorecard.certification.certified.failure_reasons,
-            },
+            "foundational": _level_data(scorecard.certification.foundational),
+            "trusted": _level_data(scorecard.certification.trusted),
+            "certified": _level_data(scorecard.certification.certified),
         },
         "created_at": scorecard.created_at.isoformat(),
     }
