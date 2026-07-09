@@ -583,7 +583,7 @@ def compute_certification(
     )
 
     if operational_policy_result is not None:
-        all_checks.setdefault(CheckId.OPERATIONAL_POLICY_COMPLIANCE, operational_policy_result)
+        all_checks[CheckId.OPERATIONAL_POLICY_COMPLIANCE] = operational_policy_result
     else:
         all_checks.setdefault(
             CheckId.OPERATIONAL_POLICY_COMPLIANCE,
