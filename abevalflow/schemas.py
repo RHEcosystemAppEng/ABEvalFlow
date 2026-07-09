@@ -236,8 +236,8 @@ class ExperimentType(StrEnum):
 class OperationalLimits(BaseModel):
     """Configurable limits for operational policy compliance checks.
 
-    Overrides the hardcoded defaults in operational_policy.py when specified
-    in metadata.yaml under certification_policy.trusted.operational_limits.
+    Defaults for operational policy checks. Can be overridden via
+    certification_policy.operational_limits in metadata.yaml.
     """
 
     max_cpus: int = Field(default=4, gt=0, description="Maximum allowed CPU cores")
@@ -258,10 +258,6 @@ class CertificationLevelPolicy(BaseModel):
               - basic_security_validation
             thresholds:
               basic_execution_validation: 0.5
-          trusted:
-            operational_limits:
-              max_cpus: 8
-              max_memory_mb: 16384
     """
 
     checks: list[str] | None = Field(
@@ -277,13 +273,6 @@ class CertificationLevelPolicy(BaseModel):
         description=(
             "Per-check threshold overrides. Keys are check IDs, values are "
             "score thresholds (0.0-1.0). Overrides hardcoded thresholds."
-        ),
-    )
-    operational_limits: OperationalLimits | None = Field(
-        default=None,
-        description=(
-            "Operational policy limits for resource, timeout, and other checks. "
-            "Overrides hardcoded defaults in operational_policy.py."
         ),
     )
 
@@ -314,6 +303,9 @@ class CertificationPolicy(BaseModel):
 
     Example in metadata.yaml:
         certification_policy:
+          operational_limits:
+            max_cpus: 8
+            max_memory_mb: 16384
           foundational:
             checks:
               - valid_skill_structure
@@ -343,6 +335,14 @@ class CertificationPolicy(BaseModel):
         default=None,
         description="Policy for Certified certification level",
     )
+    operational_limits: OperationalLimits | None = Field(
+        default=None,
+        description=(
+            "Operational policy limits for resource, timeout, and other checks. "
+            "Used by the Trusted-level operational_policy_compliance check. "
+            "Overrides OperationalLimits defaults."
+        ),
+    )
 
     def get_checks_for_level(self, level: str) -> list[str] | None:
         """Get custom check list for a level, or None to use defaults."""
@@ -367,10 +367,8 @@ class CertificationPolicy(BaseModel):
         return result
 
     def get_operational_limits(self) -> OperationalLimits | None:
-        """Get operational limits from the trusted level policy."""
-        if self.trusted is not None:
-            return self.trusted.operational_limits
-        return None
+        """Get operational limits for the operational policy compliance check."""
+        return self.operational_limits
 
 
 class CopySpec(BaseModel):

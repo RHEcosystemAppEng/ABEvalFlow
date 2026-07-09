@@ -347,7 +347,7 @@ class TestCertificationLevelConstants:
         assert CheckId.ADVANCED_SECURITY_VALIDATION in TRUSTED_CHECKS
         assert CheckId.FUNCTIONAL_VALIDATION in TRUSTED_CHECKS
         assert CheckId.INSTRUCTION_QUALITY in TRUSTED_CHECKS
-        # registry_governance and operational_policy_compliance not yet implemented
+        # registry_governance not yet implemented
         assert len(TRUSTED_CHECKS) == 5
 
     def test_certified_has_expected_checks(self) -> None:
