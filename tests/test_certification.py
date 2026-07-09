@@ -1160,9 +1160,7 @@ class TestOperationalPolicyCertificationIntegration:
             operational_policy_result=passing_result,
         )
         assert result.trusted.passed is True
-        op_check = next(
-            c for c in result.trusted.checks if c.check_id == CheckId.OPERATIONAL_POLICY_COMPLIANCE
-        )
+        op_check = next(c for c in result.trusted.checks if c.check_id == CheckId.OPERATIONAL_POLICY_COMPLIANCE)
         assert op_check.passed is True
 
     def test_failing_check_blocks_trusted(self) -> None:
@@ -1206,8 +1204,6 @@ class TestOperationalPolicyCertificationIntegration:
             has_eval_assets=True,
             operational_policy_result=None,
         )
-        op_check = next(
-            c for c in result.trusted.checks if c.check_id == CheckId.OPERATIONAL_POLICY_COMPLIANCE
-        )
+        op_check = next(c for c in result.trusted.checks if c.check_id == CheckId.OPERATIONAL_POLICY_COMPLIANCE)
         assert op_check.passed is False
         assert "not implemented" in op_check.message

@@ -131,13 +131,7 @@ class TestErrorHandling:
 
     def test_bare_except_pass(self, tmp_path: Path):
         test_file = tmp_path / "test_outputs.py"
-        test_file.write_text(
-            "def test_something():\n"
-            "    try:\n"
-            "        result = run()\n"
-            "    except:\n"
-            "        pass\n"
-        )
+        test_file.write_text("def test_something():\n    try:\n        result = run()\n    except:\n        pass\n")
         issues = _check_error_handling(test_file)
         assert len(issues) == 1
         assert "Bare" in issues[0]
@@ -145,11 +139,7 @@ class TestErrorHandling:
     def test_except_exception_pass(self, tmp_path: Path):
         test_file = tmp_path / "test_outputs.py"
         test_file.write_text(
-            "def test_something():\n"
-            "    try:\n"
-            "        result = run()\n"
-            "    except Exception:\n"
-            "        pass\n"
+            "def test_something():\n    try:\n        result = run()\n    except Exception:\n        pass\n"
         )
         issues = _check_error_handling(test_file)
         assert len(issues) == 1
@@ -170,13 +160,7 @@ class TestErrorHandling:
 
     def test_except_ellipsis(self, tmp_path: Path):
         test_file = tmp_path / "test_outputs.py"
-        test_file.write_text(
-            "def test_something():\n"
-            "    try:\n"
-            "        result = run()\n"
-            "    except:\n"
-            "        ...\n"
-        )
+        test_file.write_text("def test_something():\n    try:\n        result = run()\n    except:\n        ...\n")
         issues = _check_error_handling(test_file)
         assert len(issues) == 1
 
