@@ -53,10 +53,7 @@ def _build_template_context(
     has_llm_judge = (submission_dir / "tests" / "llm_judge.py").is_file()
 
     # .mcp.json can be at root or inside supportive/ (legacy location)
-    has_mcp_json = (
-        (submission_dir / ".mcp.json").is_file()
-        or (submission_dir / "supportive" / ".mcp.json").is_file()
-    )
+    has_mcp_json = (submission_dir / ".mcp.json").is_file() or (submission_dir / "supportive" / ".mcp.json").is_file()
 
     base_context = {
         "submission_name": metadata.name,

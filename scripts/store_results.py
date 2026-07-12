@@ -26,10 +26,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from abevalflow.db.engine import get_engine, init_db, make_session
-from abevalflow.db.models import EvaluationRun, MCPCheckerRun, MCPCheckerTask, SecurityScan, Trial
+from abevalflow.db.models import (
+    CertificationRow,
+    EvaluationRun,
+    GateResultRow,
+    MCPCheckerRun,
+    MCPCheckerTask,
+    ScorecardRow,
+    SecurityScan,
+    Trial,
+)
 from abevalflow.db.observer import discover_observers, notify_observers
 from abevalflow.mcpchecker_report import MCPCheckerResult
 from abevalflow.report import AnalysisResult
+from abevalflow.scorecard import Scorecard
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +129,74 @@ def map_security_scans(
             )
         )
     return scans
+
+
+def map_scorecard_to_row(scorecard: Scorecard) -> ScorecardRow:
+    """Flatten a Scorecard Pydantic model into a ScorecardRow."""
+    return ScorecardRow(
+        pipeline_run_id=scorecard.pipeline_run_id,
+        submission_name=scorecard.submission_name,
+        eval_engine=scorecard.eval_engine,
+        recommendation=scorecard.recommendation.value,
+        recommendation_reason=scorecard.recommendation_reason,
+        combination_mode=scorecard.policy.combination.value,
+        gates_passed=scorecard.gates_passed,
+        gates_failed=scorecard.gates_failed,
+        blocking_gates_passed=scorecard.blocking_gates_passed,
+        blocking_gates_failed=scorecard.blocking_gates_failed,
+        highest_certification=scorecard.highest_certification.value,
+        scorecard_json=json.loads(scorecard.model_dump_json()),
+    )
+
+
+def map_gate_results(scorecard: Scorecard, scorecard_row: ScorecardRow) -> list[GateResultRow]:
+    """Create GateResultRow rows from scorecard gates."""
+    rows: list[GateResultRow] = []
+    for gate in scorecard.gates:
+        rows.append(
+            GateResultRow(
+                scorecard=scorecard_row,
+                gate_name=gate.gate_name,
+                gate_type=gate.gate_type.value,
+                policy_key=gate.get_policy_key(),
+                passed=gate.passed,
+                score=gate.score,
+                mode=gate.mode.value,
+                threshold=gate.threshold,
+                findings_count=len(gate.findings),
+                message=gate.message,
+                details_json=gate.details if gate.details else None,
+                evaluated_at=gate.evaluated_at,
+            )
+        )
+    return rows
+
+
+def map_certifications(scorecard: Scorecard, scorecard_row: ScorecardRow) -> list[CertificationRow]:
+    """Create CertificationRow rows from scorecard certification results."""
+    if scorecard.certification is None:
+        return []
+
+    rows: list[CertificationRow] = []
+    for level_result in [
+        scorecard.certification.foundational,
+        scorecard.certification.trusted,
+        scorecard.certification.certified,
+    ]:
+        failed = [c.check_id.value for c in level_result.checks if not c.passed]
+        rows.append(
+            CertificationRow(
+                scorecard=scorecard_row,
+                level=level_result.level.value,
+                passed=level_result.passed,
+                checks_total=level_result.checks_total,
+                checks_passed=level_result.checks_passed,
+                checks_failed=level_result.checks_total - level_result.checks_passed,
+                failed_checks=failed if failed else None,
+                details_json=json.loads(level_result.model_dump_json()),
+            )
+        )
+    return rows
 
 
 def map_mcpchecker_result(result: MCPCheckerResult, run_id: str) -> MCPCheckerRun:
@@ -295,6 +373,25 @@ def store(
                 "Security scans already exist for run %s, skipping",
                 effective_run_id,
             )
+        scorecard_path = report_dir / "scorecard.json"
+        if scorecard_path.exists():
+            try:
+                with session.begin_nested():
+                    scorecard = Scorecard.model_validate_json(scorecard_path.read_bytes())
+                    sc_row = map_scorecard_to_row(scorecard)
+                    gate_rows = map_gate_results(scorecard, sc_row)
+                    cert_rows = map_certifications(scorecard, sc_row)
+                    session.add(sc_row)
+                    session.add_all(gate_rows)
+                    session.add_all(cert_rows)
+                logger.info(
+                    "Scorecard queued: gates=%d certifications=%d",
+                    len(gate_rows),
+                    len(cert_rows),
+                )
+            except Exception:
+                logger.warning("Failed to persist scorecard — continuing without", exc_info=True)
+
         try:
             session.commit()
         except IntegrityError as e:
