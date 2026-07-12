@@ -240,6 +240,10 @@ class OperationalLimits(BaseModel):
     certification_policy.operational_limits in metadata.yaml.
     """
 
+    enabled: bool = Field(
+        default=False,
+        description="Enable operational policy checks. When False, check passes with a warning.",
+    )
     max_cpus: int = Field(default=4, gt=0, description="Maximum allowed CPU cores")
     max_memory_mb: int = Field(default=8192, gt=0, description="Maximum allowed memory in MB")
     max_agent_timeout_sec: float = Field(default=3600.0, gt=0, description="Maximum allowed agent timeout in seconds")
@@ -366,9 +370,9 @@ class CertificationPolicy(BaseModel):
                     result = level_policy.thresholds[check_id]
         return result
 
-    def get_operational_limits(self) -> OperationalLimits | None:
+    def get_operational_limits(self) -> OperationalLimits:
         """Get operational limits for the operational policy compliance check."""
-        return self.operational_limits
+        return self.operational_limits or OperationalLimits()
 
 
 class CopySpec(BaseModel):

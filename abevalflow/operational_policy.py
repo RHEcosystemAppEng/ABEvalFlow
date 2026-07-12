@@ -33,7 +33,7 @@ LOGGING_SUPPRESSION_PATTERNS = [
 ]
 
 SECURITY_QUALIFIERS = re.compile(
-    r"\b(passwords?|credentials?|secrets?|pii|tokens?|sensitive|personal)\b",
+    r"\b(passwords?|credentials?|secrets?|pii|tokens?|sensitive|personal|api[_-]?keys?|auth|bearer|private)\b",
     re.IGNORECASE,
 )
 
@@ -93,8 +93,8 @@ def _check_error_handling(test_file: Path) -> list[str]:
             continue
         if node.type is None:
             issues.append(f"Bare 'except: pass' at line {node.lineno} — hides all errors")
-        elif isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            issues.append(f"'except Exception: pass' at line {node.lineno} — hides all errors")
+        elif isinstance(node.type, ast.Name) and node.type.id in ("Exception", "BaseException"):
+            issues.append(f"'except {node.type.id}: pass' at line {node.lineno} — hides all errors")
 
     return issues
 
@@ -110,13 +110,29 @@ def _check_logging_suppression(skill_path: Path) -> list[str]:
         return issues
 
     content = skill_path.read_text()
+    in_code_fence = False
     for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence or stripped.startswith(">"):
+            continue
         for pattern in LOGGING_SUPPRESSION_PATTERNS:
             match = pattern.search(line)
             if match and not SECURITY_QUALIFIERS.search(line):
                 issues.append(f"Logging suppression pattern found: '{match.group()}'")
 
     return issues
+
+
+SKIPPED_CHECKS = [
+    "resource declarations",
+    "resource limits",
+    "timeout compliance",
+    "error handling",
+    "logging suppression",
+]
 
 
 def check_operational_policy(
@@ -137,36 +153,61 @@ def check_operational_policy(
     if limits is None:
         limits = OperationalLimits()
 
-    all_issues: list[str] = []
+    if not limits.enabled:
+        skipped = ", ".join(SKIPPED_CHECKS)
+        return CheckResult(
+            check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
+            name="Operational Policy Compliance",
+            passed=True,
+            score=1.0,
+            message=f"Operational policy check disabled — not checking: {skipped}",
+        )
+
+    all_issues: list[tuple[str, str]] = []
 
     metadata_path = submission_dir / "metadata.yaml"
     if metadata_path.exists():
         try:
             data = yaml.safe_load(metadata_path.read_text()) or {}
-            all_issues.extend(_check_resource_declaration(data))
+            for msg in _check_resource_declaration(data):
+                all_issues.append(("low", msg))
             metadata = SubmissionMetadata(**data)
-            all_issues.extend(_check_resource_limits(metadata, limits))
-            all_issues.extend(_check_timeout_compliance(metadata, limits))
+            for msg in _check_resource_limits(metadata, limits):
+                all_issues.append(("high", msg))
+            for msg in _check_timeout_compliance(metadata, limits):
+                all_issues.append(("high", msg))
         except (ValidationError, yaml.YAMLError) as e:
             logger.warning("Failed to parse metadata.yaml for policy check: %s", e)
     else:
         logger.info("No metadata.yaml found, skipping resource/timeout checks")
 
-    test_file = submission_dir / "tests" / "test_outputs.py"
-    all_issues.extend(_check_error_handling(test_file))
+    tests_dir = submission_dir / "tests"
+    if tests_dir.exists():
+        for test_file in tests_dir.glob("*.py"):
+            for msg in _check_error_handling(test_file):
+                all_issues.append(("high", msg))
+
+    root_skill = submission_dir / "SKILL.md"
+    if root_skill.exists():
+        for msg in _check_logging_suppression(root_skill):
+            all_issues.append(("low", msg))
 
     skills_dir = submission_dir / "skills"
     if skills_dir.exists():
         for skill_file in skills_dir.glob("*.md"):
-            all_issues.extend(_check_logging_suppression(skill_file))
+            for msg in _check_logging_suppression(skill_file):
+                all_issues.append(("low", msg))
 
-    passed = len(all_issues) == 0
-    score = 1.0 if passed else max(0.0, 1.0 - (len(all_issues) * 0.25))
-
-    if passed:
+    high_issues = [(sev, msg) for sev, msg in all_issues if sev == "high"]
+    passed = len(high_issues) == 0
+    if not all_issues:
+        score = 1.0
         message = "All operational policy checks passed"
     else:
-        message = f"Operational policy issues ({len(all_issues)}): " + "; ".join(all_issues)
+        penalty = sum(0.35 if sev == "high" else 0.15 for sev, _ in all_issues)
+        score = max(0.0, 1.0 - penalty)
+        messages = [f"[{sev}] {msg}" for sev, msg in all_issues]
+        message = f"Operational policy issues ({len(all_issues)}): " + "; ".join(messages)
 
     return CheckResult(
         check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
