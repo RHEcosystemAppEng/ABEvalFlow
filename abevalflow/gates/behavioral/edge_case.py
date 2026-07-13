@@ -48,6 +48,17 @@ class EdgeCaseGate(BehavioralGate):
 
         report_path = reports_dir / "report.json"
         if not report_path.exists():
+            if gate_policy.mode == GateMode.BLOCK:
+                return GateResult(
+                    gate_type=GateType.BEHAVIORAL,
+                    gate_name="behavioral",
+                    policy_key=self.name,
+                    passed=False,
+                    score=0.0,
+                    mode=gate_policy.mode,
+                    message="FAIL: report.json missing (required in block mode)",
+                    details={"status": "not_found"},
+                )
             return GateResult(
                 gate_type=GateType.BEHAVIORAL,
                 gate_name="behavioral",

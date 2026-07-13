@@ -366,6 +366,13 @@ class TestEdgeCaseGate:
         assert result.passed is True
         assert result.gate_type == GateType.BEHAVIORAL
 
+    def test_no_report_block_mode_fails(self, tmp_path: Path) -> None:
+        policy = GatePolicy(gates={"behavioral": GatePolicyItem(mode=GateMode.BLOCK)})
+        gate = EdgeCaseGate()
+        result = gate.evaluate(tmp_path, policy)
+        assert result.passed is False
+        assert result.score == 0.0
+
     def test_disabled_mode(self, tmp_path: Path) -> None:
         policy = GatePolicy(gates={"behavioral": GatePolicyItem(mode=GateMode.DISABLED)})
         gate = EdgeCaseGate()
