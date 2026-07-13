@@ -27,7 +27,8 @@ spec:
               git clone --depth 1 --branch "$REPO_REF" \
                 https://github.com/RHEcosystemAppEng/ABEvalFlow.git /tmp/abevalflow
               cd /tmp/abevalflow
-              pip install --quiet --no-cache-dir -e .
+              pip install --quiet --no-cache-dir uv
+              uv sync --frozen
               alembic upgrade head
               echo "Migration complete (ref: $REPO_REF)"
           env:
