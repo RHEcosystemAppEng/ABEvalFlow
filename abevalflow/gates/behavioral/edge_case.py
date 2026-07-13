@@ -38,7 +38,7 @@ class EdgeCaseGate(BehavioralGate):
         if gate_policy.mode == GateMode.DISABLED:
             return GateResult(
                 gate_type=GateType.BEHAVIORAL,
-                gate_name=self.name,
+                gate_name="behavioral",
                 policy_key=self.name,
                 passed=True,
                 score=1.0,
@@ -50,7 +50,7 @@ class EdgeCaseGate(BehavioralGate):
         if not report_path.exists():
             return GateResult(
                 gate_type=GateType.BEHAVIORAL,
-                gate_name=self.name,
+                gate_name="behavioral",
                 policy_key=self.name,
                 passed=True,
                 score=1.0,
@@ -65,7 +65,7 @@ class EdgeCaseGate(BehavioralGate):
             logger.error("Failed to read report.json: %s", e)
             return GateResult(
                 gate_type=GateType.BEHAVIORAL,
-                gate_name=self.name,
+                gate_name="behavioral",
                 policy_key=self.name,
                 passed=False,
                 score=0.0,
@@ -77,7 +77,7 @@ class EdgeCaseGate(BehavioralGate):
         if not edge_case_results:
             return GateResult(
                 gate_type=GateType.BEHAVIORAL,
-                gate_name=self.name,
+                gate_name="behavioral",
                 policy_key=self.name,
                 passed=True,
                 score=1.0,
@@ -98,7 +98,7 @@ class EdgeCaseGate(BehavioralGate):
 
         return GateResult(
             gate_type=GateType.BEHAVIORAL,
-            gate_name=self.name,
+            gate_name="behavioral",
             policy_key=self.name,
             passed=passed,
             score=score,

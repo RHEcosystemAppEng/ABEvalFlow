@@ -250,6 +250,14 @@ def analyze_edge_cases(
         edge_name = edge_dir.name.removeprefix("tasks-treatment-edge-")
         trials = parse_variant_trials(edge_dir)
         if not trials:
+            logger.warning("Edge case '%s' has no trial output — counted as failure", edge_name)
+            edge_results.append(
+                EdgeCaseResult(
+                    name=edge_name,
+                    summary=VariantSummary(),
+                    passed=False,
+                )
+            )
             continue
         summary = compute_variant_summary(trials)
         mean_r = summary.mean_reward or 0.0

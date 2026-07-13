@@ -312,7 +312,25 @@ class TestCertificationWithBehavioralData:
             ),
         ]
 
-    def test_behavioral_data_enables_certified_check(self) -> None:
+    def test_behavioral_data_produces_passing_check(self) -> None:
+        behavioral_data = {
+            "std_reward": 0.1,
+            "edge_cases": {"total": 3, "passed": 3},
+        }
+        result = _compute_behavioral_testing_check(behavioral_data)
+        assert result.passed is True
+        assert result.check_id == CheckId.ENTERPRISE_BEHAVIORAL_TESTING
+
+    def test_no_behavioral_data_produces_failing_check(self) -> None:
+        result = _compute_behavioral_testing_check({})
+        assert result.passed is False
+
+    def test_behavioral_check_not_in_certified_checks_until_pipeline_wired(self) -> None:
+        from abevalflow.certification import CERTIFIED_CHECKS
+
+        assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING not in CERTIFIED_CHECKS
+
+    def test_behavioral_data_stored_but_not_required_for_certified(self) -> None:
         behavioral_data = {
             "std_reward": 0.1,
             "edge_cases": {"total": 3, "passed": 3},
@@ -324,31 +342,8 @@ class TestCertificationWithBehavioralData:
             has_eval_assets=True,
             behavioral_data=behavioral_data,
         )
-        behavioral_check = next(
-            (c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_BEHAVIORAL_TESTING),
-            None,
-        )
-        assert behavioral_check is not None
-        assert behavioral_check.passed is True
-
-    def test_no_behavioral_data_check_fails(self) -> None:
-        result = compute_certification(
-            gates=self._make_all_gates(),
-            validation_passed=True,
-            metadata_valid=True,
-            has_eval_assets=True,
-        )
-        behavioral_check = next(
-            (c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_BEHAVIORAL_TESTING),
-            None,
-        )
-        assert behavioral_check is not None
-        assert behavioral_check.passed is False
-
-    def test_behavioral_check_in_certified_checks(self) -> None:
-        from abevalflow.certification import CERTIFIED_CHECKS
-
-        assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING in CERTIFIED_CHECKS
+        # Check is computed and stored but doesn't block Certified level
+        assert result.certified.passed is True
 
     def test_backward_compatible_no_behavioral_data(self) -> None:
         result = compute_certification(
@@ -605,6 +600,16 @@ class TestEdgeCaseScaffolding:
 class TestEdgeCaseAnalysis:
     """Tests for edge case analysis in analyze.py."""
 
+    def test_missing_trial_output_counted_as_failure(self, tmp_path: Path) -> None:
+        from scripts.analyze import analyze_edge_cases
+
+        edge_dir = tmp_path / "tasks-treatment-edge-empty_input"
+        edge_dir.mkdir()
+        results = analyze_edge_cases(tmp_path)
+        assert len(results) == 1
+        assert results[0].name == "empty_input"
+        assert results[0].passed is False
+
     def test_edge_case_result_model(self) -> None:
         result = EdgeCaseResult(
             name="empty_input",
@@ -770,7 +775,7 @@ class TestEdgeCaseEndToEnd:
         assert len(analysis.edge_case_results) == 2
         assert all(ec.passed for ec in analysis.edge_case_results)
 
-        # 6. Simulate the unified data path: std_reward from report + edge cases from gate
+        # 6. Verify behavioral check passes with the extracted data
         behavioral_data = {
             "std_reward": analysis.summary.treatment.std_reward,
             "edge_cases": {
@@ -778,40 +783,7 @@ class TestEdgeCaseEndToEnd:
                 "passed": sum(1 for ec in analysis.edge_case_results if ec.passed),
             },
         }
-
-        # 7. Verify certification sees it
-        result = compute_certification(
-            gates=[
-                GateResult(
-                    gate_name="evaluation",
-                    gate_type=GateType.ENGINE,
-                    passed=True,
-                    score=0.9,
-                    mode=GateMode.BLOCK,
-                ),
-                GateResult(
-                    gate_name="security",
-                    gate_type=GateType.SECURITY,
-                    passed=True,
-                    score=1.0,
-                    mode=GateMode.BLOCK,
-                ),
-                GateResult(
-                    gate_name="quality",
-                    gate_type=GateType.QUALITY,
-                    passed=True,
-                    score=0.8,
-                    mode=GateMode.WARN,
-                ),
-            ],
-            validation_passed=True,
-            metadata_valid=True,
-            has_eval_assets=True,
-            behavioral_data=behavioral_data,
-        )
-        behavioral_check = next(
-            c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_BEHAVIORAL_TESTING
-        )
+        behavioral_check = _compute_behavioral_testing_check(behavioral_data)
         assert behavioral_check.passed is True
         assert behavioral_check.score > 0.0
 
