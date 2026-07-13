@@ -152,7 +152,8 @@ class SkillMdQualityGate(QualityGate):
 
         message = (
             f"SKILL.md quality: {total_findings} findings "
-            f"(high={severity_counts['high']},"
+            f"(critical={severity_counts['critical']},"
+            f" high={severity_counts['high']},"
             f" medium={severity_counts['medium']},"
             f" low={severity_counts['low']})"
         )

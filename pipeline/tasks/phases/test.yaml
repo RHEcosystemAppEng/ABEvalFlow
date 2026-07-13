@@ -360,13 +360,8 @@ spec:
         fi
 
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
-        SUBMISSION_NAME="$(params.submission-name)"
         WORKSPACE_ROOT="$(workspaces.source.path)"
         JSON_PATH="$WORKSPACE_ROOT/skillmd-quality-scan.json"
-
-        if [ -d "$SUBMISSION_PATH/skills" ] && [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
-          SUBMISSION_PATH="$SUBMISSION_PATH/skills"
-        fi
 
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         pip install --quiet --no-cache-dir pydantic pyyaml 2>&1 | tail -3

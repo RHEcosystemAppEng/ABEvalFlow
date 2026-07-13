@@ -192,8 +192,16 @@ def check_broken_references(
     display_path = str(file_path.relative_to(relative_to)) if relative_to else str(file_path)
     findings: list[dict] = []
     checked: set[str] = set()
+    in_code_fence = False
 
     for line_num, line in enumerate(content.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence or stripped.startswith(">"):
+            continue
+
         for match in _RELATIVE_LINK_RE.finditer(line):
             ref = match.group(1).strip()
 
@@ -201,6 +209,11 @@ def check_broken_references(
                 continue
             if "$" in ref or "{{" in ref:
                 continue
+
+            ref = ref.split("#")[0]
+            if not ref:
+                continue
+
             if ref in checked:
                 continue
             checked.add(ref)
@@ -448,6 +461,7 @@ def check_circular_references(directory: Path) -> list[dict]:
 
     graph: dict[str, set[str]] = {}
     file_map: dict[str, str] = {}
+    known_names: set[str] = set()
 
     for skill_md in skills_dir.rglob("SKILL.md"):
         skill_name = skill_md.parent.name
@@ -455,12 +469,24 @@ def check_circular_references(directory: Path) -> list[dict]:
             skill_name = "root"
         try:
             content = skill_md.read_text(encoding="utf-8", errors="replace")
+            fm_match = _FRONTMATTER_RE.match(content)
+            if fm_match:
+                try:
+                    fm = yaml.safe_load(fm_match.group(1))
+                    if isinstance(fm, dict) and "name" in fm:
+                        skill_name = fm["name"]
+                except yaml.YAMLError:
+                    pass
+            known_names.add(skill_name)
             body = re.sub(r"^---.*?---\s*", "", content, flags=re.DOTALL)
             refs = _extract_skill_references(body, skill_name)
             graph[skill_name] = refs
             file_map[skill_name] = str(skill_md.relative_to(directory))
         except OSError:
             continue
+
+    for name in graph:
+        graph[name] = graph[name] & known_names
 
     if len(graph) < 2:
         return []

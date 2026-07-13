@@ -102,6 +102,22 @@ class TestBrokenReferences:
         broken = [f for f in check_broken_references(p) if f["rule_id"] == "quality-broken-reference"]
         assert len(broken) == 1
 
+    def test_skips_file_with_fragment(self, tmp_path):
+        (tmp_path / "guide.md").write_text("# Guide")
+        p = tmp_path / "SKILL.md"
+        p.write_text("See [Installation](guide.md#install) for details.")
+        assert len(check_broken_references(p)) == 0
+
+    def test_skips_code_fences(self, tmp_path):
+        p = tmp_path / "SKILL.md"
+        p.write_text("```\nSee [link](nonexistent.md)\n```")
+        assert len(check_broken_references(p)) == 0
+
+    def test_skips_blockquotes(self, tmp_path):
+        p = tmp_path / "SKILL.md"
+        p.write_text("> See [link](nonexistent.md)")
+        assert len(check_broken_references(p)) == 0
+
 
 # ---------------------------------------------------------------------------
 # File completeness tests
@@ -278,6 +294,15 @@ class TestCircularReferences:
     def test_no_skills_dir(self, tmp_path):
         assert len(check_circular_references(tmp_path)) == 0
 
+    def test_uses_frontmatter_name(self, tmp_path):
+        skills = tmp_path / "skills"
+        (skills / "dir-a").mkdir(parents=True)
+        (skills / "dir-b").mkdir(parents=True)
+        (skills / "dir-a" / "SKILL.md").write_text("---\nname: alpha\ndescription: A\n---\n\nThis skill calls /beta.")
+        (skills / "dir-b" / "SKILL.md").write_text("---\nname: beta\ndescription: B\n---\n\nThis skill invokes /alpha.")
+        findings = check_circular_references(tmp_path)
+        assert any(f["rule_id"] == "quality-circular-reference" for f in findings)
+
 
 # ---------------------------------------------------------------------------
 # scan_directory tests
@@ -285,6 +310,10 @@ class TestCircularReferences:
 
 
 class TestScanDirectory:
+    def test_nonexistent_directory(self, tmp_path):
+        result = scan_directory(tmp_path / "does_not_exist")
+        assert result["findings"] == []
+
     def test_aggregates_all_checks(self, tmp_path):
         (tmp_path / "SKILL.md").write_text("---\nname: x\n---\n\nTODO: finish this.")
         (tmp_path / "instruction.md").write_text("# T\n\nDo.")
