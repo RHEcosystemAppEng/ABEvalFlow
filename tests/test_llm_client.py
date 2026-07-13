@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from abevalflow import llm_client
+from abevalflow.llm_client import LLMResult
 
 
 class TestResolveConfig:
@@ -104,3 +105,67 @@ class TestChatCompletion:
         call_kwargs = mock_client.chat.completions.create.call_args
         assert call_kwargs.kwargs["temperature"] == 0.7
         assert call_kwargs.kwargs["max_tokens"] == 2048
+
+
+class TestChatCompletionWithUsage:
+    @patch("abevalflow.llm_client.get_client")
+    def test_returns_llm_result(self, mock_get_client: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello!"
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 50
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = llm_client.chat_completion_with_usage(
+            [{"role": "user", "content": "hi"}],
+            model="test-model",
+        )
+
+        assert isinstance(result, LLMResult)
+        assert result.content == "Hello!"
+        assert result.prompt_tokens == 100
+        assert result.completion_tokens == 50
+        assert result.total_tokens == 150
+        assert result.model == "test-model"
+
+    @patch("abevalflow.llm_client.get_client")
+    def test_handles_no_usage(self, mock_get_client: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello!"
+        mock_response.usage = None
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = llm_client.chat_completion_with_usage(
+            [{"role": "user", "content": "hi"}],
+            model="test-model",
+        )
+
+        assert result.content == "Hello!"
+        assert result.prompt_tokens == 0
+        assert result.completion_tokens == 0
+        assert result.total_tokens == 0
+
+    @patch("abevalflow.llm_client.get_client")
+    def test_backward_compatible_chat_completion(self, mock_get_client: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello!"
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 50
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        result = llm_client.chat_completion(
+            [{"role": "user", "content": "hi"}],
+            model="test-model",
+        )
+
+        assert isinstance(result, str)
+        assert result == "Hello!"

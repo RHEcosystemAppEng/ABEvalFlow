@@ -12,6 +12,7 @@ from abevalflow.db.models import (
     Base,
     EvaluationRun,
     GateResultRow,
+    ObservabilityMetricsRow,
     ScorecardRow,
 )
 from abevalflow.gates.base import GateMode, GateResult, GateType
@@ -260,3 +261,43 @@ class TestStoreWithScorecard:
             )
             with pytest.raises(IntegrityError):
                 session.commit()
+
+    def test_store_with_metrics_checkpoint(self, tmp_path: Path, db_url: str, session_factory) -> None:
+        from abevalflow.observability.context import MetricsContext, TimingRecord
+
+        result = _sample_result()
+        report_dir = _write_report(tmp_path, result)
+        scorecard = _sample_scorecard()
+        _write_scorecard(report_dir, scorecard)
+
+        ctx = MetricsContext(
+            run_id="tekton-run-metrics",
+            submission_name="my-submission",
+            model_name="claude-sonnet",
+        )
+        ctx.record_tokens("quality_review", 500, 200, "claude-sonnet")
+        ctx.timings["pipeline"] = TimingRecord(name="pipeline", start_time=0, end_time=10, duration_ms=10000)
+        ctx.checkpoint(report_dir)
+
+        ok = store(report_dir, db_url, "tekton-run-metrics")
+        assert ok is True
+
+        with session_factory() as session:
+            metrics = session.execute(select(ObservabilityMetricsRow)).scalar_one()
+            assert metrics.submission_name == "my-submission"
+            assert metrics.model_name == "claude-sonnet"
+            assert metrics.total_prompt_tokens == 500
+            assert metrics.total_completion_tokens == 200
+            assert metrics.total_tokens == 700
+            assert metrics.pipeline_duration_ms == 10000
+            assert metrics.llm_calls_count == 1
+
+    def test_store_without_metrics_checkpoint(self, tmp_path: Path, db_url: str, session_factory) -> None:
+        result = _sample_result()
+        report_dir = _write_report(tmp_path, result)
+
+        ok = store(report_dir, db_url, "tekton-run-no-metrics")
+        assert ok is True
+
+        with session_factory() as session:
+            assert session.execute(select(ObservabilityMetricsRow)).scalar_one_or_none() is None

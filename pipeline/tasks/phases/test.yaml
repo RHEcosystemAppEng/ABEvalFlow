@@ -460,17 +460,17 @@ spec:
           echo "Quality review: passed=$PASSED recommendation=$REC"
         fi
 
-    # Step 6: Finalize results
+    # Step 6: Finalize results and write metrics checkpoint
     - name: finalize
       image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         echo "=== TEST PHASE: Finalize ==="
-        
+
         SECURITY_PASSED=$(cat "$(results.security-passed.path)")
         QUALITY_PASSED=$(cat "$(results.quality-passed.path)")
-        
+
         # Overall pass if both passed
         if [ "$SECURITY_PASSED" = "true" ] && [ "$QUALITY_PASSED" = "true" ]; then
           echo -n "true" > "$(results.tests-passed.path)"
@@ -479,3 +479,19 @@ spec:
           echo -n "false" > "$(results.tests-passed.path)"
           echo "Tests FAILED (security=$SECURITY_PASSED, quality=$QUALITY_PASSED)"
         fi
+
+        # Write metrics checkpoint with token data from quality review
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        REVIEW_FILE="$(workspaces.source.path)/_ai_review.json"
+        mkdir -p "$REPORT_DIR"
+
+        pip install --quiet --no-cache-dir pydantic 2>&1 | tail -1
+        export PYTHONPATH="$PIPELINE_DIR"
+
+        python3 "$PIPELINE_DIR/scripts/write_metrics_checkpoint.py" \
+          --run-id "$(params.pipeline-run-name)" \
+          --submission-name "$(params.submission-name)" \
+          --report-dir "$REPORT_DIR" \
+          --review-file "$REVIEW_FILE" \
+          2>&1 || echo "Warning: metrics checkpoint failed (non-blocking)"

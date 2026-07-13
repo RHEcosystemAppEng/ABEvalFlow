@@ -13,10 +13,23 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from openai import OpenAI
+
+
+@dataclass
+class LLMResult:
+    """Chat completion result with token usage."""
+
+    content: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    model: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +58,15 @@ def get_model() -> str:
     return os.environ.get("LLM_MODEL", DEFAULT_MODEL)
 
 
-def chat_completion(
+def chat_completion_with_usage(
     messages: list[dict[str, str]],
     *,
     model: str | None = None,
     temperature: float = 0.3,
     max_tokens: int = 4096,
     **kwargs,
-) -> str:
-    """Send a chat completion request and return the assistant message content.
+) -> LLMResult:
+    """Send a chat completion request and return content with token usage.
 
     Raises on API errors so callers can handle retries at a higher level.
     """
@@ -75,6 +88,38 @@ def chat_completion(
         **kwargs,
     )
 
-    content = response.choices[0].message.content
-    logger.info("chat_completion ← %d chars", len(content) if content else 0)
-    return content or ""
+    content = response.choices[0].message.content or ""
+    usage = response.usage
+    prompt_tokens = usage.prompt_tokens if usage else 0
+    completion_tokens = usage.completion_tokens if usage else 0
+
+    logger.info(
+        "chat_completion ← %d chars, tokens: %d prompt + %d completion",
+        len(content),
+        prompt_tokens,
+        completion_tokens,
+    )
+
+    return LLMResult(
+        content=content,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        model=resolved_model,
+    )
+
+
+def chat_completion(
+    messages: list[dict[str, str]],
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+    **kwargs,
+) -> str:
+    """Send a chat completion request and return the assistant message content.
+
+    For token usage, use ``chat_completion_with_usage()`` instead.
+    """
+    result = chat_completion_with_usage(messages, model=model, temperature=temperature, max_tokens=max_tokens, **kwargs)
+    return result.content
