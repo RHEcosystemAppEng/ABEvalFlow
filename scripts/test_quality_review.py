@@ -390,7 +390,7 @@ def review_submission(submission_dir: Path) -> dict:
             )
         engine = None
 
-    response_text = llm_client.chat_completion(
+    llm_result = llm_client.chat_completion_with_usage(
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -398,6 +398,7 @@ def review_submission(submission_dir: Path) -> dict:
         temperature=0.2,
         max_tokens=4096,
     )
+    response_text = llm_result.content
 
     try:
         assessment = json.loads(response_text)
@@ -410,7 +411,15 @@ def review_submission(submission_dir: Path) -> dict:
         else:
             raise ValueError("LLM review response is not valid JSON")
 
-    return _normalize_assessment(assessment, engine=engine)
+    assessment = _normalize_assessment(assessment, engine=engine)
+    assessment["token_usage"] = {
+        "prompt_tokens": llm_result.prompt_tokens,
+        "completion_tokens": llm_result.completion_tokens,
+        "total_tokens": llm_result.total_tokens,
+        "model": llm_result.model,
+    }
+
+    return assessment
 
 
 def main(argv: list[str] | None = None) -> int:

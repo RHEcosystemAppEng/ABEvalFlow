@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import yaml
 
+from abevalflow.llm_client import LLMResult
 from abevalflow.schemas import SubmissionMetadata
 from scripts.test_quality_review import (
     _advisory_aeh_missing_files,
@@ -94,8 +95,14 @@ class TestReviewSubmissionAeh:
         }
         payload = __import__("json").dumps(fake)
         with patch(
-            "scripts.test_quality_review.llm_client.chat_completion",
-            return_value=payload,
+            "scripts.test_quality_review.llm_client.chat_completion_with_usage",
+            return_value=LLMResult(
+                content=payload,
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+                model="test",
+            ),
         ):
             assessment = review_submission(sub)
         assert assessment["engine"] == "aeh"

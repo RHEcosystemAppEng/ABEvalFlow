@@ -32,12 +32,14 @@ from abevalflow.db.models import (
     GateResultRow,
     MCPCheckerRun,
     MCPCheckerTask,
+    ObservabilityMetricsRow,
     ScorecardRow,
     SecurityScan,
     Trial,
 )
 from abevalflow.db.observer import discover_observers, notify_observers
 from abevalflow.mcpchecker_report import MCPCheckerResult
+from abevalflow.observability.context import MetricsContext
 from abevalflow.report import AnalysisResult
 from abevalflow.scorecard import Scorecard
 
@@ -347,6 +349,8 @@ def store(
         ).scalar_one_or_none()
 
         if existing is not None:
+            # Note: early return skips scorecard/metrics persistence for
+            # pre-existing runs. Backfill via scripts/backfill_scorecards.py.
             logger.warning(
                 "Run %s already exists (id=%s) — skipping",
                 effective_run_id,
@@ -391,6 +395,20 @@ def store(
                 )
             except Exception:
                 logger.warning("Failed to persist scorecard — continuing without", exc_info=True)
+
+        metrics_ctx = MetricsContext.load_checkpoint(report_dir)
+        if metrics_ctx and metrics_ctx.total_tokens > 0:
+            try:
+                with session.begin_nested():
+                    session.add(
+                        ObservabilityMetricsRow(
+                            pipeline_run_id=effective_run_id,
+                            **metrics_ctx.to_observability_dict(),
+                        )
+                    )
+                logger.info("Observability metrics queued: tokens=%s", metrics_ctx.total_tokens)
+            except Exception:
+                logger.warning("Failed to persist observability metrics — continuing without", exc_info=True)
 
         try:
             session.commit()
