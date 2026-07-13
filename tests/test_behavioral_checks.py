@@ -81,23 +81,29 @@ class TestStabilityCheck:
     """Tests for _check_stability() — score drift detection."""
 
     def test_stable_scores_pass(self) -> None:
-        result = _check_stability({
-            "stability": {"score_variance": 0.01, "run_count": 5},
-        })
+        result = _check_stability(
+            {
+                "stability": {"score_variance": 0.01, "run_count": 5},
+            }
+        )
         assert result.passed is True
         assert result.score > 0.5
 
     def test_drifting_scores_fail(self) -> None:
-        result = _check_stability({
-            "stability": {"score_variance": 0.2, "run_count": 5},
-        })
+        result = _check_stability(
+            {
+                "stability": {"score_variance": 0.2, "run_count": 5},
+            }
+        )
         assert result.passed is False
         assert result.score < 0.5
 
     def test_insufficient_history_passes(self) -> None:
-        result = _check_stability({
-            "stability": {"score_variance": 0.0, "run_count": 2},
-        })
+        result = _check_stability(
+            {
+                "stability": {"score_variance": 0.0, "run_count": 2},
+            }
+        )
         assert result.passed is True
         assert "Insufficient history" in result.message
 
@@ -111,9 +117,11 @@ class TestStabilityCheck:
         assert result.passed is True
 
     def test_at_threshold_score_is_half(self) -> None:
-        result = _check_stability({
-            "stability": {"score_variance": 0.1, "run_count": 5},
-        })
+        result = _check_stability(
+            {
+                "stability": {"score_variance": 0.1, "run_count": 5},
+            }
+        )
         assert result.passed is True
         assert result.score == pytest.approx(0.5)
 
@@ -122,9 +130,11 @@ class TestStabilityCheck:
         assert result.details["status"] == "no_data"
 
     def test_insufficient_history_has_status_sentinel(self) -> None:
-        result = _check_stability({
-            "stability": {"score_variance": 0.0, "run_count": 1},
-        })
+        result = _check_stability(
+            {
+                "stability": {"score_variance": 0.0, "run_count": 1},
+            }
+        )
         assert result.details["status"] == "no_data"
 
 
@@ -132,30 +142,38 @@ class TestEdgeCaseCheck:
     """Tests for _check_edge_case_results() — edge case pass rate."""
 
     def test_all_passed(self) -> None:
-        result = _check_edge_case_results({
-            "edge_cases": {"total": 3, "passed": 3},
-        })
+        result = _check_edge_case_results(
+            {
+                "edge_cases": {"total": 3, "passed": 3},
+            }
+        )
         assert result.passed is True
         assert result.score == 1.0
 
     def test_some_failed(self) -> None:
-        result = _check_edge_case_results({
-            "edge_cases": {"total": 4, "passed": 1},
-        })
+        result = _check_edge_case_results(
+            {
+                "edge_cases": {"total": 4, "passed": 1},
+            }
+        )
         assert result.passed is False
         assert result.score == 0.25
 
     def test_all_failed(self) -> None:
-        result = _check_edge_case_results({
-            "edge_cases": {"total": 3, "passed": 0},
-        })
+        result = _check_edge_case_results(
+            {
+                "edge_cases": {"total": 3, "passed": 0},
+            }
+        )
         assert result.passed is False
         assert result.score == 0.0
 
     def test_no_edge_cases_defined(self) -> None:
-        result = _check_edge_case_results({
-            "edge_cases": {"total": 0, "passed": 0},
-        })
+        result = _check_edge_case_results(
+            {
+                "edge_cases": {"total": 0, "passed": 0},
+            }
+        )
         assert result.passed is True
         assert result.score == 1.0
 
@@ -165,9 +183,11 @@ class TestEdgeCaseCheck:
         assert result.score == 1.0
 
     def test_details_contain_counts(self) -> None:
-        result = _check_edge_case_results({
-            "edge_cases": {"total": 5, "passed": 3},
-        })
+        result = _check_edge_case_results(
+            {
+                "edge_cases": {"total": 5, "passed": 3},
+            }
+        )
         assert result.details["total"] == 5
         assert result.details["passed"] == 3
         assert result.details["pass_rate"] == 0.6
@@ -177,16 +197,20 @@ class TestFailureModeCheck:
     """Tests for _check_failure_mode() — failure handling scores."""
 
     def test_good_score_passes(self) -> None:
-        result = _check_failure_mode({
-            "failure_mode": {"score": 0.8, "threshold": 0.5},
-        })
+        result = _check_failure_mode(
+            {
+                "failure_mode": {"score": 0.8, "threshold": 0.5},
+            }
+        )
         assert result.passed is True
         assert result.score == 0.8
 
     def test_low_score_fails(self) -> None:
-        result = _check_failure_mode({
-            "failure_mode": {"score": 0.3, "threshold": 0.5},
-        })
+        result = _check_failure_mode(
+            {
+                "failure_mode": {"score": 0.3, "threshold": 0.5},
+            }
+        )
         assert result.passed is False
         assert result.score == 0.3
 
@@ -323,6 +347,7 @@ class TestCertificationWithBehavioralData:
 
     def test_behavioral_check_in_certified_checks(self) -> None:
         from abevalflow.certification import CERTIFIED_CHECKS
+
         assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING in CERTIFIED_CHECKS
 
     def test_backward_compatible_no_behavioral_data(self) -> None:
@@ -413,11 +438,13 @@ class TestEdgeCaseValidation:
 
     def test_no_edge_cases_dir_passes(self, tmp_path: Path) -> None:
         from scripts.validate import _check_edge_cases
+
         errors = _check_edge_cases(tmp_path)
         assert errors == []
 
     def test_valid_edge_cases(self, tmp_path: Path) -> None:
         from scripts.validate import _check_edge_cases
+
         edge_dir = tmp_path / "edge_cases"
         edge_dir.mkdir()
         (edge_dir / "empty_input.md").write_text("Test with empty input")
@@ -427,6 +454,7 @@ class TestEdgeCaseValidation:
 
     def test_empty_md_file(self, tmp_path: Path) -> None:
         from scripts.validate import _check_edge_cases
+
         edge_dir = tmp_path / "edge_cases"
         edge_dir.mkdir()
         (edge_dir / "empty_input.md").write_text("")
@@ -436,6 +464,7 @@ class TestEdgeCaseValidation:
 
     def test_non_md_files(self, tmp_path: Path) -> None:
         from scripts.validate import _check_edge_cases
+
         edge_dir = tmp_path / "edge_cases"
         edge_dir.mkdir()
         (edge_dir / "valid.md").write_text("Valid content")
@@ -445,6 +474,7 @@ class TestEdgeCaseValidation:
 
     def test_empty_dir(self, tmp_path: Path) -> None:
         from scripts.validate import _check_edge_cases
+
         edge_dir = tmp_path / "edge_cases"
         edge_dir.mkdir()
         errors = _check_edge_cases(tmp_path)
@@ -456,6 +486,7 @@ class TestExtractBehavioralData:
 
     def test_extracts_std_reward(self, tmp_path: Path) -> None:
         from scripts.aggregate_scorecard import _extract_behavioral_data
+
         report = {"summary": {"treatment": {"std_reward": 0.15}}}
         (tmp_path / "report.json").write_text(json.dumps(report))
         data = _extract_behavioral_data(tmp_path, gates=[])
@@ -464,6 +495,7 @@ class TestExtractBehavioralData:
 
     def test_extracts_edge_cases_from_gate(self, tmp_path: Path) -> None:
         from scripts.aggregate_scorecard import _extract_behavioral_data
+
         gate = GateResult(
             gate_type=GateType.BEHAVIORAL,
             gate_name="edge-case",
@@ -477,6 +509,7 @@ class TestExtractBehavioralData:
 
     def test_returns_none_for_empty_report(self, tmp_path: Path) -> None:
         from scripts.aggregate_scorecard import _extract_behavioral_data
+
         report = {"summary": {"treatment": {}}}
         (tmp_path / "report.json").write_text(json.dumps(report))
         data = _extract_behavioral_data(tmp_path, gates=[])
@@ -484,11 +517,13 @@ class TestExtractBehavioralData:
 
     def test_returns_none_when_no_report_and_no_gates(self, tmp_path: Path) -> None:
         from scripts.aggregate_scorecard import _extract_behavioral_data
+
         data = _extract_behavioral_data(tmp_path, gates=[])
         assert data is None
 
     def test_combines_std_reward_and_gate_edge_cases(self, tmp_path: Path) -> None:
         from scripts.aggregate_scorecard import _extract_behavioral_data
+
         report = {"summary": {"treatment": {"std_reward": 0.2}}}
         (tmp_path / "report.json").write_text(json.dumps(report))
         gate = GateResult(
@@ -527,6 +562,7 @@ class TestEdgeCaseScaffolding:
 
     def test_edge_case_dirs_created(self, tmp_path: Path) -> None:
         from scripts.scaffold import scaffold_submission
+
         sub = self._make_submission(tmp_path)
         output = tmp_path / "output"
         scaffold_submission(sub, output)
@@ -536,6 +572,7 @@ class TestEdgeCaseScaffolding:
 
     def test_edge_case_uses_alternative_instruction(self, tmp_path: Path) -> None:
         from scripts.scaffold import scaffold_submission
+
         sub = self._make_submission(tmp_path)
         output = tmp_path / "output"
         scaffold_submission(sub, output)
@@ -546,6 +583,7 @@ class TestEdgeCaseScaffolding:
 
     def test_no_edge_cases_no_extra_dirs(self, tmp_path: Path) -> None:
         from scripts.scaffold import scaffold_submission
+
         sub = tmp_path / "no-edge"
         sub.mkdir()
         (sub / "metadata.yaml").write_text("name: no-edge\n")
@@ -583,21 +621,33 @@ class TestEdgeCaseAnalysis:
         results = tmp_path / "results"
         treatment = results / "treatment" / "job" / "task__001"
         treatment.mkdir(parents=True)
-        (treatment / "result.json").write_text(json.dumps({
-            "verifier_result": {"reward": 0.8},
-        }))
+        (treatment / "result.json").write_text(
+            json.dumps(
+                {
+                    "verifier_result": {"reward": 0.8},
+                }
+            )
+        )
         control = results / "control" / "job" / "task__001"
         control.mkdir(parents=True)
-        (control / "result.json").write_text(json.dumps({
-            "verifier_result": {"reward": 0.3},
-        }))
+        (control / "result.json").write_text(
+            json.dumps(
+                {
+                    "verifier_result": {"reward": 0.3},
+                }
+            )
+        )
 
         edge_root = tmp_path / "edge_results"
         edge_dir = edge_root / "tasks-treatment-edge-empty_input" / "job" / "task__001"
         edge_dir.mkdir(parents=True)
-        (edge_dir / "result.json").write_text(json.dumps({
-            "verifier_result": {"reward": 0.6},
-        }))
+        (edge_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "verifier_result": {"reward": 0.6},
+                }
+            )
+        )
 
         result = build_analysis(
             results_dir=results,
@@ -614,14 +664,22 @@ class TestEdgeCaseAnalysis:
         results = tmp_path / "results"
         treatment = results / "treatment" / "job" / "task__001"
         treatment.mkdir(parents=True)
-        (treatment / "result.json").write_text(json.dumps({
-            "verifier_result": {"reward": 0.8},
-        }))
+        (treatment / "result.json").write_text(
+            json.dumps(
+                {
+                    "verifier_result": {"reward": 0.8},
+                }
+            )
+        )
         control = results / "control" / "job" / "task__001"
         control.mkdir(parents=True)
-        (control / "result.json").write_text(json.dumps({
-            "verifier_result": {"reward": 0.3},
-        }))
+        (control / "result.json").write_text(
+            json.dumps(
+                {
+                    "verifier_result": {"reward": 0.3},
+                }
+            )
+        )
 
         result = build_analysis(
             results_dir=results,
@@ -682,18 +740,26 @@ class TestEdgeCaseEndToEnd:
             for i, reward in enumerate([0.8, 0.85] if variant == "treatment" else [0.3, 0.35]):
                 trial_dir = results / variant / "job" / f"task__{i:03d}"
                 trial_dir.mkdir(parents=True)
-                (trial_dir / "result.json").write_text(json.dumps({
-                    "verifier_result": {"reward": reward},
-                }))
+                (trial_dir / "result.json").write_text(
+                    json.dumps(
+                        {
+                            "verifier_result": {"reward": reward},
+                        }
+                    )
+                )
 
         # 4. Create mock results for edge cases
         edge_results = tmp_path / "edge_results"
         for edge_name, reward in [("adversarial", 0.7), ("empty_input", 0.6)]:
             trial_dir = edge_results / f"tasks-treatment-edge-{edge_name}" / "job" / "task__001"
             trial_dir.mkdir(parents=True)
-            (trial_dir / "result.json").write_text(json.dumps({
-                "verifier_result": {"reward": reward},
-            }))
+            (trial_dir / "result.json").write_text(
+                json.dumps(
+                    {
+                        "verifier_result": {"reward": reward},
+                    }
+                )
+            )
 
         # 5. Analyze with edge case results
         analysis = build_analysis(
@@ -716,9 +782,27 @@ class TestEdgeCaseEndToEnd:
         # 7. Verify certification sees it
         result = compute_certification(
             gates=[
-                GateResult(gate_name="evaluation", gate_type=GateType.ENGINE, passed=True, score=0.9, mode=GateMode.BLOCK),
-                GateResult(gate_name="security", gate_type=GateType.SECURITY, passed=True, score=1.0, mode=GateMode.BLOCK),
-                GateResult(gate_name="quality", gate_type=GateType.QUALITY, passed=True, score=0.8, mode=GateMode.WARN),
+                GateResult(
+                    gate_name="evaluation",
+                    gate_type=GateType.ENGINE,
+                    passed=True,
+                    score=0.9,
+                    mode=GateMode.BLOCK,
+                ),
+                GateResult(
+                    gate_name="security",
+                    gate_type=GateType.SECURITY,
+                    passed=True,
+                    score=1.0,
+                    mode=GateMode.BLOCK,
+                ),
+                GateResult(
+                    gate_name="quality",
+                    gate_type=GateType.QUALITY,
+                    passed=True,
+                    score=0.8,
+                    mode=GateMode.WARN,
+                ),
             ],
             validation_passed=True,
             metadata_valid=True,
@@ -737,6 +821,7 @@ class TestBehavioralGateRegistry:
 
     def test_edge_case_gate_registered(self) -> None:
         from abevalflow.gates.behavioral import get_all_behavioral_gates, get_behavioral_gate
+
         gate = get_behavioral_gate("edge-case")
         assert isinstance(gate, EdgeCaseGate)
 
@@ -746,6 +831,7 @@ class TestBehavioralGateRegistry:
 
     def test_unknown_gate_raises(self) -> None:
         from abevalflow.gates.behavioral import get_behavioral_gate
+
         with pytest.raises(KeyError, match="Unknown behavioral gate"):
             get_behavioral_gate("nonexistent")
 

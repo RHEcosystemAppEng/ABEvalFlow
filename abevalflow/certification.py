@@ -589,8 +589,7 @@ def _compute_behavioral_testing_check(
             passed=False,
             score=final_score,
             message=(
-                f"Insufficient behavioral coverage: {n_active} sub-check(s) "
-                f"with data, need at least {min_required}"
+                f"Insufficient behavioral coverage: {n_active} sub-check(s) with data, need at least {min_required}"
             ),
             details={"sub_checks": sub_results, "weights": BEHAVIORAL_SUB_CHECK_WEIGHTS},
         )
@@ -603,10 +602,7 @@ def _compute_behavioral_testing_check(
     if passed:
         message = f"Behavioral testing passed ({n_active} sub-checks, score {final_score:.2f})"
     else:
-        message = (
-            f"Behavioral testing failed: "
-            f"failed sub-checks: {', '.join(failed_checks)}"
-        )
+        message = f"Behavioral testing failed: failed sub-checks: {', '.join(failed_checks)}"
 
     return CheckResult(
         check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
@@ -908,9 +904,7 @@ def compute_certification(
         )
 
     if behavioral_data is not None:
-        all_checks[CheckId.ENTERPRISE_BEHAVIORAL_TESTING] = _compute_behavioral_testing_check(
-            behavioral_data
-        )
+        all_checks[CheckId.ENTERPRISE_BEHAVIORAL_TESTING] = _compute_behavioral_testing_check(behavioral_data)
     else:
         all_checks.setdefault(
             CheckId.ENTERPRISE_BEHAVIORAL_TESTING,

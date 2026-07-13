@@ -18,7 +18,8 @@ import json
 import logging
 import sys
 from dataclasses import asdict, dataclass
-from statistics import mean, variance as stat_variance
+from statistics import mean
+from statistics import variance as stat_variance
 from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, select

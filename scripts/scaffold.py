@@ -317,9 +317,7 @@ def scaffold_submission(
 
         logger.info("Scaffolded %s variant at %s", variant, target_dir)
 
-    edge_case_dirs = _scaffold_edge_cases(
-        submission_dir, output_dir, metadata, strategy, jinja_env
-    )
+    edge_case_dirs = _scaffold_edge_cases(submission_dir, output_dir, metadata, strategy, jinja_env)
     if edge_case_dirs:
         logger.info("Scaffolded %d edge case(s)", len(edge_case_dirs))
 

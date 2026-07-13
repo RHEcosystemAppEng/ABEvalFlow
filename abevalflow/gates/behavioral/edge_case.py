@@ -104,10 +104,7 @@ class EdgeCaseGate(BehavioralGate):
             score=score,
             mode=gate_policy.mode,
             threshold=threshold,
-            message=(
-                f"Edge cases: {passed_count}/{total} passed "
-                f"(score {score:.2f}, threshold {threshold})"
-            ),
+            message=(f"Edge cases: {passed_count}/{total} passed (score {score:.2f}, threshold {threshold})"),
             details={
                 "total": total,
                 "passed": passed_count,
