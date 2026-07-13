@@ -129,6 +129,34 @@ def _check_supportive_size(submission_dir: Path) -> list[str]:
     return []
 
 
+def _check_edge_cases(submission_dir: Path) -> list[str]:
+    """Validate optional edge_cases/ directory structure.
+
+    Each file must be a non-empty .md file with a descriptive name.
+    The directory is optional — submissions without it pass validation.
+    """
+    edge_cases_dir = submission_dir / "edge_cases"
+    if not edge_cases_dir.is_dir():
+        return []
+
+    errors: list[str] = []
+    md_files = list(edge_cases_dir.glob("*.md"))
+
+    if not md_files:
+        errors.append("edge_cases/ directory exists but contains no .md files")
+        return errors
+
+    for md_file in sorted(md_files):
+        if not md_file.read_text().strip():
+            errors.append(f"edge_cases/{md_file.name} is empty")
+
+    non_md = [f.name for f in edge_cases_dir.iterdir() if f.is_file() and f.suffix != ".md"]
+    if non_md:
+        errors.append(f"edge_cases/ contains non-.md files: {', '.join(non_md)}")
+
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # ASE-specific checks
 # ---------------------------------------------------------------------------
@@ -332,6 +360,7 @@ def validate_submission(
         llm_judge = submission_dir / "tests" / "llm_judge.py"
         if llm_judge.is_file():
             errors.extend(_check_py_compiles(llm_judge))
+        errors.extend(_check_edge_cases(submission_dir))
 
     if run_ase:
         errors.extend(_check_skill_md_frontmatter(submission_dir))

@@ -42,7 +42,8 @@ from abevalflow.compass_facts import (
     validate_push_facts_config,
 )
 from abevalflow.engines import get_engine
-from abevalflow.gates.base import GateResult
+from abevalflow.gates.base import GateResult, GateType
+from abevalflow.gates.behavioral import get_all_behavioral_gates
 from abevalflow.gates.quality import get_all_quality_gates
 from abevalflow.gates.security import get_all_security_gates
 from abevalflow.operational_policy import check_operational_policy
@@ -186,6 +187,53 @@ def _maybe_push_fact(gate_result: GateResult, policy: GatePolicy) -> FactPushRes
         )
 
 
+def _extract_behavioral_data(
+    reports_dir: Path,
+    gates: list[GateResult],
+) -> dict | None:
+    """Extract behavioral testing data for certification.
+
+    Assembles behavioral_data from two sources:
+    - std_reward: read from report.json (trial variance for consistency check)
+    - edge_cases: extracted from the EdgeCaseGate result in gates list
+      (single source of truth — avoids re-reading report.json)
+
+    Stability and failure_mode sub-check data are not extracted here because
+    no pipeline component currently produces them. The sub-check functions
+    in certification.py are ready and will activate when upstream producers
+    exist.
+    TODO: Add stability extraction here once get_historical_variance()
+    in monitor.py is wired into the pipeline.
+    TODO: Add failure_mode extraction here once LLM judge trial details include
+    criteria_scores (failure_handling, uncertainty_acknowledgment) in report.json.
+    """
+    behavioral_data: dict = {}
+
+    # Extract trial variance from report.json
+    report_path = reports_dir / "report.json"
+    if report_path.exists():
+        try:
+            report_data = json.loads(report_path.read_text())
+            summary = report_data.get("summary", {})
+            treatment = summary.get("treatment", {})
+            std_reward = treatment.get("std_reward")
+            if std_reward is not None:
+                behavioral_data["std_reward"] = std_reward
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to parse report.json for behavioral data: %s", e)
+
+    # Extract edge case counts from the EdgeCaseGate result
+    for gate in gates:
+        if gate.gate_type == GateType.BEHAVIORAL and gate.details.get("total") is not None:
+            behavioral_data["edge_cases"] = {
+                "total": gate.details["total"],
+                "passed": gate.details.get("passed", 0),
+            }
+            break
+
+    return behavioral_data if behavioral_data else None
+
+
 def aggregate_scorecard(
     submission_dir: Path,
     results_dir: Path,
@@ -281,6 +329,24 @@ def aggregate_scorecard(
             fact_push_results.append(push_result)
         logger.info("Quality %s: passed=%s, score=%.3f", quality_gate.name, gate_result.passed, gate_result.score)
 
+    for behavioral_gate in get_all_behavioral_gates():
+        if not policy.is_enabled(behavioral_gate.name):
+            logger.info("Behavioral gate %s is disabled, skipping", behavioral_gate.name)
+            continue
+
+        logger.info("Processing behavioral gate: %s", behavioral_gate.name)
+        gate_result = behavioral_gate.evaluate(reports_dir, policy)
+        gates.append(gate_result)
+        push_result = _maybe_push_fact(gate_result, policy)
+        if push_result:
+            fact_push_results.append(push_result)
+        logger.info(
+            "Behavioral %s: passed=%s, score=%.3f",
+            behavioral_gate.name,
+            gate_result.passed,
+            gate_result.score,
+        )
+
     recommendation, reason = apply_combination_logic(gates, policy)
     logger.info("Final recommendation: %s (%s)", recommendation, reason)
 
@@ -324,6 +390,9 @@ def aggregate_scorecard(
         operational_policy_result.score,
     )
 
+    # Extract behavioral data from report + gate results
+    behavioral_data = _extract_behavioral_data(reports_dir, gates)
+
     certification = compute_certification(
         gates=gates,
         validation_passed=validation_passed,
@@ -331,6 +400,7 @@ def aggregate_scorecard(
         has_eval_assets=has_eval_assets,
         policy=certification_policy,
         operational_policy_result=operational_policy_result,
+        behavioral_data=behavioral_data,
     )
     logger.info(
         "Certification levels: foundational=%s, trusted=%s, certified=%s (highest=%s)",

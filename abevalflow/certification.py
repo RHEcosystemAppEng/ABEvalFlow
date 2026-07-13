@@ -94,7 +94,7 @@ TRUSTED_CHECKS = [
 CERTIFIED_CHECKS = [
     CheckId.ENTERPRISE_STRUCTURE_VALIDATION,
     CheckId.ENTERPRISE_SECURITY_REVIEW,
-    # CheckId.ENTERPRISE_BEHAVIORAL_TESTING,  # Not yet implemented
+    CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
     CheckId.ADVANCED_AGENT_VALIDATION,
     # CheckId.CONTINUOUS_OPTIMIZATION,  # Not yet implemented
 ]
@@ -314,7 +314,308 @@ DEFAULT_THRESHOLDS: dict[CheckId, float] = {
     CheckId.ADVANCED_AGENT_VALIDATION: 0.8,
     CheckId.ADVANCED_SECURITY_VALIDATION: 0.9,
     CheckId.INSTRUCTION_QUALITY: 0.7,
+    CheckId.ENTERPRISE_BEHAVIORAL_TESTING: 0.6,
 }
+
+BEHAVIORAL_SUB_CHECK_WEIGHTS = {
+    "consistency": 0.3,
+    "edge_case": 0.3,
+    "stability": 0.2,
+    "failure_mode": 0.2,
+}
+
+DEFAULT_CONSISTENCY_THRESHOLD = 0.3
+DEFAULT_STABILITY_VARIANCE_THRESHOLD = 0.1
+DEFAULT_EDGE_CASE_PASS_THRESHOLD = 0.5
+DEFAULT_FAILURE_MODE_THRESHOLD = 0.5
+
+
+def _check_consistency(
+    behavioral_data: dict[str, Any],
+    threshold: float = DEFAULT_CONSISTENCY_THRESHOLD,
+) -> CheckResult:
+    """Check trial variance for inconsistent behavior.
+
+    Skills with high trial variance (std_reward > threshold) are flagged.
+    Data comes from the existing evaluation run — no new pipeline steps needed.
+    """
+    std_reward = behavioral_data.get("std_reward")
+
+    if std_reward is None:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Consistency Check",
+            passed=True,
+            score=1.0,
+            message="No variance data available (single trial or missing data)",
+            details={"sub_check": "consistency", "status": "no_data"},
+        )
+
+    passed = std_reward <= threshold
+    score = min(1.0, max(0.0, 1.0 - 0.5 * (std_reward / threshold)))
+
+    return CheckResult(
+        check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+        name="Consistency Check",
+        passed=passed,
+        score=score,
+        message=(
+            f"Trial variance {std_reward:.3f} within threshold {threshold}"
+            if passed
+            else f"Inconsistent behavior: trial variance {std_reward:.3f} exceeds threshold {threshold}"
+        ),
+        details={"sub_check": "consistency", "std_reward": std_reward, "threshold": threshold},
+    )
+
+
+def _check_stability(
+    behavioral_data: dict[str, Any],
+    variance_threshold: float = DEFAULT_STABILITY_VARIANCE_THRESHOLD,
+) -> CheckResult:
+    """Check score drift across consecutive monitoring runs.
+
+    Passes if score variance across the last N runs is below the threshold.
+    Skips gracefully when insufficient historical data exists.
+    """
+    stability_data = behavioral_data.get("stability")
+
+    if stability_data is None:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Stability Check",
+            passed=True,
+            score=1.0,
+            message="No stability data available",
+            details={"sub_check": "stability", "status": "no_data"},
+        )
+
+    run_count = stability_data.get("run_count", 0)
+    if run_count < 3:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Stability Check",
+            passed=True,
+            score=1.0,
+            message=f"Insufficient history ({run_count} runs, need at least 3)",
+            details={"sub_check": "stability", "status": "no_data", "run_count": run_count},
+        )
+
+    variance = stability_data.get("score_variance", 0.0)
+    passed = variance <= variance_threshold
+    score = min(1.0, max(0.0, 1.0 - 0.5 * (variance / variance_threshold)))
+
+    return CheckResult(
+        check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+        name="Stability Check",
+        passed=passed,
+        score=score,
+        message=(
+            f"Score variance {variance:.4f} within threshold {variance_threshold}"
+            if passed
+            else f"Score drift detected: variance {variance:.4f} exceeds threshold {variance_threshold}"
+        ),
+        details={
+            "sub_check": "stability",
+            "score_variance": variance,
+            "threshold": variance_threshold,
+            "run_count": run_count,
+        },
+    )
+
+
+def _check_edge_case_results(
+    behavioral_data: dict[str, Any],
+    pass_threshold: float = DEFAULT_EDGE_CASE_PASS_THRESHOLD,
+) -> CheckResult:
+    """Check edge case pass rate.
+
+    Score = fraction of edge cases where the agent still passes verification.
+    """
+    edge_case_data = behavioral_data.get("edge_cases")
+
+    if edge_case_data is None:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Edge Case Check",
+            passed=True,
+            score=1.0,
+            message="No edge case data available",
+            details={"sub_check": "edge_case", "status": "no_data"},
+        )
+
+    total = edge_case_data.get("total", 0)
+    passed_count = edge_case_data.get("passed", 0)
+
+    if total == 0:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Edge Case Check",
+            passed=True,
+            score=1.0,
+            message="No edge cases defined",
+            details={"sub_check": "edge_case", "status": "no_data", "total": 0},
+        )
+
+    pass_rate = passed_count / total
+    passed = pass_rate >= pass_threshold
+
+    return CheckResult(
+        check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+        name="Edge Case Check",
+        passed=passed,
+        score=pass_rate,
+        message=(
+            f"Edge case pass rate {pass_rate:.0%} ({passed_count}/{total})"
+            if passed
+            else f"Edge case failures: {pass_rate:.0%} ({passed_count}/{total}) below threshold {pass_threshold:.0%}"
+        ),
+        details={
+            "sub_check": "edge_case",
+            "total": total,
+            "passed": passed_count,
+            "pass_rate": pass_rate,
+            "threshold": pass_threshold,
+        },
+    )
+
+
+def _check_failure_mode(behavioral_data: dict[str, Any]) -> CheckResult:
+    """Check failure mode handling scores from LLM judge.
+
+    Evaluates whether the agent handles errors gracefully and acknowledges
+    uncertainty when appropriate.
+    """
+    failure_mode_data = behavioral_data.get("failure_mode")
+
+    if failure_mode_data is None:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Failure Mode Check",
+            passed=True,
+            score=1.0,
+            message="No failure mode data available",
+            details={"sub_check": "failure_mode", "status": "no_data"},
+        )
+
+    score = failure_mode_data.get("score", 0.0)
+    threshold = failure_mode_data.get("threshold", DEFAULT_FAILURE_MODE_THRESHOLD)
+    passed = score >= threshold
+
+    return CheckResult(
+        check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+        name="Failure Mode Check",
+        passed=passed,
+        score=score,
+        message=(
+            f"Failure mode score {score:.2f} meets threshold {threshold}"
+            if passed
+            else f"Failure mode score {score:.2f} below threshold {threshold}"
+        ),
+        details={
+            "sub_check": "failure_mode",
+            "score": score,
+            "threshold": threshold,
+        },
+    )
+
+
+def _compute_behavioral_testing_check(
+    behavioral_data: dict[str, Any],
+) -> CheckResult:
+    """Compute the combined Enterprise Behavioral Testing check.
+
+    Combines four sub-checks with configurable weights:
+    - Consistency (trial variance): 30%
+    - Edge case pass rate: 30%
+    - Stability (score drift): 20%
+    - Failure mode handling: 20%
+
+    Pass/fail is determined by whether all active sub-checks pass individually.
+    The composite score is a weighted average for reporting purposes but does
+    not gate certification — each sub-check enforces its own threshold.
+
+    Missing sub-checks are skipped (not counted as failures), but at least
+    2 sub-checks must have real data for the check to pass. This prevents
+    a skill from achieving Certified with only a single passing sub-check.
+    """
+    sub_checks = {
+        "consistency": _check_consistency(behavioral_data),
+        "edge_case": _check_edge_case_results(behavioral_data),
+        "stability": _check_stability(behavioral_data),
+        "failure_mode": _check_failure_mode(behavioral_data),
+    }
+
+    weighted_score = 0.0
+    total_weight = 0.0
+    all_passed = True
+    sub_results: dict[str, Any] = {}
+
+    for key, check in sub_checks.items():
+        weight = BEHAVIORAL_SUB_CHECK_WEIGHTS[key]
+        has_data = check.details.get("status") != "no_data"
+
+        if has_data:
+            weighted_score += check.score * weight
+            total_weight += weight
+            if not check.passed:
+                all_passed = False
+
+        sub_results[key] = {
+            "passed": check.passed,
+            "score": check.score,
+            "message": check.message,
+            "has_data": has_data,
+        }
+
+    active_checks = [k for k, v in sub_results.items() if v["has_data"]]
+    n_active = len(active_checks)
+    min_required = 2
+
+    if total_weight == 0 or n_active == 0:
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Enterprise Behavioral Testing",
+            passed=False,
+            score=0.0,
+            message="No behavioral testing data available",
+            details={"sub_checks": sub_results},
+        )
+
+    if n_active < min_required:
+        final_score = weighted_score / total_weight
+        return CheckResult(
+            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            name="Enterprise Behavioral Testing",
+            passed=False,
+            score=final_score,
+            message=(
+                f"Insufficient behavioral coverage: {n_active} sub-check(s) "
+                f"with data, need at least {min_required}"
+            ),
+            details={"sub_checks": sub_results, "weights": BEHAVIORAL_SUB_CHECK_WEIGHTS},
+        )
+
+    final_score = weighted_score / total_weight
+    passed = all_passed
+
+    failed_checks = [k for k, v in sub_results.items() if v["has_data"] and not v["passed"]]
+
+    if passed:
+        message = f"Behavioral testing passed ({n_active} sub-checks, score {final_score:.2f})"
+    else:
+        message = (
+            f"Behavioral testing failed: "
+            f"failed sub-checks: {', '.join(failed_checks)}"
+        )
+
+    return CheckResult(
+        check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+        name="Enterprise Behavioral Testing",
+        passed=passed,
+        score=final_score,
+        message=message,
+        details={"sub_checks": sub_results, "weights": BEHAVIORAL_SUB_CHECK_WEIGHTS},
+    )
 
 
 def _get_threshold(
@@ -466,6 +767,10 @@ def _map_gate_to_checks(
             )
         )
 
+    # GateType.BEHAVIORAL gates (e.g. edge-case) contribute to the scorecard
+    # but not to certification checks — behavioral certification is computed
+    # from the behavioral_data parameter via _compute_behavioral_testing_check().
+
     return checks
 
 
@@ -511,6 +816,7 @@ def compute_certification(
     has_eval_assets: bool = True,
     policy: CertificationPolicy | None = None,
     operational_policy_result: CheckResult | None = None,
+    behavioral_data: dict[str, Any] | None = None,
 ) -> CertificationResult:
     """Compute certification levels from gate results.
 
@@ -520,6 +826,11 @@ def compute_certification(
         metadata_valid: Whether metadata.yaml validation passed
         has_eval_assets: Whether evaluation assets (evals.json, tests) exist
         policy: Optional certification policy for custom checks and thresholds
+        behavioral_data: Optional behavioral testing data containing:
+            - std_reward: Trial variance from evaluation run
+            - edge_cases: {total, passed} edge case results
+            - stability: {score_variance, run_count} from monitoring
+            - failure_mode: {score, threshold} from LLM judge
 
     Returns:
         Complete certification result with all levels
@@ -596,16 +907,21 @@ def compute_certification(
             ),
         )
 
-    all_checks.setdefault(
-        CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
-        CheckResult(
-            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
-            name="Enterprise Behavioral Testing",
-            passed=False,
-            score=0.0,
-            message="Behavioral testing not implemented",
-        ),
-    )
+    if behavioral_data is not None:
+        all_checks[CheckId.ENTERPRISE_BEHAVIORAL_TESTING] = _compute_behavioral_testing_check(
+            behavioral_data
+        )
+    else:
+        all_checks.setdefault(
+            CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+            CheckResult(
+                check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
+                name="Enterprise Behavioral Testing",
+                passed=False,
+                score=0.0,
+                message="No behavioral testing data provided",
+            ),
+        )
 
     all_checks.setdefault(
         CheckId.CONTINUOUS_OPTIMIZATION,

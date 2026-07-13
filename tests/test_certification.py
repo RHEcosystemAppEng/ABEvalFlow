@@ -353,9 +353,10 @@ class TestCertificationLevelConstants:
     def test_certified_has_expected_checks(self) -> None:
         assert CheckId.ENTERPRISE_STRUCTURE_VALIDATION in CERTIFIED_CHECKS
         assert CheckId.ENTERPRISE_SECURITY_REVIEW in CERTIFIED_CHECKS
+        assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING in CERTIFIED_CHECKS
         assert CheckId.ADVANCED_AGENT_VALIDATION in CERTIFIED_CHECKS
-        # behavioral_testing and continuous_optimization not yet implemented
-        assert len(CERTIFIED_CHECKS) == 3
+        # continuous_optimization not yet implemented
+        assert len(CERTIFIED_CHECKS) == 4
 
 
 class TestCertificationPolicy:
