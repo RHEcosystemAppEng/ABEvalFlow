@@ -9,6 +9,7 @@ import pytest
 
 from abevalflow.certification import (
     CheckId,
+    CheckResult,
     _check_consistency,
     _check_edge_case_results,
     _check_failure_mode,
@@ -75,6 +76,16 @@ class TestConsistencyCheck:
     def test_no_data_has_status_sentinel(self) -> None:
         result = _check_consistency({})
         assert result.details["status"] == "no_data"
+
+    def test_low_mean_low_variance_passes_consistency(self) -> None:
+        """Consistency only measures reliability, not quality."""
+        result = _check_consistency({"std_reward": 0.02})
+        assert result.passed is True
+
+    def test_high_mean_high_variance_fails_consistency(self) -> None:
+        """Good average doesn't help if results are unpredictable."""
+        result = _check_consistency({"std_reward": 0.4})
+        assert result.passed is False
 
 
 class TestStabilityCheck:
@@ -330,6 +341,15 @@ class TestCertificationWithBehavioralData:
 
         assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING not in CERTIFIED_CHECKS
 
+    def _passing_operational_policy(self) -> CheckResult:
+        return CheckResult(
+            check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
+            name="Operational Policy Compliance",
+            passed=True,
+            score=1.0,
+            message="Passed",
+        )
+
     def test_behavioral_data_stored_but_not_required_for_certified(self) -> None:
         behavioral_data = {
             "std_reward": 0.1,
@@ -340,9 +360,9 @@ class TestCertificationWithBehavioralData:
             validation_passed=True,
             metadata_valid=True,
             has_eval_assets=True,
+            operational_policy_result=self._passing_operational_policy(),
             behavioral_data=behavioral_data,
         )
-        # Check is computed and stored but doesn't block Certified level
         assert result.certified.passed is True
 
     def test_backward_compatible_no_behavioral_data(self) -> None:
@@ -351,6 +371,7 @@ class TestCertificationWithBehavioralData:
             validation_passed=True,
             metadata_valid=True,
             has_eval_assets=True,
+            operational_policy_result=self._passing_operational_policy(),
         )
         assert result.foundational.passed is True
         assert result.trusted.passed is True
