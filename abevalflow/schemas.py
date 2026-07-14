@@ -233,6 +233,22 @@ class ExperimentType(StrEnum):
     CUSTOM = "custom"
 
 
+class OperationalLimits(BaseModel):
+    """Configurable limits for operational policy compliance checks.
+
+    Defaults for operational policy checks. Can be overridden via
+    certification_policy.operational_limits in metadata.yaml.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable operational policy checks. When False, check passes with a warning.",
+    )
+    max_cpus: int = Field(default=4, gt=0, description="Maximum allowed CPU cores")
+    max_memory_mb: int = Field(default=8192, gt=0, description="Maximum allowed memory in MB")
+    max_agent_timeout_sec: float = Field(default=3600.0, gt=0, description="Maximum allowed agent timeout in seconds")
+
+
 class CertificationLevelPolicy(BaseModel):
     """Policy configuration for a single certification level.
 
@@ -291,6 +307,9 @@ class CertificationPolicy(BaseModel):
 
     Example in metadata.yaml:
         certification_policy:
+          operational_limits:
+            max_cpus: 8
+            max_memory_mb: 16384
           foundational:
             checks:
               - valid_skill_structure
@@ -320,6 +339,14 @@ class CertificationPolicy(BaseModel):
         default=None,
         description="Policy for Certified certification level",
     )
+    operational_limits: OperationalLimits | None = Field(
+        default=None,
+        description=(
+            "Operational policy limits for resource, timeout, and other checks. "
+            "Used by the Trusted-level operational_policy_compliance check. "
+            "Overrides OperationalLimits defaults."
+        ),
+    )
 
     def get_checks_for_level(self, level: str) -> list[str] | None:
         """Get custom check list for a level, or None to use defaults."""
@@ -342,6 +369,10 @@ class CertificationPolicy(BaseModel):
                 if check_id in level_policy.thresholds:
                     result = level_policy.thresholds[check_id]
         return result
+
+    def get_operational_limits(self) -> OperationalLimits:
+        """Get operational limits for the operational policy compliance check."""
+        return self.operational_limits or OperationalLimits()
 
 
 class CopySpec(BaseModel):

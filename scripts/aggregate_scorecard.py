@@ -45,7 +45,8 @@ from abevalflow.engines import get_engine
 from abevalflow.gates.base import GateResult
 from abevalflow.gates.quality import get_all_quality_gates
 from abevalflow.gates.security import get_all_security_gates
-from abevalflow.schemas import CertificationPolicy, GatePolicy, SubmissionMetadata
+from abevalflow.operational_policy import check_operational_policy
+from abevalflow.schemas import CertificationPolicy, GatePolicy, OperationalLimits, SubmissionMetadata
 from abevalflow.scorecard import Scorecard, apply_combination_logic
 
 logging.basicConfig(
@@ -315,12 +316,21 @@ def aggregate_scorecard(
 
     has_eval_assets = (submission_dir / "evals" / "evals.json").exists() or (submission_dir / "tests").exists()
 
+    operational_limits = certification_policy.get_operational_limits() if certification_policy else OperationalLimits()
+    operational_policy_result = check_operational_policy(submission_dir, limits=operational_limits)
+    logger.info(
+        "Operational policy: passed=%s, score=%.3f",
+        operational_policy_result.passed,
+        operational_policy_result.score,
+    )
+
     certification = compute_certification(
         gates=gates,
         validation_passed=validation_passed,
         metadata_valid=metadata_valid,
         has_eval_assets=has_eval_assets,
         policy=certification_policy,
+        operational_policy_result=operational_policy_result,
     )
     logger.info(
         "Certification levels: foundational=%s, trusted=%s, certified=%s (highest=%s)",

@@ -88,7 +88,7 @@ TRUSTED_CHECKS = [
     CheckId.FUNCTIONAL_VALIDATION,
     CheckId.INSTRUCTION_QUALITY,
     # CheckId.REGISTRY_GOVERNANCE,  # Not yet implemented
-    # CheckId.OPERATIONAL_POLICY_COMPLIANCE,  # Not yet implemented
+    CheckId.OPERATIONAL_POLICY_COMPLIANCE,
 ]
 
 CERTIFIED_CHECKS = [
@@ -510,6 +510,7 @@ def compute_certification(
     metadata_valid: bool = True,
     has_eval_assets: bool = True,
     policy: CertificationPolicy | None = None,
+    operational_policy_result: CheckResult | None = None,
 ) -> CertificationResult:
     """Compute certification levels from gate results.
 
@@ -581,16 +582,19 @@ def compute_certification(
         ),
     )
 
-    all_checks.setdefault(
-        CheckId.OPERATIONAL_POLICY_COMPLIANCE,
-        CheckResult(
-            check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
-            name="Operational Policy Compliance",
-            passed=False,
-            score=0.0,
-            message="Operational policy check not implemented",
-        ),
-    )
+    if operational_policy_result is not None:
+        all_checks[CheckId.OPERATIONAL_POLICY_COMPLIANCE] = operational_policy_result
+    else:
+        all_checks.setdefault(
+            CheckId.OPERATIONAL_POLICY_COMPLIANCE,
+            CheckResult(
+                check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
+                name="Operational Policy Compliance",
+                passed=False,
+                score=0.0,
+                message="Operational policy check not implemented",
+            ),
+        )
 
     all_checks.setdefault(
         CheckId.ENTERPRISE_BEHAVIORAL_TESTING,

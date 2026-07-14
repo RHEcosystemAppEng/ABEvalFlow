@@ -347,8 +347,8 @@ class TestCertificationLevelConstants:
         assert CheckId.ADVANCED_SECURITY_VALIDATION in TRUSTED_CHECKS
         assert CheckId.FUNCTIONAL_VALIDATION in TRUSTED_CHECKS
         assert CheckId.INSTRUCTION_QUALITY in TRUSTED_CHECKS
-        # registry_governance and operational_policy_compliance not yet implemented
-        assert len(TRUSTED_CHECKS) == 4
+        # registry_governance not yet implemented
+        assert len(TRUSTED_CHECKS) == 5
 
     def test_certified_has_expected_checks(self) -> None:
         assert CheckId.ENTERPRISE_STRUCTURE_VALIDATION in CERTIFIED_CHECKS
@@ -1116,3 +1116,94 @@ class TestProfileLoading:
         # Should use skill profile's check configuration
         assert result is not None
         assert result.foundational is not None
+
+
+class TestOperationalPolicyCertificationIntegration:
+    def test_passing_check_enables_trusted(self) -> None:
+        passing_result = CheckResult(
+            check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
+            name="Operational Policy Compliance",
+            passed=True,
+            score=1.0,
+            message="All passed",
+        )
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+            message="Pass",
+        )
+        security_gate = GateResult(
+            gate_name="security",
+            gate_type=GateType.SECURITY,
+            passed=True,
+            score=1.0,
+            mode=GateMode.BLOCK,
+            message="Pass",
+            findings=[],
+        )
+        quality_gate = GateResult(
+            gate_name="quality",
+            gate_type=GateType.QUALITY,
+            passed=True,
+            score=0.8,
+            mode=GateMode.WARN,
+            message="Pass",
+        )
+        result = compute_certification(
+            gates=[engine_gate, security_gate, quality_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            operational_policy_result=passing_result,
+        )
+        assert result.trusted.passed is True
+        op_check = next(c for c in result.trusted.checks if c.check_id == CheckId.OPERATIONAL_POLICY_COMPLIANCE)
+        assert op_check.passed is True
+
+    def test_failing_check_blocks_trusted(self) -> None:
+        failing_result = CheckResult(
+            check_id=CheckId.OPERATIONAL_POLICY_COMPLIANCE,
+            name="Operational Policy Compliance",
+            passed=False,
+            score=0.25,
+            message="CPU exceeds limit",
+        )
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+            message="Pass",
+        )
+        result = compute_certification(
+            gates=[engine_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            operational_policy_result=failing_result,
+        )
+        assert result.trusted.passed is False
+
+    def test_none_result_uses_default_not_implemented(self) -> None:
+        engine_gate = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.9,
+            mode=GateMode.BLOCK,
+            message="Pass",
+        )
+        result = compute_certification(
+            gates=[engine_gate],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            operational_policy_result=None,
+        )
+        op_check = next(c for c in result.trusted.checks if c.check_id == CheckId.OPERATIONAL_POLICY_COMPLIANCE)
+        assert op_check.passed is False
+        assert "not implemented" in op_check.message
