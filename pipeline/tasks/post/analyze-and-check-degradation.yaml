@@ -246,16 +246,7 @@ spec:
         EDGE_RESULTS="$REPORT_DIR/edge-case-results.json"
         if [ -f "$EDGE_RESULTS" ]; then
           echo "Merging edge case results into report.json..."
-          python3 -c "
-import json, sys
-report_path = sys.argv[1] + '/report.json'
-edge_path = sys.argv[2]
-report = json.loads(open(report_path).read())
-edge = json.loads(open(edge_path).read())
-report['edge_case_results'] = edge
-open(report_path, 'w').write(json.dumps(report, indent=2))
-print(f'Merged {len(edge)} edge case results')
-" "$REPORT_DIR" "$EDGE_RESULTS"
+          python3 -c "import json,sys;d=sys.argv[1];e=sys.argv[2];r=json.loads(open(d+'/report.json').read());ec=json.loads(open(e).read());r['edge_case_results']=ec;open(d+'/report.json','w').write(json.dumps(r,indent=2));print(f'Merged {len(ec)} edge case results')" "$REPORT_DIR" "$EDGE_RESULTS"
         fi
 
         # --- 6. Extract results for Tekton ---
