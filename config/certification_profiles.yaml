@@ -29,7 +29,7 @@ profiles:
     certified:
       checks:
         - enterprise_structure_validation
-        # - enterprise_behavioral_testing  # Implemented but not wired into pipeline yet
+        - enterprise_behavioral_testing
         - advanced_agent_validation
 
   # MCP Servers (Standardized Tool APIs) - API contracts and stability

@@ -41,7 +41,6 @@ from abevalflow.report import (
     AnalysisResult,
     AnalysisSummary,
     DegradationResult,
-    EdgeCaseResult,
     Provenance,
     Recommendation,
     ScanMode,
@@ -227,54 +226,6 @@ def build_a2a_analysis(
 
 
 # ---------------------------------------------------------------------------
-# Edge case analysis
-# ---------------------------------------------------------------------------
-
-
-def analyze_edge_cases(
-    workspace_dir: Path,
-    pass_threshold: float = 0.5,
-) -> list[EdgeCaseResult]:
-    """Analyze edge case evaluation results.
-
-    Args:
-        workspace_dir: Root directory containing tasks-treatment-edge-*/
-            directories produced by scaffold.py.
-        pass_threshold: Minimum mean reward for an edge case to pass.
-    """
-    edge_results: list[EdgeCaseResult] = []
-
-    for edge_dir in sorted(workspace_dir.glob("tasks-treatment-edge-*")):
-        if not edge_dir.is_dir():
-            continue
-        edge_name = edge_dir.name.removeprefix("tasks-treatment-edge-")
-        trials = parse_variant_trials(edge_dir)
-        if not trials:
-            logger.warning("Edge case '%s' has no trial output — counted as failure", edge_name)
-            edge_results.append(
-                EdgeCaseResult(
-                    name=edge_name,
-                    summary=VariantSummary(),
-                    passed=False,
-                )
-            )
-            continue
-        summary = compute_variant_summary(trials)
-        mean_r = summary.mean_reward or 0.0
-        passed = mean_r >= pass_threshold
-
-        edge_results.append(
-            EdgeCaseResult(
-                name=edge_name,
-                summary=summary,
-                passed=passed,
-            )
-        )
-
-    return edge_results
-
-
-# ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
 
@@ -380,15 +331,8 @@ def build_analysis(
     related_pr: str | None = None,
     llm_label: str | None = None,
     eval_engine: str | None = None,
-    edge_case_results_dir: Path | None = None,
 ) -> AnalysisResult:
-    """Parse results, compute stats, and assemble the full analysis model.
-
-    Args:
-        edge_case_results_dir: Root directory containing tasks-treatment-edge-*/
-            result directories. When provided, edge case results are analyzed
-            and included in the report.
-    """
+    """Parse results, compute stats, and assemble the full analysis model."""
     if eval_engine == "a2a" or is_a2a_results(results_dir):
         return build_a2a_analysis(
             results_dir=results_dir,
@@ -434,16 +378,6 @@ def build_analysis(
     else:
         recommendation = Recommendation.PASS if primary_gap >= threshold else Recommendation.FAIL
 
-    edge_cases: list[EdgeCaseResult] = []
-    if edge_case_results_dir is not None:
-        edge_cases = analyze_edge_cases(edge_case_results_dir)
-        if edge_cases:
-            logger.info(
-                "Edge cases: %d/%d passed",
-                sum(1 for ec in edge_cases if ec.passed),
-                len(edge_cases),
-            )
-
     return AnalysisResult(
         submission_name=submission_name,
         provenance=provenance or Provenance(),
@@ -462,7 +396,6 @@ def build_analysis(
             "treatment": treatment_trials,
             "control": control_trials,
         },
-        edge_case_results=edge_cases,
     )
 
 
@@ -704,13 +637,6 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="LLM model label for the report (e.g. 'Claude Sonnet 4.6 (vertex_ai)')",
     )
-    parser.add_argument(
-        "--edge-case-results-dir",
-        type=Path,
-        default=None,
-        help="Root directory containing tasks-treatment-edge-*/ result directories",
-    )
-
     args = parser.parse_args(argv)
 
     if args.merge_degradation_from is not None:
@@ -751,7 +677,6 @@ def main(argv: list[str] | None = None) -> int:
         related_pr=args.pr_url,
         llm_label=args.llm_label,
         eval_engine=args.eval_engine,
-        edge_case_results_dir=args.edge_case_results_dir,
     )
 
     # Include security scan results if available

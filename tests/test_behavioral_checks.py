@@ -336,10 +336,10 @@ class TestCertificationWithBehavioralData:
         result = _compute_behavioral_testing_check({})
         assert result.passed is False
 
-    def test_behavioral_check_not_in_certified_checks_until_pipeline_wired(self) -> None:
+    def test_behavioral_check_in_certified_checks(self) -> None:
         from abevalflow.certification import CERTIFIED_CHECKS
 
-        assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING not in CERTIFIED_CHECKS
+        assert CheckId.ENTERPRISE_BEHAVIORAL_TESTING in CERTIFIED_CHECKS
 
     def _passing_operational_policy(self) -> CheckResult:
         return CheckResult(
@@ -350,7 +350,7 @@ class TestCertificationWithBehavioralData:
             message="Passed",
         )
 
-    def test_behavioral_data_stored_but_not_required_for_certified(self) -> None:
+    def test_behavioral_data_required_for_certified(self) -> None:
         behavioral_data = {
             "std_reward": 0.1,
             "edge_cases": {"total": 3, "passed": 3},
@@ -365,7 +365,7 @@ class TestCertificationWithBehavioralData:
         )
         assert result.certified.passed is True
 
-    def test_backward_compatible_no_behavioral_data(self) -> None:
+    def test_no_behavioral_data_blocks_certified(self) -> None:
         result = compute_certification(
             gates=self._make_all_gates(),
             validation_passed=True,
@@ -375,6 +375,65 @@ class TestCertificationWithBehavioralData:
         )
         assert result.foundational.passed is True
         assert result.trusted.passed is True
+        assert result.certified.passed is False
+
+    def test_low_mean_high_consistency_blocked_by_engine_gate(self) -> None:
+        """A skill with low variance but poor absolute scores still fails Certified.
+
+        Consistency passes (low std_reward), but ADVANCED_AGENT_VALIDATION
+        requires engine score >= 0.8. This proves the two checks work together
+        as a safety net.
+        """
+        low_score_engine = GateResult(
+            gate_name="evaluation",
+            gate_type=GateType.ENGINE,
+            passed=True,
+            score=0.3,
+            mode=GateMode.BLOCK,
+        )
+        behavioral_data = {
+            "std_reward": 0.02,
+            "edge_cases": {"total": 3, "passed": 3},
+        }
+        result = compute_certification(
+            gates=[
+                low_score_engine,
+                GateResult(
+                    gate_name="security",
+                    gate_type=GateType.SECURITY,
+                    passed=True,
+                    score=1.0,
+                    mode=GateMode.BLOCK,
+                ),
+                GateResult(
+                    gate_name="quality",
+                    gate_type=GateType.QUALITY,
+                    passed=True,
+                    score=0.85,
+                    mode=GateMode.WARN,
+                ),
+            ],
+            validation_passed=True,
+            metadata_valid=True,
+            has_eval_assets=True,
+            operational_policy_result=self._passing_operational_policy(),
+            behavioral_data=behavioral_data,
+        )
+        behavioral_check = next(
+            (c for c in result.certified.checks if c.check_id == CheckId.ENTERPRISE_BEHAVIORAL_TESTING),
+            None,
+        )
+        assert behavioral_check is not None
+        assert behavioral_check.passed is True
+
+        agent_check = next(
+            (c for c in result.certified.checks if c.check_id == CheckId.ADVANCED_AGENT_VALIDATION),
+            None,
+        )
+        assert agent_check is not None
+        assert agent_check.passed is False
+
+        assert result.certified.passed is False
 
 
 class TestEdgeCaseGate:
@@ -562,10 +621,55 @@ class TestExtractBehavioralData:
         assert data["edge_cases"] == {"total": 3, "passed": 3}
 
 
-class TestEdgeCaseScaffolding:
-    """Tests for edge case scaffolding."""
+class TestGenerateEdgeCaseEvals:
+    """Tests for generate_edge_case_evals.py."""
 
-    def _make_submission(self, tmp_path: Path) -> Path:
+    def test_generates_evals_from_edge_cases(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import generate_edge_case_evals
+
+        sub = tmp_path / "my-skill"
+        sub.mkdir()
+        (sub / "metadata.yaml").write_text("name: my-skill\n")
+        edge_dir = sub / "edge_cases"
+        edge_dir.mkdir()
+        (edge_dir / "empty_input.md").write_text("Test with empty input")
+        (edge_dir / "adversarial.md").write_text("Try to break the skill")
+
+        result = generate_edge_case_evals(sub)
+        assert result is not None
+        assert result["skill_name"] == "my-skill"
+        assert len(result["evals"]) == 2
+        assert result["evals"][0]["id"] == "edge-adversarial"
+        assert result["evals"][1]["id"] == "edge-empty_input"
+        assert "assertions" in result["evals"][0]
+
+    def test_returns_none_without_edge_cases(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import generate_edge_case_evals
+
+        sub = tmp_path / "my-skill"
+        sub.mkdir()
+        result = generate_edge_case_evals(sub)
+        assert result is None
+
+    def test_skips_empty_files(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import generate_edge_case_evals
+
+        sub = tmp_path / "my-skill"
+        sub.mkdir()
+        (sub / "metadata.yaml").write_text("name: my-skill\n")
+        edge_dir = sub / "edge_cases"
+        edge_dir.mkdir()
+        (edge_dir / "empty.md").write_text("")
+        (edge_dir / "valid.md").write_text("A valid edge case")
+
+        result = generate_edge_case_evals(sub)
+        assert result is not None
+        assert len(result["evals"]) == 1
+        assert result["evals"][0]["id"] == "edge-valid"
+
+    def test_scaffold_does_not_create_edge_case_dirs(self, tmp_path: Path) -> None:
+        from scripts.scaffold import scaffold_submission
+
         sub = tmp_path / "my-skill"
         sub.mkdir()
         (sub / "metadata.yaml").write_text("name: my-skill\n")
@@ -576,47 +680,9 @@ class TestEdgeCaseScaffolding:
         tests = sub / "tests"
         tests.mkdir()
         (tests / "test_outputs.py").write_text("pass")
-
-        edge_cases = sub / "edge_cases"
-        edge_cases.mkdir()
-        (edge_cases / "empty_input.md").write_text("Test with empty input")
-        (edge_cases / "adversarial.md").write_text("Test with adversarial prompt")
-        return sub
-
-    def test_edge_case_dirs_created(self, tmp_path: Path) -> None:
-        from scripts.scaffold import scaffold_submission
-
-        sub = self._make_submission(tmp_path)
-        output = tmp_path / "output"
-        scaffold_submission(sub, output)
-
-        assert (output / "tasks-treatment-edge-adversarial" / "my-skill").is_dir()
-        assert (output / "tasks-treatment-edge-empty_input" / "my-skill").is_dir()
-
-    def test_edge_case_uses_alternative_instruction(self, tmp_path: Path) -> None:
-        from scripts.scaffold import scaffold_submission
-
-        sub = self._make_submission(tmp_path)
-        output = tmp_path / "output"
-        scaffold_submission(sub, output)
-
-        edge_dir = output / "tasks-treatment-edge-empty_input" / "my-skill"
-        instruction = (edge_dir / "instruction.md").read_text()
-        assert instruction == "Test with empty input"
-
-    def test_no_edge_cases_no_extra_dirs(self, tmp_path: Path) -> None:
-        from scripts.scaffold import scaffold_submission
-
-        sub = tmp_path / "no-edge"
-        sub.mkdir()
-        (sub / "metadata.yaml").write_text("name: no-edge\n")
-        (sub / "instruction.md").write_text("Main instruction")
-        skills = sub / "skills"
-        skills.mkdir()
-        (skills / "SKILL.md").write_text("# My Skill")
-        tests = sub / "tests"
-        tests.mkdir()
-        (tests / "test_outputs.py").write_text("pass")
+        edge_dir = sub / "edge_cases"
+        edge_dir.mkdir()
+        (edge_dir / "empty_input.md").write_text("Test with empty input")
 
         output = tmp_path / "output"
         scaffold_submission(sub, output)
@@ -625,100 +691,51 @@ class TestEdgeCaseScaffolding:
         assert edge_dirs == []
 
 
-class TestEdgeCaseAnalysis:
-    """Tests for edge case analysis in analyze.py."""
+class TestEdgeCaseAggregation:
+    """Tests for ASE-based edge case aggregation."""
 
-    def test_missing_trial_output_counted_as_failure(self, tmp_path: Path) -> None:
-        from scripts.analyze import analyze_edge_cases
+    def test_edge_case_result_model_with_score(self) -> None:
+        result = EdgeCaseResult(name="empty_input", passed=True, score=0.8)
+        assert result.name == "empty_input"
+        assert result.passed is True
+        assert result.summary is None
+        assert result.score == 0.8
 
-        edge_dir = tmp_path / "tasks-treatment-edge-empty_input"
-        edge_dir.mkdir()
-        results = analyze_edge_cases(tmp_path)
-        assert len(results) == 1
-        assert results[0].name == "empty_input"
-        assert results[0].passed is False
-
-    def test_edge_case_result_model(self) -> None:
+    def test_edge_case_result_model_with_summary(self) -> None:
         result = EdgeCaseResult(
             name="empty_input",
             summary=VariantSummary(n_trials=5, n_passed=4, pass_rate=0.8, mean_reward=0.7),
             passed=True,
         )
-        assert result.name == "empty_input"
-        assert result.passed is True
+        assert result.summary is not None
         assert result.summary.pass_rate == 0.8
 
-    def test_build_analysis_includes_edge_cases(self, tmp_path: Path) -> None:
-        from scripts.analyze import build_analysis
+    def test_aggregate_per_edge_case_results(self, tmp_path: Path) -> None:
+        from scripts.aggregate_edge_case_evals import aggregate_edge_case_results
 
-        results = tmp_path / "results"
-        treatment = results / "treatment" / "job" / "task__001"
-        treatment.mkdir(parents=True)
-        (treatment / "result.json").write_text(
-            json.dumps(
-                {
-                    "verifier_result": {"reward": 0.8},
-                }
-            )
-        )
-        control = results / "control" / "job" / "task__001"
-        control.mkdir(parents=True)
-        (control / "result.json").write_text(
-            json.dumps(
-                {
-                    "verifier_result": {"reward": 0.3},
-                }
-            )
-        )
-
-        edge_root = tmp_path / "edge_results"
-        edge_dir = edge_root / "tasks-treatment-edge-empty_input" / "job" / "task__001"
+        edge_dir = tmp_path / "empty_input" / "iteration-1" / "eval-skill" / "with_skill"
         edge_dir.mkdir(parents=True)
-        (edge_dir / "result.json").write_text(
+        (edge_dir / "grading.json").write_text(
             json.dumps(
                 {
-                    "verifier_result": {"reward": 0.6},
+                    "summary": {"passed": 3, "failed": 0, "total": 3, "pass_rate": 1.0},
                 }
             )
         )
 
-        result = build_analysis(
-            results_dir=results,
-            submission_name="test-skill",
-            edge_case_results_dir=edge_root,
-        )
-        assert len(result.edge_case_results) == 1
-        assert result.edge_case_results[0].name == "empty_input"
-        assert result.edge_case_results[0].passed is True
+        results = aggregate_edge_case_results(tmp_path)
+        assert len(results) == 1
+        assert results[0]["name"] == "empty_input"
+        assert results[0]["passed"] is True
 
-    def test_build_analysis_no_edge_cases(self, tmp_path: Path) -> None:
-        from scripts.analyze import build_analysis
+    def test_missing_grading_counted_as_failure(self, tmp_path: Path) -> None:
+        from scripts.aggregate_edge_case_evals import aggregate_edge_case_results
 
-        results = tmp_path / "results"
-        treatment = results / "treatment" / "job" / "task__001"
-        treatment.mkdir(parents=True)
-        (treatment / "result.json").write_text(
-            json.dumps(
-                {
-                    "verifier_result": {"reward": 0.8},
-                }
-            )
-        )
-        control = results / "control" / "job" / "task__001"
-        control.mkdir(parents=True)
-        (control / "result.json").write_text(
-            json.dumps(
-                {
-                    "verifier_result": {"reward": 0.3},
-                }
-            )
-        )
-
-        result = build_analysis(
-            results_dir=results,
-            submission_name="test-skill",
-        )
-        assert result.edge_case_results == []
+        (tmp_path / "empty_input").mkdir()
+        results = aggregate_edge_case_results(tmp_path)
+        assert len(results) == 1
+        assert results[0]["name"] == "empty_input"
+        assert results[0]["passed"] is False
 
 
 class TestLLMJudgeCriteria:
@@ -739,78 +756,35 @@ class TestLLMJudgeCriteria:
 
 
 class TestEdgeCaseEndToEnd:
-    """End-to-end: scaffold → mock results → analyze → certification."""
+    """End-to-end: generate evals → mock results → certification."""
 
-    def test_scaffold_analyze_certify(self, tmp_path: Path) -> None:
-        from scripts.analyze import build_analysis
-        from scripts.scaffold import scaffold_submission
+    def test_generate_evals_and_certify(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import generate_edge_case_evals
 
         # 1. Create submission with edge cases
         sub = tmp_path / "e2e-skill"
         sub.mkdir()
         (sub / "metadata.yaml").write_text("name: e2e-skill\n")
-        (sub / "instruction.md").write_text("Main instruction")
-        skills = sub / "skills"
-        skills.mkdir()
-        (skills / "SKILL.md").write_text("# E2E Skill")
-        tests = sub / "tests"
-        tests.mkdir()
-        (tests / "test_outputs.py").write_text("pass")
         edge_cases = sub / "edge_cases"
         edge_cases.mkdir()
         (edge_cases / "empty_input.md").write_text("Test with empty input")
         (edge_cases / "adversarial.md").write_text("Test with adversarial prompt")
 
-        # 2. Scaffold
-        output = tmp_path / "scaffold_output"
-        scaffold_submission(sub, output)
-        assert (output / "tasks-treatment-edge-adversarial" / "e2e-skill").is_dir()
-        assert (output / "tasks-treatment-edge-empty_input" / "e2e-skill").is_dir()
+        # 2. Generate edge case evals
+        evals = generate_edge_case_evals(sub)
+        assert evals is not None
+        assert len(evals["evals"]) == 2
 
-        # 3. Create mock Harbor results (2+ trials for std_reward computation)
-        results = tmp_path / "results"
-        for variant in ("treatment", "control"):
-            for i, reward in enumerate([0.8, 0.85] if variant == "treatment" else [0.3, 0.35]):
-                trial_dir = results / variant / "job" / f"task__{i:03d}"
-                trial_dir.mkdir(parents=True)
-                (trial_dir / "result.json").write_text(
-                    json.dumps(
-                        {
-                            "verifier_result": {"reward": reward},
-                        }
-                    )
-                )
-
-        # 4. Create mock results for edge cases
-        edge_results = tmp_path / "edge_results"
-        for edge_name, reward in [("adversarial", 0.7), ("empty_input", 0.6)]:
-            trial_dir = edge_results / f"tasks-treatment-edge-{edge_name}" / "job" / "task__001"
-            trial_dir.mkdir(parents=True)
-            (trial_dir / "result.json").write_text(
-                json.dumps(
-                    {
-                        "verifier_result": {"reward": reward},
-                    }
-                )
-            )
-
-        # 5. Analyze with edge case results
-        analysis = build_analysis(
-            results_dir=results,
-            submission_name="e2e-skill",
-            edge_case_results_dir=edge_results,
-        )
-        assert len(analysis.edge_case_results) == 2
-        assert all(ec.passed for ec in analysis.edge_case_results)
-
-        # 6. Verify behavioral check passes with the extracted data
+        # 3. Simulate edge case results (as pipeline would produce)
         behavioral_data = {
-            "std_reward": analysis.summary.treatment.std_reward,
+            "std_reward": 0.05,
             "edge_cases": {
-                "total": len(analysis.edge_case_results),
-                "passed": sum(1 for ec in analysis.edge_case_results if ec.passed),
+                "total": len(evals["evals"]),
+                "passed": len(evals["evals"]),
             },
         }
+
+        # 4. Verify behavioral check passes
         behavioral_check = _compute_behavioral_testing_check(behavioral_data)
         assert behavioral_check.passed is True
         assert behavioral_check.score > 0.0

@@ -166,8 +166,12 @@ class EdgeCaseResult(BaseModel):
     """Result of a single edge case evaluation."""
 
     name: str = Field(description="Edge case name (derived from filename)")
-    summary: VariantSummary = Field(description="Trial stats for this edge case")
+    summary: VariantSummary | None = Field(
+        default=None,
+        description="Trial stats (present for Harbor-based eval, absent for ASE-based eval)",
+    )
     passed: bool = Field(description="Whether the edge case passed verification")
+    score: float | None = Field(default=None, description="Edge case score (0.0-1.0)")
 
 
 class AnalysisResult(BaseModel):

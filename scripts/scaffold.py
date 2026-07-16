@@ -220,48 +220,16 @@ def _copy_root_dirs(submission_dir: Path, target_dir: Path) -> None:
             shutil.copytree(src, target_dir / rootdir, dirs_exist_ok=True)
 
 
-def _scaffold_edge_cases(
-    submission_dir: Path,
-    output_dir: Path,
-    metadata: SubmissionMetadata,
-    strategy: ExperimentStrategy,
-    jinja_env: Environment,
-) -> list[Path]:
-    """Scaffold per-edge-case treatment task directories.
+def _count_edge_cases(submission_dir: Path) -> int:
+    """Count edge case .md files in the submission's edge_cases/ directory.
 
-    For each .md file in edge_cases/, creates a task directory identical to
-    the treatment variant but with the edge case instruction instead of the
-    main instruction.md. No control variant is needed for edge cases.
-
-    Returns list of edge case task directory paths.
+    Edge cases are evaluated via ASE (not Harbor) so no scaffolding is needed.
+    The ASE pipeline step reads edge_cases/ directly from the submission.
     """
     edge_cases_dir = submission_dir / "edge_cases"
     if not edge_cases_dir.is_dir():
-        return []
-
-    context = _build_template_context(metadata, submission_dir, "treatment", strategy)
-    rendered = _render_templates(jinja_env, context)
-    strategy_srcs = [src for src, _ in context.get("copy_pairs", [])]
-
-    # Same templates for all edge cases; only instruction.md differs per case
-    edge_case_dirs: list[Path] = []
-    for md_file in sorted(edge_cases_dir.glob("*.md")):
-        edge_name = md_file.stem
-        edge_dir = output_dir / f"tasks-treatment-edge-{edge_name}" / metadata.name
-
-        environment_dir = _write_rendered_templates(rendered, edge_dir)
-        _copy_submission_files(submission_dir, environment_dir, strategy_srcs, "treatment")
-
-        # Two copies: environment/ for the Docker build context,
-        # task root for Harbor metadata/display (same as main scaffolding).
-        shutil.copy2(md_file, environment_dir / "instruction.md")
-        shutil.copy2(md_file, edge_dir / "instruction.md")
-        _copy_root_dirs(submission_dir, edge_dir)
-
-        edge_case_dirs.append(edge_dir)
-        logger.info("Scaffolded edge case '%s' at %s", edge_name, edge_dir)
-
-    return edge_case_dirs
+        return 0
+    return len(list(edge_cases_dir.glob("*.md")))
 
 
 def scaffold_submission(
@@ -317,9 +285,9 @@ def scaffold_submission(
 
         logger.info("Scaffolded %s variant at %s", variant, target_dir)
 
-    edge_case_dirs = _scaffold_edge_cases(submission_dir, output_dir, metadata, strategy, jinja_env)
-    if edge_case_dirs:
-        logger.info("Scaffolded %d edge case(s)", len(edge_case_dirs))
+    n_edge_cases = _count_edge_cases(submission_dir)
+    if n_edge_cases:
+        logger.info("Found %d edge case(s) (will be evaluated via ASE)", n_edge_cases)
 
     return treatment_dir, control_dir
 
