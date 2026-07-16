@@ -162,6 +162,18 @@ class AnalysisSummary(BaseModel):
     recommendation: Recommendation
 
 
+class EdgeCaseResult(BaseModel):
+    """Result of a single edge case evaluation."""
+
+    name: str = Field(description="Edge case name (derived from filename)")
+    summary: VariantSummary | None = Field(
+        default=None,
+        description="Trial stats (present for Harbor-based eval, absent for ASE-based eval)",
+    )
+    passed: bool = Field(description="Whether the edge case passed verification")
+    score: float | None = Field(default=None, description="Edge case score (0.0-1.0)")
+
+
 class AnalysisResult(BaseModel):
     """Top-level report model written to report.json."""
 
@@ -178,4 +190,8 @@ class AnalysisResult(BaseModel):
     degradation: DegradationResult | None = Field(
         default=None,
         description="Historical degradation check result. Present when monitoring ran.",
+    )
+    edge_case_results: list[EdgeCaseResult] = Field(
+        default_factory=list,
+        description="Results from edge case evaluations. Empty if no edge cases defined.",
     )

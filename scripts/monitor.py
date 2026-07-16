@@ -18,6 +18,8 @@ import json
 import logging
 import sys
 from dataclasses import asdict, dataclass
+from statistics import mean
+from statistics import variance as stat_variance
 from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, select
@@ -46,6 +48,56 @@ class MonitorResult:
     message: str
     current_run_id: str | None = None
     previous_run_id: str | None = None
+
+
+# TODO: Wire into aggregate_scorecard._extract_behavioral_data()
+# to feed stability sub-check in behavioral testing certification.
+def get_historical_variance(
+    engine: Engine,
+    submission_name: str,
+    window: int = 5,
+    eval_engine: str | None = None,
+) -> dict:
+    """Query last N evaluation runs and compute score variance.
+
+    Args:
+        engine: SQLAlchemy engine connected to the evaluation DB.
+        submission_name: The skill/submission name to check.
+        window: Number of recent runs to consider.
+        eval_engine: Optional engine filter.
+
+    Returns:
+        Dict with score_variance, run_count, scores, mean_score.
+    """
+    from abevalflow.db.models import EvaluationRun
+
+    with Session(engine) as session:
+        stmt = select(EvaluationRun).where(EvaluationRun.submission_name == submission_name)
+        if eval_engine is not None:
+            stmt = stmt.where(EvaluationRun.eval_engine == eval_engine)
+        stmt = stmt.order_by(EvaluationRun.created_at.desc()).limit(window)
+        runs = list(session.execute(stmt).scalars().all())
+
+    scores = [r.treatment_pass_rate for r in runs if r.treatment_pass_rate is not None]
+    run_count = len(scores)
+
+    if run_count < 2:
+        return {
+            "score_variance": 0.0,
+            "run_count": run_count,
+            "scores": scores,
+            "mean_score": scores[0] if scores else None,
+        }
+
+    mean_score = mean(scores)
+    variance = stat_variance(scores)
+
+    return {
+        "score_variance": variance,
+        "run_count": run_count,
+        "scores": scores,
+        "mean_score": mean_score,
+    }
 
 
 def check_degradation(

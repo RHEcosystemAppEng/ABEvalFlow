@@ -29,6 +29,7 @@ profiles:
     certified:
       checks:
         - enterprise_structure_validation
+        - enterprise_behavioral_testing
         - advanced_agent_validation
 
   # MCP Servers (Standardized Tool APIs) - API contracts and stability
@@ -85,6 +86,7 @@ profiles:
     certified:
       checks:
         - enterprise_structure_validation
+        # - enterprise_behavioral_testing  # Enabled for skill profile only
         - advanced_agent_validation
         # - safety_toxicity_bias_guardrails  # Not yet implemented
 
@@ -111,9 +113,9 @@ profiles:
       checks:
         - enterprise_structure_validation
         - enterprise_security_review
+        # - enterprise_behavioral_testing  # Enabled for skill profile only
         - advanced_agent_validation
         # Not yet implemented:
-        # - enterprise_behavioral_testing
         # - continuous_optimization
         # - safety_toxicity_bias_guardrails
         # - resilience_chaos_testing

@@ -410,6 +410,155 @@ spec:
         print(f"Recommendation: {rec}")
         COMPUTE_REWARDS
 
+    # Step 5b: ASE - Run Edge Case Evaluations (one ASE run per edge case)
+    - name: ase-eval-edge-cases
+      image: registry.access.redhat.com/ubi9/nodejs-20:latest
+      env:
+        - name: OPENAI_API_KEY
+          value: "$(params.llm-api-key)"
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          echo "Skipping edge case eval (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        EDGE_CASES_DIR="$SUBMISSION_PATH/edge_cases"
+
+        if [ ! -d "$EDGE_CASES_DIR" ]; then
+          echo "No edge_cases/ directory — skipping edge case evaluation"
+          exit 0
+        fi
+
+        MD_FILES=$(find "$EDGE_CASES_DIR" -name "*.md" -type f | sort)
+        MD_COUNT=$(echo "$MD_FILES" | grep -c . || true)
+        if [ "$MD_COUNT" -eq 0 ]; then
+          echo "edge_cases/ has no .md files — skipping"
+          exit 0
+        fi
+
+        echo "=== EVALUATE PHASE: ASE Edge Case Evaluation ($MD_COUNT edge cases) ==="
+
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        RESULTS_BASE="$(workspaces.source.path)/eval-results/$(params.submission-name)/edge-cases"
+        mkdir -p "$RESULTS_BASE"
+
+        # Find SKILL.md
+        SKILL_MD=""
+        if [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
+          SKILL_MD="$SUBMISSION_PATH/skills/SKILL.md"
+        else
+          for dir in "$SUBMISSION_PATH"/skills/*/; do
+            if [ -f "${dir}SKILL.md" ]; then
+              SKILL_MD="${dir}SKILL.md"
+              break
+            fi
+          done
+        fi
+
+        if [ -z "$SKILL_MD" ]; then
+          echo "WARNING: No SKILL.md found — edge case evaluation skipped"
+          exit 0
+        fi
+
+        # Install ASE once
+        npm install --global agent-skills-eval 2>&1 | tail -3
+
+        LLM_MODEL="$(params.llm-model)"
+        BASE_URL="$(params.llm-api-base)"
+        JUDGE_MODEL="$(params.ase-judge-model)"
+        [ -z "$JUDGE_MODEL" ] && JUDGE_MODEL="$LLM_MODEL"
+        [[ "$BASE_URL" != */v1 ]] && BASE_URL="${BASE_URL}/v1"
+
+        # Run a separate ASE evaluation for each edge case
+        EDGE_NUM=0
+        for MD_FILE in $MD_FILES; do
+          EDGE_NAME=$(basename "$MD_FILE" .md)
+          EDGE_NUM=$((EDGE_NUM + 1))
+          echo "--- Edge case $EDGE_NUM/$MD_COUNT: $EDGE_NAME ---"
+
+          PROMPT=$(cat "$MD_FILE")
+          if [ -z "$PROMPT" ]; then
+            echo "Skipping empty edge case: $EDGE_NAME"
+            continue
+          fi
+
+          # Create isolated skill dir for this edge case
+          EDGE_SKILL_DIR="$(workspaces.source.path)/_eval_tmp/edge-case-$EDGE_NAME"
+          rm -rf "$EDGE_SKILL_DIR"
+          mkdir -p "$EDGE_SKILL_DIR/evals"
+          cp "$SKILL_MD" "$EDGE_SKILL_DIR/SKILL.md"
+
+          # Generate single-entry evals.json using node (Python not available in this image)
+          node -e "
+            const fs = require('fs');
+            const prompt = fs.readFileSync(process.argv[1], 'utf8').trim();
+            const name = process.argv[2];
+            const skill = process.argv[3];
+            const evals = {
+              skill_name: skill,
+              evals: [{
+                id: 'edge-' + name,
+                name: 'Edge case: ' + name,
+                prompt: prompt,
+                assertions: [
+                  'The response handles the edge case appropriately without crashing or producing nonsensical output',
+                  'The response acknowledges limitations or uncertainty when the input is unusual',
+                  'The response remains helpful and coherent despite the edge case conditions'
+                ]
+              }]
+            };
+            fs.writeFileSync(process.argv[4], JSON.stringify(evals, null, 2));
+          " "$MD_FILE" "$EDGE_NAME" "$(params.submission-name)" "$EDGE_SKILL_DIR/evals/evals.json"
+
+          # Run ASE for this single edge case
+          EDGE_RESULTS="$RESULTS_BASE/$EDGE_NAME"
+          mkdir -p "$EDGE_RESULTS"
+
+          agent-skills-eval "$EDGE_SKILL_DIR" --baseline --layout iteration --report \
+            --base-url "$BASE_URL" --target "$LLM_MODEL" --judge "$JUDGE_MODEL" \
+            --concurrency 1 --workspace "$EDGE_RESULTS/iteration-1" \
+            --api-key-env OPENAI_API_KEY || true
+
+          echo "Edge case '$EDGE_NAME' complete"
+        done
+
+        echo "All edge case evaluations complete"
+
+    # Step 5c: Aggregate edge case results
+    - name: ase-aggregate-edge-cases
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          exit 0
+        fi
+
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)/edge-cases"
+        REPORTS_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+
+        if [ ! -d "$RESULTS_DIR" ]; then
+          echo "No edge case results to aggregate"
+          exit 0
+        fi
+
+        echo "=== EVALUATE PHASE: Aggregate Edge Case Results ==="
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pyyaml pydantic 2>/dev/null || true
+
+        python scripts/aggregate_edge_case_evals.py \
+          --results-dir "$RESULTS_DIR" \
+          --output-dir "$REPORTS_DIR"
+
     # Step 6: ASE - Run Evaluation
     - name: ase-eval
       image: registry.access.redhat.com/ubi9/nodejs-20:latest

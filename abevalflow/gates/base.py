@@ -22,6 +22,7 @@ class GateType(StrEnum):
     ENGINE = "engine"
     SECURITY = "security"
     QUALITY = "quality"
+    BEHAVIORAL = "behavioral"
 
 
 class GateMode(StrEnum):

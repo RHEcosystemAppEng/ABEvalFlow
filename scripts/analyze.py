@@ -637,7 +637,6 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="LLM model label for the report (e.g. 'Claude Sonnet 4.6 (vertex_ai)')",
     )
-
     args = parser.parse_args(argv)
 
     if args.merge_degradation_from is not None:

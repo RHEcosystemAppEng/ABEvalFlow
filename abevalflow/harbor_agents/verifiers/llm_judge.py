@@ -64,6 +64,14 @@ CRITERIA_DESCRIPTIONS = {
     "completeness": "The response thoroughly covers all aspects of the question/task",
     "clarity": "The response is clear, well-organized, and easy to understand",
     "accuracy": "The response contains accurate technical information",
+    "failure_handling": (
+        "The agent handles errors and failures gracefully, providing clear error messages "
+        "and recovery suggestions rather than crashing or producing garbage output"
+    ),
+    "uncertainty_acknowledgment": (
+        "The agent acknowledges uncertainty when it doesn't know the answer, rather than "
+        "confabulating or presenting uncertain information as fact"
+    ),
 }
 
 

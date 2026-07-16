@@ -187,6 +187,51 @@ def _warn_non_claude_skills_dir(
         )
 
 
+def _write_rendered_templates(
+    rendered: dict[str, str],
+    target_dir: Path,
+) -> Path:
+    """Write rendered templates to a task directory, return the environment dir."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    environment_dir = target_dir / "environment"
+    environment_dir.mkdir(exist_ok=True)
+
+    for filename, content in rendered.items():
+        if filename == "Dockerfile":
+            dest = environment_dir / filename
+        elif filename == "test.sh":
+            tests_dir = target_dir / "tests"
+            tests_dir.mkdir(exist_ok=True)
+            dest = tests_dir / filename
+        else:
+            dest = target_dir / filename
+        dest.write_text(content)
+        if filename == "test.sh":
+            dest.chmod(dest.stat().st_mode | stat.S_IEXEC)
+
+    return environment_dir
+
+
+def _copy_root_dirs(submission_dir: Path, target_dir: Path) -> None:
+    """Copy solution/ and tests/ to task root for Harbor's emptyDir mounts."""
+    for rootdir in ("solution", "tests"):
+        src = submission_dir / rootdir
+        if src.is_dir():
+            shutil.copytree(src, target_dir / rootdir, dirs_exist_ok=True)
+
+
+def _count_edge_cases(submission_dir: Path) -> int:
+    """Count edge case .md files in the submission's edge_cases/ directory.
+
+    Edge cases are evaluated via ASE (not Harbor) so no scaffolding is needed.
+    The ASE pipeline step reads edge_cases/ directly from the submission.
+    """
+    edge_cases_dir = submission_dir / "edge_cases"
+    if not edge_cases_dir.is_dir():
+        return 0
+    return len(list(edge_cases_dir.glob("*.md")))
+
+
 def scaffold_submission(
     submission_dir: Path,
     output_dir: Path,
@@ -228,24 +273,7 @@ def scaffold_submission(
             context["has_claude_md"] = False
             context["has_mcp_json"] = False
         rendered = _render_templates(jinja_env, context)
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        environment_dir = target_dir / "environment"
-        environment_dir.mkdir(exist_ok=True)
-
-        for filename, content in rendered.items():
-            if filename == "Dockerfile":
-                dest = environment_dir / filename
-            elif filename == "test.sh":
-                tests_dir = target_dir / "tests"
-                tests_dir.mkdir(exist_ok=True)
-                dest = tests_dir / filename
-            else:
-                dest = target_dir / filename
-            dest.write_text(content)
-            if filename == "test.sh":
-                dest.chmod(dest.stat().st_mode | stat.S_IEXEC)
+        environment_dir = _write_rendered_templates(rendered, target_dir)
 
         strategy_srcs = [src for src, _ in context.get("copy_pairs", [])]
         _copy_submission_files(submission_dir, environment_dir, strategy_srcs, variant)
@@ -253,17 +281,13 @@ def scaffold_submission(
         # Second copy at task root: Harbor reads instruction.md from the task
         # directory (outside the build context) for display/metadata purposes.
         shutil.copy2(submission_dir / "instruction.md", target_dir / "instruction.md")
-
-        # Copy solution/ and tests/ to task root: the OpenShift backend
-        # mounts emptyDir volumes over /tests and /solution inside the pod,
-        # hiding anything the Dockerfile COPY'd.  Harbor uploads these
-        # directories from the task root into the pod at runtime.
-        for rootdir in ("solution", "tests"):
-            src = submission_dir / rootdir
-            if src.is_dir():
-                shutil.copytree(src, target_dir / rootdir, dirs_exist_ok=True)
+        _copy_root_dirs(submission_dir, target_dir)
 
         logger.info("Scaffolded %s variant at %s", variant, target_dir)
+
+    n_edge_cases = _count_edge_cases(submission_dir)
+    if n_edge_cases:
+        logger.info("Found %d edge case(s) (will be evaluated via ASE)", n_edge_cases)
 
     return treatment_dir, control_dir
 

@@ -242,6 +242,13 @@ spec:
           python3 -c "import sys;sys.path.insert(0,'$PIPELINE_DIR');from pathlib import Path;from abevalflow.report import AnalysisResult;from scripts.analyze import render_markdown;d=Path(sys.argv[1]);r=AnalysisResult.model_validate_json((d/'report.json').read_text());(d/'report.md').write_text(render_markdown(r))" "$REPORT_DIR"
         fi
 
+        # --- 5b. Merge edge case results into report.json (if present) ---
+        EDGE_RESULTS="$REPORT_DIR/edge-case-results.json"
+        if [ -f "$EDGE_RESULTS" ]; then
+          echo "Merging edge case results into report.json..."
+          python3 -c "import json,sys;d=sys.argv[1];e=sys.argv[2];r=json.loads(open(d+'/report.json').read());ec=json.loads(open(e).read());r['edge_case_results']=ec;open(d+'/report.json','w').write(json.dumps(r,indent=2));print(f'Merged {len(ec)} edge case results')" "$REPORT_DIR" "$EDGE_RESULTS"
+        fi
+
         # --- 6. Extract results for Tekton ---
         echo -n "$REPORT_DIR" > "$(results.report-path.path)"
 
