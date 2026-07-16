@@ -19,6 +19,8 @@ import logging
 import sys
 from pathlib import Path
 
+from abevalflow.certification import DEFAULT_EDGE_CASE_PASS_THRESHOLD
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +57,7 @@ def aggregate_edge_case_results(results_dir: Path) -> list[dict]:
 
         total_passed = 0
         total_count = 0
+        parse_failed = False
         for grading_path in with_skill_gradings:
             try:
                 data = json.loads(grading_path.read_text())
@@ -62,13 +65,16 @@ def aggregate_edge_case_results(results_dir: Path) -> list[dict]:
                 total_passed += summary.get("passed", 0)
                 total_count += summary.get("total", 0)
             except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to parse %s: %s", grading_path, e)
+                logger.warning("Failed to parse %s — counted as failure: %s", grading_path, e)
+                parse_failed = True
+                break
 
-        if total_count == 0:
+        if parse_failed or total_count == 0:
             edge_results.append({"name": edge_name, "passed": False, "score": 0.0})
         else:
             score = total_passed / total_count
-            edge_results.append({"name": edge_name, "passed": score >= 0.5, "score": score})
+            passed = score >= DEFAULT_EDGE_CASE_PASS_THRESHOLD
+            edge_results.append({"name": edge_name, "passed": passed, "score": score})
 
     return edge_results
 

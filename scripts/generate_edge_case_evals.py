@@ -18,6 +18,8 @@ import logging
 import sys
 from pathlib import Path
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_ASSERTIONS = [
@@ -51,8 +53,6 @@ def generate_edge_case_evals(
     if skill_name is None:
         metadata_path = submission_dir / "metadata.yaml"
         if metadata_path.exists():
-            import yaml
-
             with metadata_path.open() as f:
                 meta = yaml.safe_load(f) or {}
             skill_name = meta.get("name", "unknown-skill")
@@ -148,8 +148,6 @@ def main(argv: list[str] | None = None) -> int:
         skill_name = args.skill_name or "unknown-skill"
         metadata_path = args.submission_dir / "metadata.yaml"
         if metadata_path.exists() and not args.skill_name:
-            import yaml
-
             with metadata_path.open() as f:
                 meta = yaml.safe_load(f) or {}
             skill_name = meta.get("name", skill_name)
