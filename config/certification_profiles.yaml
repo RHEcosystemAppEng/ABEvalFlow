@@ -86,7 +86,7 @@ profiles:
     certified:
       checks:
         - enterprise_structure_validation
-        # - enterprise_behavioral_testing  # Implemented but not wired into pipeline yet
+        # - enterprise_behavioral_testing  # Enabled for skill profile only
         - advanced_agent_validation
         # - safety_toxicity_bias_guardrails  # Not yet implemented
 
@@ -113,7 +113,7 @@ profiles:
       checks:
         - enterprise_structure_validation
         - enterprise_security_review
-        # - enterprise_behavioral_testing  # Implemented but not wired into pipeline yet
+        # - enterprise_behavioral_testing  # Enabled for skill profile only
         - advanced_agent_validation
         # Not yet implemented:
         # - continuous_optimization

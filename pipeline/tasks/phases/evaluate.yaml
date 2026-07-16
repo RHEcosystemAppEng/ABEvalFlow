@@ -421,7 +421,7 @@ spec:
         set -euo pipefail
 
         EVAL_ENGINE="$(params.eval-engine)"
-        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "both" ]; then
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
           echo "Skipping edge case eval (eval-engine=$EVAL_ENGINE)"
           exit 0
         fi
@@ -525,7 +525,7 @@ spec:
         set -euo pipefail
 
         EVAL_ENGINE="$(params.eval-engine)"
-        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "both" ]; then
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
           exit 0
         fi
 
