@@ -493,15 +493,27 @@ spec:
           mkdir -p "$EDGE_SKILL_DIR/evals"
           cp "$SKILL_MD" "$EDGE_SKILL_DIR/SKILL.md"
 
-          # Generate single-entry evals.json for this edge case
-          cd "$PIPELINE_DIR"
-          export PYTHONPATH="$PIPELINE_DIR"
-          python scripts/generate_edge_case_evals.py \
-            --submission-dir "$SUBMISSION_PATH" \
-            --output-dir "$EDGE_SKILL_DIR/evals" \
-            --edge-case-file "$MD_FILE"
-
-          mv "$EDGE_SKILL_DIR/evals/edge-case-evals.json" "$EDGE_SKILL_DIR/evals/evals.json"
+          # Generate single-entry evals.json using node (Python not available in this image)
+          node -e "
+            const fs = require('fs');
+            const prompt = fs.readFileSync(process.argv[1], 'utf8').trim();
+            const name = process.argv[2];
+            const skill = process.argv[3];
+            const evals = {
+              skill_name: skill,
+              evals: [{
+                id: 'edge-' + name,
+                name: 'Edge case: ' + name,
+                prompt: prompt,
+                assertions: [
+                  'The response handles the edge case appropriately without crashing or producing nonsensical output',
+                  'The response acknowledges limitations or uncertainty when the input is unusual',
+                  'The response remains helpful and coherent despite the edge case conditions'
+                ]
+              }]
+            };
+            fs.writeFileSync(process.argv[4], JSON.stringify(evals, null, 2));
+          " "$MD_FILE" "$EDGE_NAME" "$(params.submission-name)" "$EDGE_SKILL_DIR/evals/evals.json"
 
           # Run ASE for this single edge case
           EDGE_RESULTS="$RESULTS_BASE/$EDGE_NAME"
