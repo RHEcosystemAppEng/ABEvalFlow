@@ -10,7 +10,7 @@ spec:
   description: >-
     Testing phase: runs security scanning (Cisco skill-scanner) and quality
     review checks. Results are persisted immediately to MinIO/DB after each
-    check completes. Skipped entirely for MCPChecker eval-engine.
+    check completes. Identical for harbor, ASE, and AEH; skipped for MCPChecker.
   params:
     - name: submission-dir
       type: string
@@ -20,7 +20,7 @@ spec:
       description: Validated submission name from metadata.yaml
     - name: eval-engine
       type: string
-      description: Evaluation engine (harbor, ase, mcpchecker, both)
+      description: Evaluation engine (harbor, ase, mcpchecker, a2a, aeh, both)
     - name: report-prefix
       type: string
       description: MinIO report prefix (timestamp_name_runid)
@@ -91,9 +91,9 @@ spec:
         
         EVAL_ENGINE="$(params.eval-engine)"
         
-        # MCPChecker doesn't need testing phase
+        # MCPChecker has no skill submission layout to scan
         if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
-          echo "MCPChecker mode: skipping test phase"
+          echo "Skipping test phase for eval-engine=$EVAL_ENGINE"
           echo -n "true" > "$(results.security-passed.path)"
           echo -n "disabled" > "$(results.security-mode.path)"
           echo -n "0" > "$(results.security-findings.path)"
@@ -150,7 +150,7 @@ spec:
         
         EVAL_ENGINE="$(params.eval-engine)"
         if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
-          echo "MCPChecker mode: security scan skipped"
+          echo "Skipping security scan for eval-engine=$EVAL_ENGINE"
           exit 0
         fi
         
@@ -174,9 +174,23 @@ spec:
         SARIF_PATH="$REPORT_DIR/security-scan.sarif"
         mkdir -p "$REPORT_DIR"
         
-        # Handle ASE structure
-        if [ -d "$SUBMISSION_PATH/skills" ] && [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
+        # Point Cisco at the skill package root that contains SKILL.md:
+        # - ASE flat: skills/SKILL.md → scan skills/
+        # - AEH nested: skills/<name>/SKILL.md → scan skills/<name>/
+        # skill-scanner scan expects a skill dir, not the whole submission tree.
+        if [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
           SUBMISSION_PATH="$SUBMISSION_PATH/skills"
+        else
+          SKILL_MD=$(find "$SUBMISSION_PATH" -name 'SKILL.md' -type f 2>/dev/null | head -1 || true)
+          if [ -n "$SKILL_MD" ]; then
+            SUBMISSION_PATH="$(dirname "$SKILL_MD")"
+            echo "Using nested skill package for Cisco scan: $SUBMISSION_PATH"
+          else
+            echo "WARN: SKILL.md was not found in submission; skipping Cisco security scan"
+            echo -n "true" > "$(results.security-passed.path)"
+            echo -n "0" > "$(results.security-findings.path)"
+            exit 0
+          fi
         fi
         
         # Install scanner
@@ -257,7 +271,8 @@ spec:
         if not db_url:
             sys.exit(0)
         
-        findings_json = None
+        # Column is NOT NULL — use empty list when the scanner produced no JSON.
+        findings_json = "[]"
         counts = {"total": 0, "critical": 0, "high": 0}
         if os.path.isfile(json_path):
             with open(json_path) as f:
@@ -274,7 +289,7 @@ spec:
             conn.execute(text("""
                 INSERT INTO security_scans (id, pipeline_run_id, submission_name, scanner, scan_mode, passed, findings_count, critical_count, high_count, findings_json, created_at)
                 VALUES (:id, :run, :name, 'cisco', :mode, :passed, :total, :critical, :high, :json, NOW())
-                ON CONFLICT (pipeline_run_id) DO UPDATE SET findings_count=EXCLUDED.findings_count, critical_count=EXCLUDED.critical_count, high_count=EXCLUDED.high_count, passed=EXCLUDED.passed
+                ON CONFLICT (pipeline_run_id) DO UPDATE SET findings_count=EXCLUDED.findings_count, critical_count=EXCLUDED.critical_count, high_count=EXCLUDED.high_count, passed=EXCLUDED.passed, findings_json=EXCLUDED.findings_json
             """), {"id": str(uuid.uuid4()), "run": run_id, "name": sub_name, "mode": mode, "passed": passed == "true", "total": counts["total"], "critical": counts["critical"], "high": counts["high"], "json": findings_json})
             conn.commit()
         print("DB record written")
@@ -296,7 +311,7 @@ spec:
 
         EVAL_ENGINE="$(params.eval-engine)"
         if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
-          echo "MCPChecker mode: SKILL.md scan skipped"
+          echo "Skipping SKILL.md scan for eval-engine=$EVAL_ENGINE"
           exit 0
         fi
 
@@ -315,9 +330,12 @@ spec:
         JSON_PATH="$REPORT_DIR/skillmd-security-scan.json"
         mkdir -p "$REPORT_DIR"
 
-        if [ -d "$SUBMISSION_PATH/skills" ] && [ -f "$SUBMISSION_PATH/skills/SKILL.md" ]; then
-          SUBMISSION_PATH="$SUBMISSION_PATH/skills"
+        SKILL_MD=$(find "$SUBMISSION_PATH" -name 'SKILL.md' -type f 2>/dev/null | head -1 || true)
+        if [ -z "$SKILL_MD" ]; then
+          echo "WARN: SKILL.md was not found in submission; skipping SKILL.md security scan"
+          exit 0
         fi
+        echo "Found SKILL.md at: $SKILL_MD"
 
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         pip install --quiet --no-cache-dir pydantic pyyaml openai 2>&1 | tail -3
@@ -363,6 +381,13 @@ spec:
         WORKSPACE_ROOT="$(workspaces.source.path)"
         JSON_PATH="$WORKSPACE_ROOT/skillmd-quality-scan.json"
 
+        SKILL_MD=$(find "$SUBMISSION_PATH" -name 'SKILL.md' -type f 2>/dev/null | head -1 || true)
+        if [ -z "$SKILL_MD" ]; then
+          echo "WARN: SKILL.md was not found in submission; skipping SKILL.md quality scan"
+          exit 0
+        fi
+        echo "Found SKILL.md at: $SKILL_MD"
+
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
         pip install --quiet --no-cache-dir pydantic pyyaml 2>&1 | tail -3
         export PYTHONPATH="$PIPELINE_DIR"
@@ -397,7 +422,7 @@ spec:
         SUBMISSION_SKIP="$(params.submission-skip-quality-review)"
         
         if [ "$EVAL_ENGINE" = "mcpchecker" ]; then
-          echo "MCPChecker mode: quality review skipped"
+          echo "Skipping quality review for eval-engine=$EVAL_ENGINE"
           exit 0
         fi
         
@@ -424,10 +449,16 @@ spec:
         # Save to workspace for later use
         cp /tmp/review-output.json "$(workspaces.source.path)/_ai_review.json" 2>/dev/null || true
         
-        PASSED=$(python3 -c "import json; print(str(json.load(open('/tmp/review-output.json')).get('passed', False)).lower())" 2>/dev/null || echo "true")
-        echo -n "$PASSED" > "$(results.quality-passed.path)"
-        
-        echo "Quality review: passed=$PASSED"
+        REC=$(python3 -c "import json; print(json.load(open('/tmp/review-output.json')).get('recommendation', 'warn'))" 2>/dev/null || echo "warn")
+        # AEH quality review is advisory: never fail the test phase on recommendation.
+        if [ "$EVAL_ENGINE" = "aeh" ]; then
+          echo -n "true" > "$(results.quality-passed.path)"
+          echo "Quality review (AEH advisory): recommendation=$REC, quality-passed=true"
+        else
+          PASSED=$(python3 -c "import json; print(str(json.load(open('/tmp/review-output.json')).get('passed', False)).lower())" 2>/dev/null || echo "true")
+          echo -n "$PASSED" > "$(results.quality-passed.path)"
+          echo "Quality review: passed=$PASSED recommendation=$REC"
+        fi
 
     # Step 6: Finalize results
     - name: finalize

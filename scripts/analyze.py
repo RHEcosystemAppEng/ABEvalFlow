@@ -536,6 +536,31 @@ def render_markdown(result: AnalysisResult) -> str:
                 lines.append("\n</details>\n")
             lines.append("")
 
+    # --- Pairwise comparison (AEH) ---
+    if result.pairwise is not None:
+        pw = result.pairwise
+        lines.append("## Pairwise Comparison\n")
+        lines.append(f"- **Treatment run:** `{pw.run_a}`")
+        lines.append(f"- **Control run:** `{pw.run_b}`")
+        lines.append(f"- **Cases compared:** {pw.cases_compared}")
+        lines.append(f"- **Treatment wins:** {pw.wins_a}")
+        lines.append(f"- **Control wins:** {pw.wins_b}")
+        lines.append(f"- **Ties:** {pw.ties}")
+        lines.append(f"- **Errors:** {pw.errors}")
+        lines.append(f"- **Treatment win rate:** {_fmt(pw.win_rate)}")
+        if pw.per_case:
+            lines.append("\n<details>\n<summary>Per-case winners</summary>\n")
+            lines.append("| Case | Winner |")
+            lines.append("|------|--------|")
+            for entry in pw.per_case:
+                if not isinstance(entry, dict):
+                    continue
+                case_id = entry.get("case_id") or entry.get("case") or entry.get("id") or "?"
+                winner = entry.get("winner") or entry.get("verdict") or entry.get("result") or "?"
+                lines.append(f"| {case_id} | {winner} |")
+            lines.append("\n</details>\n")
+        lines.append("")
+
     # --- Per-trial details ---
     lines.append("## Trial Details\n")
     if is_a2a:
@@ -614,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--eval-engine",
         type=str,
-        choices=["harbor", "ase", "both", "a2a"],
+        choices=["harbor", "ase", "both", "a2a", "aeh"],
         default="harbor",
         help="Evaluation engine used (for provenance tagging and analysis path)",
     )

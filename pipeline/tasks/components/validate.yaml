@@ -28,9 +28,22 @@ spec:
       type: string
       default: "harbor"
       description: >-
-        Evaluation engine (harbor, ase, both). Controls which validation
+        Evaluation engine (harbor, ase, both, aeh). Controls which validation
         checks are run — Harbor checks require instruction.md and tests/,
-        ASE checks require evals/evals.json and SKILL.md frontmatter.
+        ASE checks require evals/evals.json and SKILL.md frontmatter,
+        AEH checks require eval.yaml and cases/.
+    - name: aeh-mode
+      type: string
+      default: "single"
+      description: AEH evaluation mode (single, pairwise)
+    - name: aeh-control-config
+      type: string
+      default: "eval-control.yaml"
+      description: Control variant eval.yaml filename for AEH pairwise mode
+    - name: aeh-treatment-config
+      type: string
+      default: "eval-treatment.yaml"
+      description: Treatment variant eval.yaml filename for AEH pairwise mode
     - name: pipeline-run-name
       type: string
       description: Name of the PipelineRun (for building report prefix)
@@ -102,6 +115,9 @@ spec:
         # Run validation and capture output
         python scripts/validate.py "$SUBMISSION_PATH" \
           --eval-engine "$(params.eval-engine)" \
+          --aeh-mode "$(params.aeh-mode)" \
+          --aeh-control-config "$(params.aeh-control-config)" \
+          --aeh-treatment-config "$(params.aeh-treatment-config)" \
           | tee /tmp/validation-output.json
 
         # Write to Tekton result
