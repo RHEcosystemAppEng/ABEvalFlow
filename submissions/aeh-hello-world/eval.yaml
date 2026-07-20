@@ -1,0 +1,51 @@
+# Agent-Eval-Harness evaluation configuration
+# This is a minimal example for testing the AEH pipeline integration
+
+skill: aeh-hello-world
+
+# Runner configuration
+runner:
+  type: claude-code
+  effort: low
+  settings:
+    permission_mode: bypassPermissions
+
+# Model configuration
+models:
+  skill: claude-sonnet-4-5
+  judge: claude-sonnet-4-5
+
+# Dataset location (relative to submission)
+dataset:
+  path: cases
+
+# Judges evaluate each case
+judges:
+  - name: correctness
+    type: llm
+    prompt: |
+      Evaluate whether the agent's response correctly addresses the user's request.
+      Score 1.0 if fully correct, 0.5 if partially correct, 0.0 if incorrect.
+      
+      User request: {input}
+      Agent response: {output}
+      
+      Respond with a JSON object: {"score": <number>, "reason": "<explanation>"}
+  
+  - name: helpfulness
+    type: llm
+    prompt: |
+      Evaluate how helpful and complete the agent's response is.
+      Score 1.0 if very helpful, 0.5 if somewhat helpful, 0.0 if not helpful.
+      
+      User request: {input}
+      Agent response: {output}
+      
+      Respond with a JSON object: {"score": <number>, "reason": "<explanation>"}
+
+# Thresholds for pass/fail
+thresholds:
+  correctness:
+    min_mean: 0.7
+  helpfulness:
+    min_mean: 0.5

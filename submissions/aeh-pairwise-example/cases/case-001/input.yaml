@@ -1,0 +1,14 @@
+# Test case: Simple coding task
+prompt: |
+  Write a Python function that calculates the factorial of a given number.
+  Include proper error handling for negative numbers and non-integer inputs.
+  The function should be well-documented with a docstring.
+
+context:
+  language: python
+  difficulty: medium
+  expected_behavior: |
+    - Accept an integer n >= 0
+    - Return n! (n factorial)
+    - Raise ValueError for negative numbers
+    - Handle edge case of 0! = 1
