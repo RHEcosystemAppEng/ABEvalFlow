@@ -29,6 +29,7 @@ class EvalEngine(StrEnum):
     ASE = "ase"
     MCPCHECKER = "mcpchecker"
     A2A = "a2a"
+    AEH = "aeh"  # Agent-Eval-Harness
     BOTH = "both"  # Harbor + ASE
 
 

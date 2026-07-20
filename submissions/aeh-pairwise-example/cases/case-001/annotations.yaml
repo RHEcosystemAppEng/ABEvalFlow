@@ -1,0 +1,31 @@
+# Expected annotations for this test case
+expected_output: |
+  A factorial function with error handling and documentation.
+  
+golden_example: |
+  def factorial(n: int) -> int:
+      """Calculate the factorial of a non-negative integer.
+      
+      Args:
+          n: A non-negative integer
+          
+      Returns:
+          The factorial of n (n!)
+          
+      Raises:
+          ValueError: If n is negative
+          TypeError: If n is not an integer
+      """
+      if not isinstance(n, int):
+          raise TypeError("Input must be an integer")
+      if n < 0:
+          raise ValueError("Input must be non-negative")
+      if n == 0:
+          return 1
+      return n * factorial(n - 1)
+
+evaluation_criteria:
+  - Has docstring
+  - Handles negative input
+  - Handles 0 correctly
+  - Uses recursion or iteration correctly

@@ -217,7 +217,13 @@ spec:
           ARGS+=(--pr-number "$(params.pr-number)")
         fi
         RESULTS_DIR="$(params.results-dir)"
-        if [ -z "$RESULTS_DIR" ] && [ "$(params.eval-engine)" != "harbor" ]; then
+        if [ "$(params.eval-engine)" = "aeh" ]; then
+          # Prefer evaluate's AEH results-dir (_eval_tmp); fall back to workspace.
+          # Pairwise jobs are under aeh-*-jobs-*, not aeh-jobs alone.
+          if [ -z "$RESULTS_DIR" ] || [ ! -d "$RESULTS_DIR" ]; then
+            RESULTS_DIR="$(workspaces.source.path)/_eval_tmp"
+          fi
+        elif [ -z "$RESULTS_DIR" ] && [ "$(params.eval-engine)" != "harbor" ]; then
           RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
         fi
         if [ -n "$RESULTS_DIR" ]; then

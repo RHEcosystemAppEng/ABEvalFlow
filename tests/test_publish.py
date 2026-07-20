@@ -14,6 +14,8 @@ from scripts.publish import (
     cleanup_images,
     post_pr_comment,
     promote_to_quay,
+    upload_aeh_debug_artifacts,
+    upload_aeh_run_artifacts,
     upload_debug_artifacts,
     upload_reports,
     upload_scaffolded_configs,
@@ -476,6 +478,187 @@ class TestUploadDebugArtifacts:
         )
 
         mock_client.make_bucket.assert_called_once_with("ab-eval-reports")
+
+
+class TestUploadAehDebugArtifacts:
+    @pytest.fixture
+    def aeh_jobs_dir(self, tmp_path: Path) -> Path:
+        job = tmp_path / "2026-07-19__08-44-52"
+        trial = job / "case-001__abc"
+        (trial / "agent").mkdir(parents=True)
+        (trial / "verifier").mkdir(parents=True)
+        (trial / "agent" / "claude-code.txt").write_text("{}")
+        (trial / "verifier" / "reward.json").write_text('{"reward": 1.0}')
+        (trial / "exception.txt").write_text("boom")
+        (job / "result.json").write_text("{}")
+        (job / "job.log").write_text("ok")
+        return tmp_path
+
+    @patch("minio.Minio")
+    def test_uploads_unpacked_job_tree(self, mock_minio_cls, aeh_jobs_dir):
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        count = upload_aeh_debug_artifacts(
+            results_dir=aeh_jobs_dir,
+            prefix="20260719_prep_aeh-hello_run1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        assert count == 5
+        names = [call[0][1] for call in mock_client.fput_object.call_args_list]
+        assert all(n.startswith("20260719_prep_aeh-hello_run1/debug/harbor/") for n in names)
+        assert any("2026-07-19__08-44-52/case-001__abc/agent/claude-code.txt" in n for n in names)
+        assert any("2026-07-19__08-44-52/result.json" in n for n in names)
+        assert not any(n.endswith(".tar.gz") for n in names)
+
+    def test_missing_jobs_dir(self, tmp_path):
+        assert (
+            upload_aeh_debug_artifacts(
+                results_dir=tmp_path / "missing",
+                prefix="p",
+                endpoint="http://minio:9000",
+                access_key="k",
+                secret_key="s",
+            )
+            == 0
+        )
+
+    @patch("minio.Minio")
+    def test_uploads_pairwise_control_and_treatment_jobs(self, mock_minio_cls, tmp_path: Path):
+        """Pairwise jobs live under aeh-*-jobs-* siblings of _eval_tmp."""
+        eval_tmp = tmp_path / "_eval_tmp"
+        for label in ("control", "treatment"):
+            job = eval_tmp / f"aeh-{label}-jobs-run1" / "2026-07-19__12-00-00"
+            trial = job / "case-001__abc"
+            (trial / "agent").mkdir(parents=True)
+            (trial / "agent" / "out.txt").write_text(label)
+            (job / "result.json").write_text("{}")
+
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        count = upload_aeh_debug_artifacts(
+            results_dir=eval_tmp,
+            prefix="prefix1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+
+        assert count == 4
+        names = [call[0][1] for call in mock_client.fput_object.call_args_list]
+        assert any("debug/harbor/control/2026-07-19__12-00-00/" in n for n in names)
+        assert any("debug/harbor/treatment/2026-07-19__12-00-00/" in n for n in names)
+        assert not any("aeh-control-jobs" in n or "aeh-treatment-jobs" in n for n in names)
+
+    @patch("minio.Minio")
+    def test_single_flattens_aeh_jobs_segment(self, mock_minio_cls, tmp_path: Path):
+        """Single mode: _eval_tmp/aeh-jobs/<ts> → debug/harbor/<ts>/ (no aeh-jobs/)."""
+        eval_tmp = tmp_path / "_eval_tmp"
+        job = eval_tmp / "aeh-jobs" / "2026-07-19__12-00-00"
+        job.mkdir(parents=True)
+        (job / "result.json").write_text("{}")
+        (job / "job.log").write_text("ok")
+
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        count = upload_aeh_debug_artifacts(
+            results_dir=eval_tmp,
+            prefix="prefix1",
+            endpoint="http://minio:9000",
+            access_key="key",
+            secret_key="secret",
+        )
+        assert count == 2
+        names = [call[0][1] for call in mock_client.fput_object.call_args_list]
+        assert any(n.endswith("debug/harbor/2026-07-19__12-00-00/result.json") for n in names)
+        assert not any("/aeh-jobs/" in n for n in names)
+
+
+class TestUploadAehRunArtifacts:
+    def _make_run(self, root: Path, name: str, *, pairwise: bool = False) -> Path:
+        run = root / name
+        (run / "cases" / "case-001" / "artifacts").mkdir(parents=True)
+        (run / "summary.yaml").write_text(
+            "run_id: x\n" + ("pairwise:\n  wins_a: 0\n  ties: 1\n" if pairwise else "judges: {}\n")
+        )
+        (run / "run_result.json").write_text('{"mean_reward": 1.0}')
+        (run / "report.html").write_text("<html>ok</html>")
+        (run / "cases" / "case-001" / "artifacts" / "greeting.txt").write_text("Hello")
+        return run
+
+    @patch("minio.Minio")
+    def test_uploads_single_run_tree(self, mock_minio_cls, tmp_path: Path):
+        report_dir = tmp_path / "reports" / "aeh-hello-world-single"
+        report_dir.mkdir(parents=True)
+        self._make_run(report_dir, "aeh-single-run1")
+        (report_dir / "report.json").write_text("{}")
+
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        count = upload_aeh_run_artifacts(
+            report_dir=report_dir,
+            prefix="prefix-single",
+            endpoint="http://minio:9000",
+            access_key="k",
+            secret_key="s",
+        )
+        assert count == 4
+        names = [call[0][1] for call in mock_client.fput_object.call_args_list]
+        assert any(n.endswith("debug/aeh/aeh-single-run1/summary.yaml") for n in names)
+        assert any(n.endswith("debug/aeh/aeh-single-run1/report.html") for n in names)
+        assert any(n.endswith("debug/aeh/aeh-single-run1/run_result.json") for n in names)
+        assert any("debug/aeh/aeh-single-run1/cases/case-001/artifacts/greeting.txt" in n for n in names)
+        # Top-level aggregate report.json must not be nested under debug/aeh/
+        assert not any("/debug/aeh/report.json" in n for n in names)
+
+    @patch("minio.Minio")
+    def test_uploads_pairwise_control_and_treatment_runs(self, mock_minio_cls, tmp_path: Path):
+        report_dir = tmp_path / "reports" / "aeh-hello-world-pairwise"
+        report_dir.mkdir(parents=True)
+        self._make_run(report_dir, "control-run1")
+        self._make_run(report_dir, "treatment-run1", pairwise=True)
+
+        mock_client = MagicMock()
+        mock_minio_cls.return_value = mock_client
+        mock_client.bucket_exists.return_value = True
+
+        count = upload_aeh_run_artifacts(
+            report_dir=report_dir,
+            prefix="prefix-pw",
+            endpoint="http://minio:9000",
+            access_key="k",
+            secret_key="s",
+        )
+        assert count == 8
+        names = [call[0][1] for call in mock_client.fput_object.call_args_list]
+        assert any("debug/aeh/control-run1/summary.yaml" in n for n in names)
+        assert any("debug/aeh/treatment-run1/summary.yaml" in n for n in names)
+        assert any("debug/aeh/treatment-run1/report.html" in n for n in names)
+
+    def test_missing_runs_returns_zero(self, tmp_path: Path):
+        report_dir = tmp_path / "reports" / "empty"
+        report_dir.mkdir(parents=True)
+        (report_dir / "report.json").write_text("{}")
+        assert (
+            upload_aeh_run_artifacts(
+                report_dir=report_dir,
+                prefix="p",
+                endpoint="http://minio:9000",
+                access_key="k",
+                secret_key="s",
+            )
+            == 0
+        )
 
 
 class TestUpliftThresholdLogic:

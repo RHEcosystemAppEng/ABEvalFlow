@@ -329,6 +329,278 @@ def _check_mcpchecker_tasks(submission_dir: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# AEH-specific checks
+# ---------------------------------------------------------------------------
+
+
+def _check_aeh_eval_yaml_file(eval_path: Path) -> list[str]:
+    """Validate a single AEH eval.yaml file exists and has valid structure.
+
+    AEH eval.yaml requires:
+    - models.skill (or models block)
+    - judges section (dict or list)
+    - Optional: thresholds, mlflow, etc.
+    """
+    if not eval_path.is_file():
+        return [f"{eval_path.name} is required for AEH evaluation"]
+
+    try:
+        data = yaml.safe_load(eval_path.read_text())
+    except yaml.YAMLError as exc:
+        return [f"{eval_path.name} is not valid YAML: {exc}"]
+
+    if not isinstance(data, dict):
+        return [f"{eval_path.name} must be a YAML mapping"]
+
+    errors: list[str] = []
+    filename = eval_path.name
+
+    models = data.get("models")
+    if not models:
+        errors.append(f"{filename}: 'models' section is required")
+    elif isinstance(models, dict):
+        if not models.get("skill"):
+            errors.append(f"{filename}: 'models.skill' is required (e.g., 'claude-sonnet-4-5')")
+    elif isinstance(models, str):
+        pass
+    else:
+        errors.append(f"{filename}: 'models' must be a mapping or string")
+
+    if not data.get("judges"):
+        errors.append(f"{filename}: 'judges' section is required")
+
+    return errors
+
+
+def _check_aeh_eval_yaml(submission_dir: Path) -> list[str]:
+    """Validate eval.yaml exists and has valid AEH structure (single mode)."""
+    return _check_aeh_eval_yaml_file(submission_dir / "eval.yaml")
+
+
+def _check_aeh_plugin_dirs(submission_dir: Path, eval_path: Path) -> list[str]:
+    """If eval.yaml lists plugin_dirs, each must exist and contain a SKILL.md."""
+    if not eval_path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(eval_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    runner = data.get("runner") or {}
+    if not isinstance(runner, dict):
+        return []
+    plugin_dirs = runner.get("plugin_dirs") or []
+    if not plugin_dirs:
+        return []
+
+    errors: list[str] = []
+    skill_name = data.get("skill")
+    for rel in plugin_dirs:
+        root = submission_dir / str(rel)
+        if not root.is_dir():
+            errors.append(
+                f"{eval_path.name}: plugin_dirs entry '{rel}/' is missing "
+                f"(required for Claude slash-skill /{skill_name or '…'})"
+            )
+            continue
+        has_top = (root / "SKILL.md").is_file()
+        has_nested = any((child / "SKILL.md").is_file() for child in root.iterdir() if child.is_dir())
+        if not has_top and not has_nested:
+            errors.append(
+                f"{eval_path.name}: plugin_dirs '{rel}/' must contain SKILL.md (flat or nested skills/<name>/SKILL.md)"
+            )
+        elif skill_name and not has_top:
+            named = root / str(skill_name) / "SKILL.md"
+            if not named.is_file():
+                errors.append(
+                    f"{eval_path.name}: skill '{skill_name}' requires "
+                    f"{rel}/{skill_name}/SKILL.md for /{skill_name} slash command"
+                )
+    return errors
+
+
+def _check_aeh_cases(submission_dir: Path) -> list[str]:
+    """Validate cases/ directory exists with at least one case.
+
+    Each case directory must contain:
+    - input.yaml (required)
+    - annotations.yaml (optional)
+    """
+    cases_dir = submission_dir / "cases"
+    if not cases_dir.is_dir():
+        return ["cases/ directory is required for AEH evaluation"]
+
+    case_dirs = [d for d in cases_dir.iterdir() if d.is_dir()]
+    if not case_dirs:
+        return ["cases/ must contain at least one case directory (e.g., cases/case-001/)"]
+
+    errors: list[str] = []
+    for case_dir in sorted(case_dirs):
+        rel = case_dir.relative_to(submission_dir)
+        input_path = case_dir / "input.yaml"
+        if not input_path.is_file():
+            errors.append(f"{rel}: missing required input.yaml")
+            continue
+
+        try:
+            data = yaml.safe_load(input_path.read_text())
+        except yaml.YAMLError as exc:
+            errors.append(f"{rel}/input.yaml: invalid YAML: {exc}")
+            continue
+
+        if not isinstance(data, dict):
+            errors.append(f"{rel}/input.yaml: must be a YAML mapping")
+
+    return errors
+
+
+def _check_aeh_pairwise_contract(eval_path: Path) -> list[str]:
+    """Pairwise mode requires outputs: and a pairwise LLM judge for score.py."""
+    if not eval_path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(eval_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []
+
+    errors: list[str] = []
+    filename = eval_path.name
+
+    outputs = data.get("outputs") or []
+    has_path = False
+    if isinstance(outputs, list):
+        for out in outputs:
+            if isinstance(out, dict) and out.get("path"):
+                has_path = True
+                break
+            if isinstance(out, str) and out.strip():
+                has_path = True
+                break
+    if not has_path:
+        errors.append(
+            f"{filename}: pairwise mode requires outputs: with at least one path "
+            "(e.g. path: output) so score.py can compare case artifacts"
+        )
+
+    judges = data.get("judges") or []
+    has_pairwise = False
+    if isinstance(judges, list):
+        for judge in judges:
+            if not isinstance(judge, dict):
+                continue
+            name = str(judge.get("name") or "").lower()
+            jtype = str(judge.get("type") or "").lower()
+            if name == "pairwise" or (jtype == "llm" and "pairwise" in name):
+                has_pairwise = True
+                break
+            if jtype == "llm" and (judge.get("prompt") or judge.get("prompt_file")):
+                # Accept any LLM judge as fallback (score.py does too)
+                has_pairwise = True
+                break
+    elif isinstance(judges, dict):
+        has_pairwise = "pairwise" in judges or any(
+            isinstance(v, dict) and (v.get("type") == "llm" or v.get("prompt")) for v in judges.values()
+        )
+    if not has_pairwise:
+        errors.append(
+            f"{filename}: pairwise mode requires a 'pairwise' LLM judge "
+            "(or another LLM judge with prompt) for score.py pairwise"
+        )
+
+    return errors
+
+
+def _check_aeh_structure(
+    submission_dir: Path,
+    aeh_mode: str = "single",
+    control_config: str = "eval-control.yaml",
+    treatment_config: str = "eval-treatment.yaml",
+) -> list[str]:
+    """Run all AEH-specific validation checks.
+
+    Args:
+        submission_dir: Path to the submission directory
+        aeh_mode: Either "single" or "pairwise"
+        control_config: Control variant config filename for pairwise mode
+        treatment_config: Treatment variant config filename for pairwise mode
+    """
+    errors: list[str] = []
+
+    if aeh_mode == "pairwise":
+        control_path = submission_dir / control_config
+        treatment_path = submission_dir / treatment_config
+
+        if not control_path.is_file():
+            errors.append(f"AEH pairwise: missing {control_config}")
+        else:
+            errors.extend(_check_aeh_eval_yaml_file(control_path))
+            errors.extend(_check_aeh_plugin_dirs(submission_dir, control_path))
+
+        if not treatment_path.is_file():
+            errors.append(f"AEH pairwise: missing {treatment_config}")
+        else:
+            errors.extend(_check_aeh_eval_yaml_file(treatment_path))
+            errors.extend(_check_aeh_plugin_dirs(submission_dir, treatment_path))
+            # Treatment config drives score.py pairwise — enforce contract there
+            errors.extend(_check_aeh_pairwise_contract(treatment_path))
+    else:
+        errors.extend(_check_aeh_eval_yaml(submission_dir))
+        errors.extend(_check_aeh_plugin_dirs(submission_dir, submission_dir / "eval.yaml"))
+
+    errors.extend(_check_aeh_cases(submission_dir))
+    errors.extend(_check_aeh_skill_matches_metadata(submission_dir, aeh_mode, control_config, treatment_config))
+    return errors
+
+
+def _check_aeh_skill_matches_metadata(
+    submission_dir: Path,
+    aeh_mode: str,
+    control_config: str,
+    treatment_config: str,
+) -> list[str]:
+    """Require eval.yaml skill to match metadata.name (analyze uses submission-name).
+
+    Pipeline report.json is keyed by submission-name (usually metadata.name). AEH
+    run dirs use the skill field for score.py. Mismatches break analyze after a
+    successful eval.
+    """
+    meta_path = submission_dir / "metadata.yaml"
+    if not meta_path.is_file():
+        return []
+    try:
+        meta = yaml.safe_load(meta_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []
+    meta_name = meta.get("name")
+    if not meta_name:
+        return []
+
+    config_paths: list[Path]
+    if aeh_mode == "pairwise":
+        config_paths = [submission_dir / control_config, submission_dir / treatment_config]
+    else:
+        config_paths = [submission_dir / "eval.yaml"]
+
+    errors: list[str] = []
+    for path in config_paths:
+        if not path.is_file():
+            continue
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except yaml.YAMLError:
+            continue
+        skill = data.get("skill")
+        if skill and skill != meta_name:
+            errors.append(
+                f"{path.name}: skill '{skill}' must match metadata.name '{meta_name}' "
+                "(analyze reads reports/<submission-name>/report.json)"
+            )
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Main validation
 # ---------------------------------------------------------------------------
 
@@ -336,8 +608,19 @@ def _check_mcpchecker_tasks(submission_dir: Path) -> list[str]:
 def validate_submission(
     submission_dir: Path,
     eval_engine: EvalEngine = EvalEngine.HARBOR,
+    aeh_mode: str = "single",
+    aeh_control_config: str = "eval-control.yaml",
+    aeh_treatment_config: str = "eval-treatment.yaml",
 ) -> list[str]:
-    """Run validation checks based on the eval engine and return error strings."""
+    """Run validation checks based on the eval engine and return error strings.
+
+    Args:
+        submission_dir: Path to the submission directory
+        eval_engine: Which evaluation engine to validate for
+        aeh_mode: AEH mode - "single" or "pairwise"
+        aeh_control_config: Control config filename for AEH pairwise mode
+        aeh_treatment_config: Treatment config filename for AEH pairwise mode
+    """
     logger.info("Validating submission: %s (eval_engine=%s)", submission_dir, eval_engine)
     errors: list[str] = []
 
@@ -345,13 +628,14 @@ def validate_submission(
     run_ase = eval_engine in (EvalEngine.ASE, EvalEngine.BOTH)
     run_mcpchecker = eval_engine == EvalEngine.MCPCHECKER
     run_a2a = eval_engine == EvalEngine.A2A
+    run_aeh = eval_engine == EvalEngine.AEH
 
     # Common: metadata.yaml is always required
     metadata_errors, metadata = _check_metadata_yaml(submission_dir)
     errors.extend(metadata_errors)
 
-    # MCPChecker and A2A have their own structure - skip skills/ check
-    if not run_mcpchecker and not run_a2a:
+    # MCPChecker, A2A, and AEH have their own structure - skip skills/ check
+    if not run_mcpchecker and not run_a2a and not run_aeh:
         errors.extend(_check_skills_dir(submission_dir))
 
     if run_harbor:
@@ -384,8 +668,18 @@ def validate_submission(
         if not has_instruction and not has_task_toml and not has_tasks_dir:
             errors.append("A2A evaluation requires instruction.md, task.toml, or tasks/ directory")
 
-    # Common: supportive/ size check (skip for mcpchecker and a2a)
-    if not run_mcpchecker and not run_a2a:
+    if run_aeh:
+        errors.extend(
+            _check_aeh_structure(
+                submission_dir,
+                aeh_mode=aeh_mode,
+                control_config=aeh_control_config,
+                treatment_config=aeh_treatment_config,
+            )
+        )
+
+    # Common: supportive/ size check (skip for mcpchecker, a2a, and aeh)
+    if not run_mcpchecker and not run_a2a and not run_aeh:
         errors.extend(_check_supportive_size(submission_dir))
 
     if errors:
@@ -401,9 +695,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--eval-engine",
         type=str,
-        choices=["harbor", "ase", "mcpchecker", "a2a", "both"],
+        choices=["harbor", "ase", "mcpchecker", "a2a", "aeh", "both"],
         default="harbor",
         help="Evaluation engine (controls which checks run)",
+    )
+    parser.add_argument(
+        "--aeh-mode",
+        type=str,
+        choices=["single", "pairwise"],
+        default="single",
+        help="AEH evaluation mode (single or pairwise)",
+    )
+    parser.add_argument(
+        "--aeh-control-config",
+        type=str,
+        default="eval-control.yaml",
+        help="Control variant eval.yaml filename for AEH pairwise mode",
+    )
+    parser.add_argument(
+        "--aeh-treatment-config",
+        type=str,
+        default="eval-treatment.yaml",
+        help="Treatment variant eval.yaml filename for AEH pairwise mode",
     )
     args = parser.parse_args(argv)
 
@@ -414,7 +727,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     engine = EvalEngine(args.eval_engine)
-    errors = validate_submission(submission_dir, eval_engine=engine)
+    errors = validate_submission(
+        submission_dir,
+        eval_engine=engine,
+        aeh_mode=args.aeh_mode,
+        aeh_control_config=args.aeh_control_config,
+        aeh_treatment_config=args.aeh_treatment_config,
+    )
     result = {"valid": len(errors) == 0, "errors": errors}
     print(json.dumps(result, indent=2))
     return 0 if result["valid"] else 1

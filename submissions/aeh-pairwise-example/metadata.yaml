@@ -1,0 +1,12 @@
+schema_version: "1.0"
+name: aeh-pairwise-example
+description: Sample AEH pairwise A/B comparison submission (treatment vs control)
+persona: rh-developer
+version: "0.1.0"
+author: ABEvalFlow Team
+eval_engine: aeh
+tags:
+  - sample
+  - aeh
+  - pairwise
+  - a-b-testing

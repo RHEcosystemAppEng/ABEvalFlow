@@ -25,7 +25,19 @@ spec:
     - name: eval-engine
       type: string
       default: "harbor"
-      description: Evaluation engine (harbor, ase, mcpchecker, both)
+      description: Evaluation engine (harbor, ase, mcpchecker, aeh, both)
+    - name: aeh-mode
+      type: string
+      default: "single"
+      description: AEH evaluation mode (single, pairwise)
+    - name: aeh-control-config
+      type: string
+      default: "eval-control.yaml"
+      description: Control variant eval.yaml filename for AEH pairwise mode
+    - name: aeh-treatment-config
+      type: string
+      default: "eval-treatment.yaml"
+      description: Treatment variant eval.yaml filename for AEH pairwise mode
     - name: pipeline-repo-url
       type: string
       default: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
@@ -234,6 +246,9 @@ spec:
         
         python scripts/validate.py "$SUBMISSION_PATH" \
           --eval-engine "$(params.eval-engine)" \
+          --aeh-mode "$(params.aeh-mode)" \
+          --aeh-control-config "$(params.aeh-control-config)" \
+          --aeh-treatment-config "$(params.aeh-treatment-config)" \
           | tee /tmp/validation-output.json
         
         cat /tmp/validation-output.json | tr -d '\n' > "$(results.validation-result.path)"

@@ -1,0 +1,102 @@
+# Agent-Eval-Harness (AEH) runner image for ABEvalFlow
+#
+# This image contains the agent-eval-harness framework pre-installed,
+# along with Harbor and necessary dependencies for running evaluations
+# in a Kubernetes/OpenShift environment.
+#
+# Build (from repo root — COPY abevalflow requires repo-root context):
+#   podman build -t quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3 \
+#     --build-arg AEH_SHA=<commit-sha> \
+#     -f containers/agent-eval-harness/Containerfile .
+#
+# Required build args (PIN BEFORE BUILDING):
+#   AEH_SHA: Commit SHA of agent-eval-harness repo (7-40 hex chars; no branch/HEAD)
+#
+# Published smoke-tested image: quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3
+# Rebuilds from this Containerfile must pin AEH_SHA to the same upstream commit
+# used for that tag (inspect image labels / build logs) — do not leave the
+# REPLACE_WITH_COMMIT_SHA placeholder.
+#
+# Note: Uses official Harbor from PyPI (>=0.13.0), not the skills_eval_corrections fork.
+# The fork's OpenShift backend is only needed for Harbor engine evaluations, not AEH.
+
+FROM registry.access.redhat.com/ubi9/python-312:latest
+
+# Build args - MUST be pinned to specific commits for reproducibility
+# Build will FAIL if SHA is not provided (no default branch names allowed)
+# Example: --build-arg AEH_SHA=abc123def456
+ARG AEH_REPO=https://github.com/opendatahub-io/agent-eval-harness.git
+ARG AEH_SHA=REPLACE_WITH_COMMIT_SHA
+
+LABEL name="agent-eval-harness" \
+      vendor="Red Hat Ecosystem App Engineering" \
+      description="Agent-Eval-Harness runner for ABEvalFlow pipeline" \
+      io.k8s.display-name="AEH Runner" \
+      io.openshift.tags="abevalflow,evaluation,agent-eval-harness"
+
+USER 0
+
+# System dependencies
+# Node.js + npm for claude-code agent CLI
+# git for cloning repos at build time
+# tar for layer operations
+RUN dnf install -y nodejs npm git tar && dnf clean all
+
+# Agent CLIs (Claude Code)
+RUN npm install -g @anthropic-ai/claude-code
+
+# Validate SHA build arg - must be 7-40 char hex commit SHA
+# Rejects HEAD, main, master, branch names, or placeholder defaults
+RUN if ! echo "${AEH_SHA}" | grep -qE '^[0-9a-fA-F]{7,40}$'; then \
+      echo "ERROR: AEH_SHA must be a 7-40 char hex commit SHA, got '${AEH_SHA}'" >&2; \
+      echo "Usage: --build-arg AEH_SHA=abc123def456..." >&2; \
+      exit 1; \
+    fi
+
+# Clone agent-eval-harness at pinned SHA
+# Fetch main branch then checkout specific commit (can't shallow-fetch a SHA directly)
+RUN git init /opt/agent-eval-harness \
+    && cd /opt/agent-eval-harness \
+    && git remote add origin ${AEH_REPO} \
+    && git fetch origin main \
+    && git checkout ${AEH_SHA} \
+    && rm -rf .git
+
+# Copy abevalflow module for OpenShift environment extensions
+# This provides OpenShiftEnvironment class that adds emptyDir mounts for /workspace and /tmp
+# Required by trial pods to work with OpenShift's read-only root filesystem (restricted-v2 SCC)
+COPY --chown=1001:0 abevalflow /opt/agent-eval-harness/abevalflow
+
+# Python dependencies
+# - Harbor (official PyPI package >=0.13.0 required by agent-eval-harness)
+# - Kubernetes client for K8s environment
+# - YAML/JSON handling
+# - Anthropic SDK with Vertex AI support
+# - Jinja2 for template rendering
+# - SciPy for statistical functions
+RUN pip install --no-cache-dir \
+    "harbor>=0.13.0" \
+    "kubernetes>=32.0.0" \
+    pyyaml \
+    "anthropic[vertex]" \
+    jinja2 \
+    scipy
+
+# Set up environment
+ENV PYTHONPATH=/opt/agent-eval-harness \
+    HOME=/workspace
+
+# OpenShift-compatible permissions
+# - /workspace: Working directory for evaluations
+# - /logs: Harbor log output
+# - /tests: Test artifacts
+# - /solution: Agent solution artifacts
+# - /opt/agent-eval-harness: AEH package (needs read access)
+RUN mkdir -p /workspace /logs /tests /solution \
+    && chgrp -R 0 /workspace /logs /tests /solution /opt/agent-eval-harness \
+    && chmod -R g=u /workspace /logs /tests /solution /opt/agent-eval-harness
+
+WORKDIR /workspace
+
+# Run as non-root (OpenShift assigns arbitrary UID in restricted-v2 SCC)
+USER 1001

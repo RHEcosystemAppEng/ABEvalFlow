@@ -33,7 +33,7 @@ The pipeline executes in six main stages, with engine-specific steps within each
 - **Security Scan** — Cisco AI Defense scan for prompt injection, data exfiltration risks
 
 ### 3. Evaluate
-Four evaluation engines, each suited for different artifact types:
+Five evaluation engines, each suited for different artifact types:
 
 | Engine | Evaluates | Comparison Mode | Container Isolation |
 |--------|-----------|-----------------|---------------------|
@@ -41,6 +41,7 @@ Four evaluation engines, each suited for different artifact types:
 | **ASE** | Skills only | A/B (treatment vs control) | No |
 | **A2A** | A2A-protocol agents | A/B (treatment vs control) | Yes |
 | **MCPChecker** | MCP servers | Single-agent task verification | No |
+| **AEH** | Agents, skills | Judge-based evaluation | Yes (K8s pods) |
 
 ### 4. Analyze
 - Compute pass rates, uplift (gap), statistical significance (p-value)
@@ -61,7 +62,7 @@ All flow configuration is defined in `metadata.yaml` within each submission:
 
 ```yaml
 name: my-submission
-eval_engine: harbor              # harbor, ase, a2a, or mcpchecker
+eval_engine: harbor              # harbor, ase, a2a, mcpchecker, or aeh
 persona: general                 # Agent persona for Harbor/A2A
 
 experiment:
@@ -115,7 +116,7 @@ ABEvalFlow/
 
 ## Evaluation Engines
 
-The pipeline supports four evaluation engines, each suited for different artifact types:
+The pipeline supports five evaluation engines, each suited for different artifact types:
 
 | Engine | Artifact Type | Use Case | Comparison | Container Isolation |
 |--------|---------------|----------|------------|---------------------|
@@ -123,6 +124,7 @@ The pipeline supports four evaluation engines, each suited for different artifac
 | **ASE** | Skills only | Lightweight LLM-as-judge assertions | A/B (with vs without skill) | No |
 | **A2A** | A2A Agents | A2A-protocol compliant agent evaluation | A/B (treatment vs control) | Yes |
 | **MCPChecker** | MCP Servers | MCP server/tool verification | Single-agent task verification | No |
+| **AEH** | Agents, Skills | Agent-Eval-Harness judge-based evaluation | Single or pairwise | Yes (K8s pods) |
 
 Engines are implemented in `abevalflow/engines/` using a registry pattern:
 
@@ -133,6 +135,7 @@ abevalflow/engines/
 ├── harbor.py        # Harbor A/B evaluation
 ├── ase.py           # ASE LLM-as-judge evaluation
 ├── a2a.py           # A2A protocol evaluation
+├── aeh.py           # Agent-Eval-Harness evaluation
 └── mcpchecker.py    # MCPChecker task verification
 ```
 
@@ -144,7 +147,7 @@ Gates are evaluation checkpoints that produce standardized results. The unified 
 
 | Category | Policy Key | Purpose | Implementation |
 |----------|------------|---------|----------------|
-| **evaluation** | `evaluation` | Results from the selected eval engine | Harbor, ASE, A2A, or MCPChecker |
+| **evaluation** | `evaluation` | Results from the selected eval engine | Harbor, ASE, A2A, MCPChecker, or AEH |
 | **security** | `security` | Security scanning results | Cisco AI Defense scanner |
 | **quality** | `quality` | Quality review results | LLM-powered review |
 
@@ -611,7 +614,54 @@ my-agent-eval/
 
 Harbor creates treatment/control container variants and runs A/B comparison.
 
-See [Trigger Guide](Docs/trigger_guide.md) for detailed submission and trigger instructions.
+### AEH Submission (Agent-Eval-Harness)
+
+For evaluating agents using the Agent-Eval-Harness framework with flexible LLM judges.
+Trials run as Harbor jobs on OpenShift.
+
+**Single** (`aeh-mode=single`):
+
+```
+my-aeh-eval/
+├── metadata.yaml        # eval_engine: aeh (required)
+├── eval.yaml            # AEH config (models, judges, thresholds, outputs)
+├── skills/…/SKILL.md    # Optional skill package
+└── cases/
+    └── case-001/
+        └── input.yaml
+```
+
+**Pairwise** (`aeh-mode=pairwise`):
+
+```
+my-aeh-pairwise/
+├── metadata.yaml
+├── eval-control.yaml    # Baseline (often unskilled)
+├── eval-treatment.yaml  # Treatment + pairwise LLM judge
+├── skills/<name>/SKILL.md
+└── cases/
+    └── case-001/
+        └── input.yaml
+```
+
+Verified smoke samples in [skill-submissions](https://github.com/RHEcosystemAppEng/skill-submissions):
+- Branch `eval/aeh-hello-world-single` → `aeh-hello-world-single`
+- Branch `eval/aeh-hello-world-pairwise` → `aeh-hello-world-pairwise`
+
+Working trigger defaults: LiteLLM `claude-sonnet` via
+`http://litellm.ab-eval-flow.svc.cluster.local:4000`, AEH image
+`quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3`.
+
+MinIO layout for AEH: `debug/harbor/` (raw Harbor jobs) + `debug/aeh/`
+(`summary.yaml`, `report.html`, `cases/`). Pairwise HTML is regenerated with
+`--baseline` so treatment `report.html` includes the pairwise section.
+
+See [Trigger Guide](Docs/trigger_guide.md) for full YAML examples, or run:
+
+```bash
+./scripts/misc/trigger_test_runs.sh                 # all engines including AEH
+./scripts/misc/trigger_test_runs.sh "$(git branch --show-current)" aeh   # AEH only
+```
 
 ## LLM Access
 

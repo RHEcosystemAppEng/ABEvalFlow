@@ -26,9 +26,13 @@ metadata:
   name: pipeline-trial-manager
   namespace: ab-eval-flow
 rules:
+  # Pod management for Harbor trial pods and AEH KubernetesEnvironment
+  # AEH uses: create_namespaced_pod, read_namespaced_pod, delete_namespaced_pod
   - apiGroups: [""]
     resources: [pods]
     verbs: [create, get, list, watch, delete]
+  # Pod exec for Harbor/AEH to run commands in trial pods
+  # AEH uses: connect_get_namespaced_pod_exec
   - apiGroups: [""]
     resources: [pods/exec]
     verbs: [create]

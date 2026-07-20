@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -174,6 +175,21 @@ class EdgeCaseResult(BaseModel):
     score: float | None = Field(default=None, description="Edge case score (0.0-1.0)")
 
 
+class PairwiseComparisonResult(BaseModel):
+    """AEH pairwise LLM-judge comparison (from score.py pairwise)."""
+
+    run_a: str = ""
+    run_b: str = ""
+    cases_compared: int = 0
+    wins_a: int = 0
+    wins_b: int = 0
+    ties: int = 0
+    errors: int = 0
+    win_rate: float = 0.0
+    per_case: list[dict[str, Any]] = Field(default_factory=list)
+    stability: dict[str, Any] | None = None
+
+
 class AnalysisResult(BaseModel):
     """Top-level report model written to report.json."""
 
@@ -194,4 +210,8 @@ class AnalysisResult(BaseModel):
     edge_case_results: list[EdgeCaseResult] = Field(
         default_factory=list,
         description="Results from edge case evaluations. Empty if no edge cases defined.",
+    )
+    pairwise: PairwiseComparisonResult | None = Field(
+        default=None,
+        description="AEH pairwise comparison results. Present for aeh-mode=pairwise.",
     )

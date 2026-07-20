@@ -17,13 +17,17 @@ spec:
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
-        echo "Cleaning up PVCs for PipelineRun $(params.pipelinerun-name)..."
-        oc get pvc -n ab-eval-flow \
+
+        # Get current namespace from service account
+        NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+        echo "Cleaning up PVCs for PipelineRun $(params.pipelinerun-name) in namespace ${NAMESPACE}..."
+        oc get pvc -n "${NAMESPACE}" \
           -o jsonpath='{range .items[?(@.metadata.ownerReferences[0].name=="$(params.pipelinerun-name)")]}{.metadata.name}{"\n"}{end}' \
           | while read -r pvc; do
               if [ -n "$pvc" ]; then
                 echo "Deleting PVC: $pvc"
-                oc delete pvc "$pvc" -n ab-eval-flow --wait=false
+                oc delete pvc "$pvc" -n "${NAMESPACE}" --wait=false
               fi
             done
         echo "PVC cleanup complete"
