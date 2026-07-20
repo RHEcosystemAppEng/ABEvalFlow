@@ -1,29 +1,157 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Trigger all 6 test pipeline runs for validating ABEvalFlow changes
-# Usage: ./scripts/trigger_test_runs.sh [branch-name]
-# If branch-name is not provided, uses current git branch
+# Trigger ABEvalFlow test PipelineRuns.
+#
+# Usage:
+#   ./scripts/misc/trigger_test_runs.sh [branch-name] [all|aeh|legacy]
+#
+#   branch-name  Pipeline repo revision (default: current git branch)
+#   mode         all     — Harbor/A2A/ASE monitoring+CI plus AEH single+pairwise (default)
+#                aeh     — AEH single + pairwise only (verified smoke samples)
+#                legacy  — original 6 Harbor/A2A/ASE runs only
+#
+# Env overrides:
+#   NAMESPACE          OpenShift namespace (default: guy-ziv-evalflow)
+#   PIPELINE_CI        CI pipeline name (default: abevalflow-pipeline-dev)
+#   PIPELINE_MONITOR   Monitoring pipeline name (default: abevalflow-monitoring-pipeline)
+#   LLM_API_BASE       LiteLLM base URL
+#   AEH_IMAGE          AEH/Harbor trial image
+#   SKILL_REPO         skill-submissions git URL
+#
+# Verified AEH samples (skill-submissions):
+#   single:   revision=eval/aeh-hello-world-single   submission-dir=aeh-hello-world-single
+#   pairwise: revision=eval/aeh-hello-world-pairwise submission-dir=aeh-hello-world-pairwise
 
-BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
-NAMESPACE="ab-eval-flow"
+BRANCH="${1:-}"
+if [[ -z "$BRANCH" ]]; then
+  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+fi
+MODE="${2:-all}"
 
-echo "Triggering 6 test runs with pipeline-repo-revision: $BRANCH"
+NAMESPACE="${NAMESPACE:-guy-ziv-evalflow}"
+PIPELINE_CI="${PIPELINE_CI:-abevalflow-pipeline-dev}"
+PIPELINE_MONITOR="${PIPELINE_MONITOR:-abevalflow-monitoring-pipeline}"
+LLM_API_BASE="${LLM_API_BASE:-http://litellm.ab-eval-flow.svc.cluster.local:4000}"
+AEH_IMAGE="${AEH_IMAGE:-quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3}"
+SKILL_REPO="${SKILL_REPO:-https://github.com/RHEcosystemAppEng/skill-submissions.git}"
+LLM_MODEL="${LLM_MODEL:-claude-sonnet}"
+
+echo "pipeline-repo-revision: $BRANCH"
+echo "namespace:              $NAMESPACE"
+echo "mode:                   $MODE"
+echo "ci pipeline:            $PIPELINE_CI"
+echo "llm-api-base:           $LLM_API_BASE"
 echo ""
 
-cat << EOF | oc create -f -
-# Monitoring pipelines (3)
+trigger_aeh() {
+  echo "=== Triggering AEH single + pairwise (verified smoke samples) ==="
+  cat <<EOF | oc create -n "$NAMESPACE" -f -
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: aeh-single-
+spec:
+  pipelineRef:
+    name: $PIPELINE_CI
+  params:
+    - name: repo-url
+      value: "$SKILL_REPO"
+    - name: revision
+      value: "eval/aeh-hello-world-single"
+    - name: submission-dir
+      value: "aeh-hello-world-single"
+    - name: eval-engine
+      value: "aeh"
+    - name: aeh-mode
+      value: "single"
+    - name: pipeline-repo-revision
+      value: "$BRANCH"
+    - name: llm-model
+      value: "$LLM_MODEL"
+    - name: llm-api-base
+      value: "$LLM_API_BASE"
+    - name: llm-api-key
+      value: "mock"
+    - name: aeh-model-override
+      value: "$LLM_MODEL"
+    - name: aeh-image
+      value: "$AEH_IMAGE"
+  timeouts:
+    pipeline: "2h"
+    tasks: "1h30m"
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: aeh-pairwise-
+spec:
+  pipelineRef:
+    name: $PIPELINE_CI
+  params:
+    - name: repo-url
+      value: "$SKILL_REPO"
+    - name: revision
+      value: "eval/aeh-hello-world-pairwise"
+    - name: submission-dir
+      value: "aeh-hello-world-pairwise"
+    - name: eval-engine
+      value: "aeh"
+    - name: aeh-mode
+      value: "pairwise"
+    - name: pipeline-repo-revision
+      value: "$BRANCH"
+    - name: llm-model
+      value: "$LLM_MODEL"
+    - name: llm-api-base
+      value: "$LLM_API_BASE"
+    - name: llm-api-key
+      value: "mock"
+    - name: aeh-model-override
+      value: "$LLM_MODEL"
+    - name: aeh-image
+      value: "$AEH_IMAGE"
+  timeouts:
+    pipeline: "2h"
+    tasks: "1h30m"
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+EOF
+}
+
+trigger_legacy() {
+  echo "=== Triggering Harbor / A2A / ASE monitoring + CI (6 runs) ==="
+  # Short litellm hostname for ab-eval-flow namespace; override LLM_API_BASE if needed.
+  local LITELLM_SHORT="${LLM_API_BASE}"
+  cat <<EOF | oc create -n "$NAMESPACE" -f -
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: harbor-test-
-  namespace: $NAMESPACE
 spec:
   pipelineRef:
-    name: abevalflow-monitoring-pipeline
+    name: $PIPELINE_MONITOR
   params:
     - name: repo-url
-      value: "https://github.com/RHEcosystemAppEng/skill-submissions.git"
+      value: "$SKILL_REPO"
     - name: revision
       value: "main"
     - name: submission-dir
@@ -33,9 +161,9 @@ spec:
     - name: pipeline-repo-revision
       value: "$BRANCH"
     - name: llm-model
-      value: "claude-sonnet"
+      value: "$LLM_MODEL"
     - name: llm-api-base
-      value: "http://litellm.ab-eval-flow.svc:4000"
+      value: "$LITELLM_SHORT"
     - name: llm-api-key
       value: "mock"
   timeouts:
@@ -56,10 +184,9 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: a2a-verify-
-  namespace: $NAMESPACE
 spec:
   pipelineRef:
-    name: abevalflow-monitoring-pipeline
+    name: $PIPELINE_MONITOR
   params:
     - name: repo-url
       value: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
@@ -74,9 +201,9 @@ spec:
     - name: agent-endpoint
       value: "http://lightspeed-agent.ab-eval-flow.svc:8000"
     - name: llm-model
-      value: "claude-sonnet"
+      value: "$LLM_MODEL"
     - name: llm-api-base
-      value: "http://litellm.ab-eval-flow.svc:4000"
+      value: "$LITELLM_SHORT"
     - name: llm-api-key
       value: "mock"
   timeouts:
@@ -97,13 +224,12 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: ase-verify-
-  namespace: $NAMESPACE
 spec:
   pipelineRef:
-    name: abevalflow-monitoring-pipeline
+    name: $PIPELINE_MONITOR
   params:
     - name: repo-url
-      value: "https://github.com/RHEcosystemAppEng/skill-submissions.git"
+      value: "$SKILL_REPO"
     - name: revision
       value: "eval/hello-world-full"
     - name: submission-dir
@@ -113,9 +239,9 @@ spec:
     - name: pipeline-repo-revision
       value: "$BRANCH"
     - name: llm-model
-      value: "claude-sonnet"
+      value: "$LLM_MODEL"
     - name: llm-api-base
-      value: "http://litellm.ab-eval-flow.svc:4000"
+      value: "$LITELLM_SHORT"
     - name: llm-api-key
       value: "mock"
   timeouts:
@@ -132,18 +258,16 @@ spec:
             requests:
               storage: 1Gi
 ---
-# CI pipelines (3)
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: ci-harbor-
-  namespace: $NAMESPACE
 spec:
   pipelineRef:
-    name: abevalflow-pipeline
+    name: $PIPELINE_CI
   params:
     - name: repo-url
-      value: "https://github.com/RHEcosystemAppEng/skill-submissions.git"
+      value: "$SKILL_REPO"
     - name: revision
       value: "main"
     - name: submission-dir
@@ -153,9 +277,9 @@ spec:
     - name: pipeline-repo-revision
       value: "$BRANCH"
     - name: llm-model
-      value: "claude-sonnet"
+      value: "$LLM_MODEL"
     - name: llm-api-base
-      value: "http://litellm.ab-eval-flow.svc:4000"
+      value: "$LITELLM_SHORT"
     - name: llm-api-key
       value: "mock"
   timeouts:
@@ -176,10 +300,9 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: ci-a2a-
-  namespace: $NAMESPACE
 spec:
   pipelineRef:
-    name: abevalflow-pipeline
+    name: $PIPELINE_CI
   params:
     - name: repo-url
       value: "https://github.com/RHEcosystemAppEng/ABEvalFlow.git"
@@ -194,9 +317,9 @@ spec:
     - name: agent-endpoint
       value: "http://lightspeed-agent.ab-eval-flow.svc:8000"
     - name: llm-model
-      value: "claude-sonnet"
+      value: "$LLM_MODEL"
     - name: llm-api-base
-      value: "http://litellm.ab-eval-flow.svc:4000"
+      value: "$LITELLM_SHORT"
     - name: llm-api-key
       value: "mock"
   timeouts:
@@ -217,13 +340,12 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: ci-ase-
-  namespace: $NAMESPACE
 spec:
   pipelineRef:
-    name: abevalflow-pipeline
+    name: $PIPELINE_CI
   params:
     - name: repo-url
-      value: "https://github.com/RHEcosystemAppEng/skill-submissions.git"
+      value: "$SKILL_REPO"
     - name: revision
       value: "eval/hello-world-full"
     - name: submission-dir
@@ -233,9 +355,9 @@ spec:
     - name: pipeline-repo-revision
       value: "$BRANCH"
     - name: llm-model
-      value: "claude-sonnet"
+      value: "$LLM_MODEL"
     - name: llm-api-base
-      value: "http://litellm.ab-eval-flow.svc:4000"
+      value: "$LITELLM_SHORT"
     - name: llm-api-key
       value: "mock"
   timeouts:
@@ -252,6 +374,25 @@ spec:
             requests:
               storage: 1Gi
 EOF
+}
+
+case "$MODE" in
+  aeh)
+    trigger_aeh
+    ;;
+  legacy)
+    trigger_legacy
+    ;;
+  all)
+    trigger_legacy
+    trigger_aeh
+    ;;
+  *)
+    echo "Unknown mode: $MODE (use all|aeh|legacy)" >&2
+    exit 1
+    ;;
+esac
 
 echo ""
-echo "Done! Monitor with: oc get pipelineruns -n $NAMESPACE --sort-by=.metadata.creationTimestamp | tail -10"
+echo "Done! Monitor with:"
+echo "  oc get pipelineruns -n $NAMESPACE --sort-by=.metadata.creationTimestamp | tail -15"

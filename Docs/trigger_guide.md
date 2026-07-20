@@ -261,6 +261,251 @@ tkn pipeline start abevalflow-pipeline \
 A2A evaluation tests both agent functionality and protocol compliance. See
 `examples/a2a-skill/` for a complete example.
 
+### AEH Format (Agent-Eval-Harness)
+
+For evaluating agents using the Agent-Eval-Harness framework, use the AEH format.
+This mode provides flexible judge-based evaluation with support for LLM judges,
+custom scoring, and detailed per-case analysis. Trials run as Harbor jobs on
+OpenShift (OpenShiftEnvironment).
+
+**Verified smoke samples** (in [skill-submissions](https://github.com/RHEcosystemAppEng/skill-submissions)):
+
+| Mode | Branch | `submission-dir` |
+|------|--------|------------------|
+| Single | `eval/aeh-hello-world-single` | `aeh-hello-world-single` |
+| Pairwise | `eval/aeh-hello-world-pairwise` | `aeh-hello-world-pairwise` |
+
+#### AEH single mode
+
+```
+submissions/<name>/
+├── metadata.yaml              # Required — eval_engine: aeh
+├── eval.yaml                  # Required — AEH evaluation config (judges, thresholds)
+├── skills/                    # Optional — nested or flat SKILL.md for treatment
+│   └── …/SKILL.md
+└── cases/
+    └── case-001/
+        ├── input.yaml         # Required — task prompt / agent instruction
+        └── annotations.yaml   # Optional — ground truth for judges
+```
+
+**eval.yaml essentials** (LiteLLM model ids, not Anthropic native names):
+
+```yaml
+name: aeh-hello-world-single
+skill: aeh-hello-world-single
+
+runner:
+  type: claude-code
+  effort: low
+  settings:
+    permission_mode: bypassPermissions
+
+models:
+  skill: claude-sonnet           # LiteLLM alias (override via aeh-model-override)
+  judge: claude-sonnet
+
+dataset:
+  path: cases
+
+outputs:
+  - path: output                 # Required for artifact collection / pairwise
+
+judges:
+  - name: exit_success
+    type: check
+    # …
+  - name: file_created
+    type: check
+    # …
+```
+
+**Trigger single AEH** (params that work on OpenShift with in-cluster LiteLLM):
+
+```bash
+# Dev pipeline + personal namespace example (guy-ziv-evalflow).
+# Prod: abevalflow-pipeline / ab-eval-flow
+oc create -n guy-ziv-evalflow -f - <<'YAML'
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: aeh-single-
+spec:
+  pipelineRef:
+    name: abevalflow-pipeline-dev
+  params:
+    - name: repo-url
+      value: "https://github.com/RHEcosystemAppEng/skill-submissions.git"
+    - name: revision
+      value: "eval/aeh-hello-world-single"
+    - name: submission-dir
+      value: "aeh-hello-world-single"
+    - name: eval-engine
+      value: "aeh"
+    - name: aeh-mode
+      value: "single"
+    - name: pipeline-repo-revision
+      value: "APPENG-5300/aeh-engine-integration"   # or main once merged
+    - name: llm-model
+      value: "claude-sonnet"
+    - name: llm-api-base
+      value: "http://litellm.ab-eval-flow.svc.cluster.local:4000"
+    - name: llm-api-key
+      value: "mock"
+    - name: aeh-model-override
+      value: "claude-sonnet"
+    - name: aeh-image
+      value: "quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3"
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  timeouts:
+    pipeline: 2h0m0s
+    tasks: 1h30m0s
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+YAML
+```
+
+Or with `tkn`:
+
+```bash
+tkn pipeline start abevalflow-pipeline-dev \
+  -p repo-url=https://github.com/RHEcosystemAppEng/skill-submissions.git \
+  -p revision=eval/aeh-hello-world-single \
+  -p submission-dir=aeh-hello-world-single \
+  -p eval-engine=aeh \
+  -p aeh-mode=single \
+  -p pipeline-repo-revision=APPENG-5300/aeh-engine-integration \
+  -p llm-model=claude-sonnet \
+  -p llm-api-base=http://litellm.ab-eval-flow.svc.cluster.local:4000 \
+  -p llm-api-key=mock \
+  -p aeh-model-override=claude-sonnet \
+  -p aeh-image=quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3 \
+  -w name=shared-workspace,volumeClaimTemplateFile=pipeline/triggers/pvc-template.yaml \
+  -n guy-ziv-evalflow
+```
+
+AEH-specific parameters:
+- `aeh-model-override`: Override `models.skill` from eval.yaml (use LiteLLM aliases such as `claude-sonnet`)
+- `aeh-judge-model-override`: Override `models.judge` from eval.yaml
+- `aeh-mode`: `single` (default) or `pairwise`
+- `aeh-control-config` / `aeh-treatment-config`: Pairwise config filenames (defaults: `eval-control.yaml` / `eval-treatment.yaml`)
+- `aeh-image`: Harbor trial image (use `quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3` or newer)
+- `aeh-runner`: Execution backend — currently `harbor` only
+
+**Note on execution backends:**
+- **harbor** (default): Containerized execution in OpenShift trial pods via AEH’s OpenShiftEnvironment.
+- **vanilla**: Not yet implemented in ABEvalFlow.
+
+#### AEH Pairwise A/B Testing
+
+Pairwise runs control then treatment on the same cases, then `score.py pairwise`
+(LLM judge, position-swapped). After compare, the pipeline regenerates treatment
+`report.html` with `--baseline` so the HTML includes the pairwise section.
+
+**Pairwise submission structure:**
+
+```
+submissions/<name>/
+├── metadata.yaml              # Required — eval_engine: aeh
+├── eval-control.yaml          # Required — control/baseline (often skill: "")
+├── eval-treatment.yaml        # Required — treatment (with skill package)
+├── skills/<name>/SKILL.md     # Treatment skill (optional nested layout)
+└── cases/
+    └── case-001/
+        └── input.yaml
+```
+
+Both configs must share the same `skill:` namespace used for
+`$AGENT_EVAL_RUNS_DIR/<skill>/<run-id>/`. Control may set `skill: ""` for an
+unskilled baseline while treatment sets the real skill package name — the
+pipeline still keys runs under the treatment skill name.
+
+**outputs:** is required when using a pairwise LLM judge (artifacts must be
+bridged into `cases/<id>/<path>/` for the judge).
+
+**Trigger pairwise** (same LiteLLM / image params as single):
+
+```bash
+oc create -n guy-ziv-evalflow -f - <<'YAML'
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: aeh-pairwise-
+spec:
+  pipelineRef:
+    name: abevalflow-pipeline-dev
+  params:
+    - name: repo-url
+      value: "https://github.com/RHEcosystemAppEng/skill-submissions.git"
+    - name: revision
+      value: "eval/aeh-hello-world-pairwise"
+    - name: submission-dir
+      value: "aeh-hello-world-pairwise"
+    - name: eval-engine
+      value: "aeh"
+    - name: aeh-mode
+      value: "pairwise"
+    - name: pipeline-repo-revision
+      value: "APPENG-5300/aeh-engine-integration"
+    - name: llm-model
+      value: "claude-sonnet"
+    - name: llm-api-base
+      value: "http://litellm.ab-eval-flow.svc.cluster.local:4000"
+    - name: llm-api-key
+      value: "mock"
+    - name: aeh-model-override
+      value: "claude-sonnet"
+    - name: aeh-image
+      value: "quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3"
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  timeouts:
+    pipeline: 2h0m0s
+    tasks: 1h30m0s
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+YAML
+```
+
+**Pairwise results:**
+
+| Field | Meaning |
+|-------|---------|
+| `wins_a` | Treatment preferred |
+| `wins_b` | Control preferred |
+| `ties` | No preference |
+| `win_rate` | `wins_a / (wins_a + wins_b + ties)` — ties are non-wins |
+
+Recommendation: pass when treatment wins ≥50% of cases, **or** when the run is
+all-ties (no decisive losses). Scores still report the honest `win_rate` (e.g.
+`0/1` tie → `0%` with recommendation `pass`).
+
+**Where pairwise appears in MinIO:**
+
+| Path | Contents |
+|------|----------|
+| `debug/aeh/treatment-*/summary.yaml` → `pairwise:` | Wins/ties + LLM reasoning (AEH native) |
+| `debug/aeh/treatment-*/report.html` | HTML regenerated with `--baseline` (includes pairwise) |
+| `report.json` → `pairwise` | Aggregated ABEvalFlow report |
+| `debug/harbor/control|treatment/<timestamp>/` | Raw Harbor trial trees |
+| `debug/aeh/control-*/` / `treatment-*/` | AEH mapped runs (`summary.yaml`, `run_result.json`, `cases/`) |
+
+See skill-submissions branches above for complete samples. Or use
+`./scripts/misc/trigger_test_runs.sh` (includes AEH single + pairwise).
+
 ### AI-Assisted Mode
 
 If you only have the skill definition and want the pipeline to generate the
@@ -508,7 +753,10 @@ Typical runtime: **5-30 minutes** depending on evaluation engine and task comple
 - `scorecard.json` — unified verdict combining all evaluation gates (see below)
 - `security-scan.json` / `security-scan.sarif` — security scan findings
 - `generated/` — AI-generated files (instruction.md, test_outputs.py, evals.json)
-- `debug/` — trial logs, agent outputs, error traces
+- `debug/` — engine-specific trial / run trees
+  - **Harbor / A2A:** `debug/` trial trees (`agent/`, `verifier/`, …)
+  - **AEH:** `debug/harbor/{control,treatment}/<timestamp>/` (raw Harbor jobs)
+    and `debug/aeh/<run-id>/` (`summary.yaml`, `report.html`, `run_result.json`, `cases/`)
 
 **PostgreSQL database:**
 - `analysis_results` table — evaluation summaries (pass rates, uplift, p-values)
@@ -522,7 +770,7 @@ a different aspect:
 
 | Gate Type | Gate Name | What it checks |
 |-----------|-----------|----------------|
-| **Engine** | `evaluation` | A/B evaluation results (Harbor, ASE, A2A, MCPChecker) |
+| **Engine** | `evaluation` | A/B evaluation results (Harbor, ASE, A2A, MCPChecker, AEH) |
 | **Security** | `security` | Security vulnerabilities (Cisco scanner) |
 | **Quality** | `quality` | Test coherence, coverage, clarity (LLM review) |
 
