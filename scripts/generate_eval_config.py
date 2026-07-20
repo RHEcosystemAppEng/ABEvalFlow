@@ -121,6 +121,9 @@ def build_variant_config(
 
     task: dict[str, Any] = {"path": task_dir}
 
+    # Stock Harbor JobConfig validates environment.type as a strict enum
+    # (openshift|docker|...). The fork's OpenShiftEnvironment is selected via
+    # this enum — do not put an import path here (that fails Pydantic validation).
     env_block: dict[str, Any] = {
         "type": "openshift",
         "delete": True,
