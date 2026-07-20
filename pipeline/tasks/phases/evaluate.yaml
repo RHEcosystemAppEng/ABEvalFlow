@@ -1303,11 +1303,7 @@ spec:
         export PYTHONPATH="$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pyyaml 2>&1 | tail -1
 
-        AEH_THRESHOLD=$(python3 -c "
-from pathlib import Path
-from abevalflow.aeh_scoring import resolve_evaluation_threshold
-print(resolve_evaluation_threshold(Path('$SUBMISSION_DIR') / 'metadata.yaml'))
-")
+        AEH_THRESHOLD=$(python3 -c "from pathlib import Path; from abevalflow.aeh_scoring import resolve_evaluation_threshold; print(resolve_evaluation_threshold(Path('$SUBMISSION_DIR') / 'metadata.yaml'))")
         echo "AEH evaluation threshold: $AEH_THRESHOLD"
         
         if [ -f "$OUT_DIR/summary.yaml" ] || [ -f "$OUT_DIR/run_result.json" ]; then
@@ -1489,11 +1485,7 @@ print(resolve_evaluation_threshold(Path('$SUBMISSION_DIR') / 'metadata.yaml'))
         export PYTHONPATH="$PIPELINE_DIR"
         pip install --quiet --no-cache-dir pyyaml 2>&1 | tail -1
 
-        AEH_THRESHOLD=$(python3 -c "
-from pathlib import Path
-from abevalflow.aeh_scoring import resolve_evaluation_threshold
-print(resolve_evaluation_threshold(Path('$SUBMISSION_DIR') / 'metadata.yaml'))
-")
+        AEH_THRESHOLD=$(python3 -c "from pathlib import Path; from abevalflow.aeh_scoring import resolve_evaluation_threshold; print(resolve_evaluation_threshold(Path('$SUBMISSION_DIR') / 'metadata.yaml'))")
         echo "AEH evaluation threshold: $AEH_THRESHOLD"
         
         python "$PIPELINE_DIR/scripts/aggregate_aeh.py" "$TREATMENT_DIR" \
