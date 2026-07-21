@@ -598,7 +598,7 @@ spec:
           [ -d "$SUBDIR" ] || continue
           EVAL_FILE="$SUBDIR/edge-case-evals.json"
           [ -f "$EVAL_FILE" ] || continue
-          EDGE_NAME=$(basename "$SUBDIR" | sed 's/^submitter_//')
+          EDGE_NAME=$(basename "$SUBDIR")
           echo "--- Submitter edge case: $EDGE_NAME ---"
 
           EDGE_SKILL_DIR="$(workspaces.source.path)/_eval_tmp/edge-case-$EDGE_NAME"
