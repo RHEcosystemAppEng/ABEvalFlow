@@ -154,7 +154,8 @@ def generate_edge_case_evals_from_skill(
         except json.JSONDecodeError:
             try:
                 start = text.index("{")
-                evals_data = json.loads(text[start:])
+                end = text.rindex("}") + 1
+                evals_data = json.loads(text[start:end])
             except (ValueError, json.JSONDecodeError) as exc:
                 logger.warning("Attempt %d: JSON parse failed: %s", attempt, exc)
                 continue
