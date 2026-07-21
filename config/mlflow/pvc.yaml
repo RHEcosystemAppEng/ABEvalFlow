@@ -1,0 +1,17 @@
+# Dedicated MLflow artifact + sqlite store for ABEvalFlow (dev).
+# First deploy target: guy-ziv-evalflow. Promote to ab-eval-flow later if needed.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: abevalflow-mlflow-data
+  namespace: guy-ziv-evalflow
+  labels:
+    app.kubernetes.io/part-of: abevalflow
+    app.kubernetes.io/name: mlflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: gp3

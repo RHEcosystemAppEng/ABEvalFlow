@@ -167,6 +167,16 @@ spec:
       type: string
       default: "harbor"
       description: AEH execution backend (harbor, vanilla)
+
+    # AEH MLflow (optional post-evaluate logging)
+    - name: enable-mlflow
+      type: string
+      default: "false"
+      description: When true and mlflow-tracking-uri is set, log AEH results to MLflow
+    - name: mlflow-tracking-uri
+      type: string
+      default: ""
+      description: MLflow tracking server URI (e.g. http://mlflow.ab-eval-flow.svc:5000)
     # Security scanning
     - name: security-scan
       type: string
@@ -393,6 +403,10 @@ spec:
           value: $(params.aeh-image)
         - name: aeh-runner
           value: $(params.aeh-runner)
+        - name: enable-mlflow
+          value: $(params.enable-mlflow)
+        - name: mlflow-tracking-uri
+          value: $(params.mlflow-tracking-uri)
       workspaces:
         - name: source
           workspace: shared-workspace

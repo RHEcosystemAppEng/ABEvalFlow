@@ -98,3 +98,67 @@ def test_enrich_copies_skills_and_sets_skills_dir(tmp_path: Path):
     assert (task / "environment" / "skills" / "demo-skill" / "SKILL.md").is_file()
     toml = (task / "task.toml").read_text()
     assert 'skills_dir = "/workspace/skills"' in toml
+
+
+def test_enrich_preserves_tool_interception_artifacts(tmp_path: Path):
+    submission = tmp_path / "submission"
+    skill_dir = submission / "skills" / "demo-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo-skill\n---\n# demo\n")
+    (submission / "cases" / "case-001").mkdir(parents=True)
+    (submission / "eval.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "skill": "demo-skill",
+                "dataset": {"path": "cases"},
+                "runner": {"type": "claude-code", "plugin_dirs": ["skills"]},
+                "inputs": {"tools": [{"match": "Block MCP tools", "prompt": "deny"}]},
+                "permissions": {"deny": ["mcp__*"]},
+                "judges": [{"name": "exit_success"}],
+            }
+        )
+    )
+    (submission / "tool_handlers.yaml").write_text(
+        yaml.safe_dump({"handlers": [{"patterns": ["mcp__*"], "action": "deny"}]})
+    )
+
+    tasks = tmp_path / "tasks"
+    task = tasks / "case-001"
+    _write_generated_task(task)
+    env = task / "environment"
+    (env / "hooks").mkdir()
+    (env / "hooks" / "tools.py").write_text("# interceptor\n")
+    (env / ".claude").mkdir()
+    (env / ".claude" / "settings.json").write_text('{"hooks":{}}')
+    (env / "tool_handlers.yaml").write_text("handlers: []\n")
+
+    enrich_harbor_tasks(tasks, config_path=submission / "eval.yaml")
+
+    assert (env / "hooks" / "tools.py").read_text() == "# interceptor\n"
+    assert (env / "tool_handlers.yaml").is_file()
+    assert (env / ".claude" / "settings.json").is_file()
+    assert (env / "skills" / "demo-skill" / "SKILL.md").is_file()
+
+
+def test_enrich_copies_submission_tool_handlers_when_missing(tmp_path: Path):
+    submission = tmp_path / "submission"
+    (submission / "cases" / "case-001").mkdir(parents=True)
+    (submission / "eval.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "skill": "demo",
+                "dataset": {"path": "cases"},
+                "inputs": {"tools": [{"match": "Ask user questions"}]},
+                "judges": [{"name": "exit_success"}],
+            }
+        )
+    )
+    (submission / "tool_handlers.yaml").write_text("handlers:\n  - patterns: [AskUserQuestion]\n")
+
+    tasks = tmp_path / "tasks"
+    task = tasks / "case-001"
+    _write_generated_task(task)
+
+    enrich_harbor_tasks(tasks, config_path=submission / "eval.yaml")
+    assert (task / "environment" / "tool_handlers.yaml").is_file()
+    assert "AskUserQuestion" in (task / "environment" / "tool_handlers.yaml").read_text()

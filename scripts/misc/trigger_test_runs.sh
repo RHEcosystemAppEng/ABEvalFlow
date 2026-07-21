@@ -4,20 +4,23 @@ set -euo pipefail
 # Trigger ABEvalFlow test PipelineRuns.
 #
 # Usage:
-#   ./scripts/misc/trigger_test_runs.sh [branch-name] [all|aeh|legacy]
+#   ./scripts/misc/trigger_test_runs.sh [branch-name] [all|aeh|legacy|aeh-mon]
 #
 #   branch-name  Pipeline repo revision (default: current git branch)
-#   mode         all     — Harbor/A2A/ASE monitoring+CI plus AEH single+pairwise (default)
-#                aeh     — AEH single + pairwise only (verified smoke samples)
-#                legacy  — original 6 Harbor/A2A/ASE runs only
+#   mode         all      — Harbor/A2A/ASE monitoring+CI plus AEH single+pairwise (default)
+#                aeh      — AEH single + pairwise CI only (verified smoke samples)
+#                aeh-mon  — AEH single + pairwise on monitoring pipeline
+#                legacy   — original 6 Harbor/A2A/ASE runs only
 #
 # Env overrides:
 #   NAMESPACE          OpenShift namespace (default: guy-ziv-evalflow)
 #   PIPELINE_CI        CI pipeline name (default: abevalflow-pipeline-dev)
-#   PIPELINE_MONITOR   Monitoring pipeline name (default: abevalflow-monitoring-pipeline)
+#   PIPELINE_MONITOR   Monitoring pipeline name (default: abevalflow-monitoring-pipeline-dev)
 #   LLM_API_BASE       LiteLLM base URL
 #   AEH_IMAGE          AEH/Harbor trial image
 #   SKILL_REPO         skill-submissions git URL
+#   ENABLE_MLFLOW      true/false (default false)
+#   MLFLOW_TRACKING_URI  MLflow server URI when ENABLE_MLFLOW=true
 #
 # Verified AEH samples (skill-submissions):
 #   single:   revision=eval/aeh-hello-world-single   submission-dir=aeh-hello-world-single
@@ -31,11 +34,14 @@ MODE="${2:-all}"
 
 NAMESPACE="${NAMESPACE:-guy-ziv-evalflow}"
 PIPELINE_CI="${PIPELINE_CI:-abevalflow-pipeline-dev}"
-PIPELINE_MONITOR="${PIPELINE_MONITOR:-abevalflow-monitoring-pipeline}"
+PIPELINE_MONITOR="${PIPELINE_MONITOR:-abevalflow-monitoring-pipeline-dev}"
 LLM_API_BASE="${LLM_API_BASE:-http://litellm.ab-eval-flow.svc.cluster.local:4000}"
 AEH_IMAGE="${AEH_IMAGE:-quay.io/ecosystem-appeng/agent-eval-harness:v1.0.3}"
 SKILL_REPO="${SKILL_REPO:-https://github.com/RHEcosystemAppEng/skill-submissions.git}"
 LLM_MODEL="${LLM_MODEL:-claude-sonnet}"
+ENABLE_MLFLOW="${ENABLE_MLFLOW:-false}"
+# Dedicated ABEvalFlow MLflow in guy-ziv-evalflow (see config/mlflow/).
+MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-http://abevalflow-mlflow.guy-ziv-evalflow.svc.cluster.local:5000}"
 
 echo "pipeline-repo-revision: $BRANCH"
 echo "namespace:              $NAMESPACE"
@@ -77,6 +83,10 @@ spec:
       value: "$LLM_MODEL"
     - name: aeh-image
       value: "$AEH_IMAGE"
+    - name: enable-mlflow
+      value: "$ENABLE_MLFLOW"
+    - name: mlflow-tracking-uri
+      value: "$MLFLOW_TRACKING_URI"
   timeouts:
     pipeline: "2h"
     tasks: "1h30m"
@@ -121,6 +131,10 @@ spec:
       value: "$LLM_MODEL"
     - name: aeh-image
       value: "$AEH_IMAGE"
+    - name: enable-mlflow
+      value: "$ENABLE_MLFLOW"
+    - name: mlflow-tracking-uri
+      value: "$MLFLOW_TRACKING_URI"
   timeouts:
     pipeline: "2h"
     tasks: "1h30m"
@@ -135,6 +149,15 @@ spec:
             requests:
               storage: 5Gi
 EOF
+}
+
+trigger_aeh_monitoring() {
+  echo "=== Triggering AEH single + pairwise on monitoring pipeline ==="
+  local saved_ci="$PIPELINE_CI"
+  PIPELINE_CI="$PIPELINE_MONITOR"
+  # Reuse CI AEH manifests but against monitoring pipeline name
+  trigger_aeh
+  PIPELINE_CI="$saved_ci"
 }
 
 trigger_legacy() {
@@ -380,6 +403,9 @@ case "$MODE" in
   aeh)
     trigger_aeh
     ;;
+  aeh-mon)
+    trigger_aeh_monitoring
+    ;;
   legacy)
     trigger_legacy
     ;;
@@ -388,7 +414,7 @@ case "$MODE" in
     trigger_aeh
     ;;
   *)
-    echo "Unknown mode: $MODE (use all|aeh|legacy)" >&2
+    echo "Unknown mode: $MODE (use all|aeh|aeh-mon|legacy)" >&2
     exit 1
     ;;
 esac

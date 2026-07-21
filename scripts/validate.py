@@ -421,6 +421,73 @@ def _check_aeh_plugin_dirs(submission_dir: Path, eval_path: Path) -> list[str]:
     return errors
 
 
+def _check_aeh_tool_interception(submission_dir: Path, eval_path: Path) -> list[str]:
+    """Validate inputs.tools / permissions / tool_handlers.yaml for Harbor MCP hooks.
+
+    When ``inputs.tools`` is declared, each entry needs ``match``, and a
+    submission-level ``tool_handlers.yaml`` is required so OpenShift Harbor
+    trials get reliable PreToolUse patterns (heuristic fallback is weak).
+    """
+    if not eval_path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(eval_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    errors: list[str] = []
+    filename = eval_path.name
+
+    permissions = data.get("permissions")
+    if permissions is not None:
+        if not isinstance(permissions, dict):
+            errors.append(f"{filename}: 'permissions' must be a mapping with allow/deny lists")
+        else:
+            for key in ("allow", "deny"):
+                if key in permissions and not isinstance(permissions[key], list):
+                    errors.append(f"{filename}: permissions.{key} must be a list")
+
+    inputs = data.get("inputs")
+    if inputs is None:
+        return errors
+    if not isinstance(inputs, dict):
+        errors.append(f"{filename}: 'inputs' must be a mapping")
+        return errors
+
+    tools = inputs.get("tools")
+    if tools is None:
+        return errors
+    if not isinstance(tools, list):
+        errors.append(f"{filename}: inputs.tools must be a list")
+        return errors
+
+    for i, entry in enumerate(tools):
+        if not isinstance(entry, dict):
+            errors.append(f"{filename}: inputs.tools[{i}] must be a mapping")
+            continue
+        if not str(entry.get("match") or "").strip():
+            errors.append(f"{filename}: inputs.tools[{i}] requires a non-empty 'match' field")
+
+    handlers = submission_dir / "tool_handlers.yaml"
+    if tools and not handlers.is_file():
+        errors.append(
+            f"{filename}: inputs.tools is set but tool_handlers.yaml is missing "
+            f"next to {filename} (required for reliable Harbor tool/MCP interception)"
+        )
+    elif handlers.is_file():
+        try:
+            handlers_data = yaml.safe_load(handlers.read_text())
+        except yaml.YAMLError as exc:
+            errors.append(f"tool_handlers.yaml is not valid YAML: {exc}")
+        else:
+            if handlers_data is not None and not isinstance(handlers_data, (dict, list)):
+                errors.append("tool_handlers.yaml must be a YAML mapping or list")
+
+    return errors
+
+
 def _check_aeh_cases(submission_dir: Path) -> list[str]:
     """Validate cases/ directory exists with at least one case.
 
@@ -537,17 +604,20 @@ def _check_aeh_structure(
         else:
             errors.extend(_check_aeh_eval_yaml_file(control_path))
             errors.extend(_check_aeh_plugin_dirs(submission_dir, control_path))
+            errors.extend(_check_aeh_tool_interception(submission_dir, control_path))
 
         if not treatment_path.is_file():
             errors.append(f"AEH pairwise: missing {treatment_config}")
         else:
             errors.extend(_check_aeh_eval_yaml_file(treatment_path))
             errors.extend(_check_aeh_plugin_dirs(submission_dir, treatment_path))
+            errors.extend(_check_aeh_tool_interception(submission_dir, treatment_path))
             # Treatment config drives score.py pairwise — enforce contract there
             errors.extend(_check_aeh_pairwise_contract(treatment_path))
     else:
         errors.extend(_check_aeh_eval_yaml(submission_dir))
         errors.extend(_check_aeh_plugin_dirs(submission_dir, submission_dir / "eval.yaml"))
+        errors.extend(_check_aeh_tool_interception(submission_dir, submission_dir / "eval.yaml"))
 
     errors.extend(_check_aeh_cases(submission_dir))
     errors.extend(_check_aeh_skill_matches_metadata(submission_dir, aeh_mode, control_config, treatment_config))

@@ -159,6 +159,14 @@ spec:
       type: string
       default: "harbor"
       description: AEH execution backend (harbor, vanilla)
+    - name: enable-mlflow
+      type: string
+      default: "false"
+      description: When true and mlflow-tracking-uri is set, log AEH results to MLflow
+    - name: mlflow-tracking-uri
+      type: string
+      default: ""
+      description: MLflow tracking server URI
   workspaces:
     - name: source
       description: Workspace containing the cloned submissions repository
@@ -1352,6 +1360,22 @@ spec:
         print(f"Recommendation: {rec}")
         PARSE_AEH
 
+        # Optional MLflow logging (non-blocking)
+        if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
+          echo "=== AEH MLflow logging ==="
+          pip install --quiet --no-cache-dir 'mlflow[genai]' 2>&1 | tail -1 || true
+          export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
+          python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
+            --enabled true \
+            --tracking-uri "$(params.mlflow-tracking-uri)" \
+            --run-id "$RUN_ID" \
+            --config "$SUBMISSION_DIR/eval.yaml" \
+            --runs-dir "$(workspaces.source.path)/reports" \
+            2>&1 || echo "Warning: MLflow logging failed (non-blocking)"
+        else
+          echo "Skipping AEH MLflow (enable-mlflow=$(params.enable-mlflow), uri set=$([ -n "$(params.mlflow-tracking-uri)" ] && echo yes || echo no))"
+        fi
+
         if [ "$AEH_EXIT" -ne 0 ]; then
           echo "ERROR: AEH single evaluation exited $AEH_EXIT (report written if outputs existed)"
           exit "$AEH_EXIT"
@@ -1575,6 +1599,28 @@ spec:
         print(f"  Treatment win rate: {win_rate:.2%} (threshold={threshold})")
         print(f"  Recommendation: {rec}")
         PARSE_PAIRWISE
+
+        # Optional MLflow logging for control + treatment (non-blocking)
+        if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
+          echo "=== AEH MLflow logging (pairwise) ==="
+          pip install --quiet --no-cache-dir 'mlflow[genai]' 2>&1 | tail -1 || true
+          export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
+          for VARIANT_RUN in "control-$RUN_ID" "treatment-$RUN_ID"; do
+            CFG="$SUBMISSION_DIR/$TREATMENT_CONFIG"
+            if [[ "$VARIANT_RUN" == control-* ]]; then
+              CFG="$SUBMISSION_DIR/$CONTROL_CONFIG"
+            fi
+            python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
+              --enabled true \
+              --tracking-uri "$(params.mlflow-tracking-uri)" \
+              --run-id "$VARIANT_RUN" \
+              --config "$CFG" \
+              --runs-dir "$REPORTS_DIR" \
+              2>&1 || echo "Warning: MLflow logging failed for $VARIANT_RUN (non-blocking)"
+          done
+        else
+          echo "Skipping AEH MLflow (enable-mlflow=$(params.enable-mlflow))"
+        fi
 
         if [ "$PAIRWISE_EXIT" -ne 0 ]; then
           echo "ERROR: pairwise evaluation exited $PAIRWISE_EXIT (report written if outputs existed)"

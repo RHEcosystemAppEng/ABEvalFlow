@@ -3,6 +3,10 @@
 
 skill: aeh-hello-world
 
+# Optional: MLflow experiment name (pipeline enable-mlflow=true)
+mlflow:
+  experiment: aeh-hello-world-single
+
 # Runner configuration
 runner:
   type: claude-code
