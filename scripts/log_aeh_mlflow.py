@@ -44,7 +44,21 @@ def _resolve_log_results_script() -> Path | None:
     return None
 
 
+def _mlflow_importable() -> bool:
+    try:
+        import mlflow  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _run_aeh_log_results(*, script: Path, run_id: str, config: Path, runs_dir: Path) -> int:
+    """Run upstream log_results.py.
+
+    Returns 0 on real success. Returns non-zero when the script no-ops because
+    ``mlflow`` is missing (upstream exits 0 with a message — treat as failure
+    so we can fall back to the minimal logger).
+    """
     env = os.environ.copy()
     env["AGENT_EVAL_RUNS_DIR"] = str(runs_dir)
     cmd = [
@@ -56,7 +70,15 @@ def _run_aeh_log_results(*, script: Path, run_id: str, config: Path, runs_dir: P
         str(config),
     ]
     logger.info("Running AEH MLflow logger: %s", " ".join(cmd))
-    result = subprocess.run(cmd, env=env, check=False)
+    result = subprocess.run(cmd, env=env, check=False, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    combined = f"{result.stdout}\n{result.stderr}"
+    if "MLflow not installed" in combined:
+        logger.warning("AEH log_results.py skipped (mlflow package missing)")
+        return 2
     return result.returncode
 
 
@@ -156,6 +178,12 @@ def main(argv: list[str] | None = None) -> int:
     runs_dir = args.runs_dir.resolve()
     if not config.is_file():
         logger.error("Config not found: %s", config)
+        return 1
+
+    if not _mlflow_importable():
+        logger.error(
+            "Python package 'mlflow' is not installed in this environment; install with: python -m pip install mlflow"
+        )
         return 1
 
     script = _resolve_log_results_script()

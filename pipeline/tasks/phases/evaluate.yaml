@@ -1363,7 +1363,8 @@ spec:
         # Optional MLflow logging (non-blocking)
         if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
           echo "=== AEH MLflow logging ==="
-          pip install --quiet --no-cache-dir 'mlflow[genai]' 2>&1 | tail -1 || true
+          # Install into the same interpreter the AEH image uses for logging.
+          python -m pip install --no-cache-dir 'mlflow' 2>&1 | tail -5
           export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
           python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
             --enabled true \
@@ -1603,7 +1604,7 @@ spec:
         # Optional MLflow logging for control + treatment (non-blocking)
         if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
           echo "=== AEH MLflow logging (pairwise) ==="
-          pip install --quiet --no-cache-dir 'mlflow[genai]' 2>&1 | tail -1 || true
+          python -m pip install --no-cache-dir 'mlflow' 2>&1 | tail -5
           export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
           for VARIANT_RUN in "control-$RUN_ID" "treatment-$RUN_ID"; do
             CFG="$SUBMISSION_DIR/$TREATMENT_CONFIG"

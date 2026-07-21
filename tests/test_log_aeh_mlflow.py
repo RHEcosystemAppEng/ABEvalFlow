@@ -78,6 +78,35 @@ def test_skips_when_uri_empty(tmp_path: Path) -> None:
     assert rc == 0
 
 
+def test_returns_error_when_mlflow_not_importable(tmp_path: Path, monkeypatch) -> None:
+    runs, config = _write_run(tmp_path)
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _block_mlflow(name, *args, **kwargs):
+        if name == "mlflow" or name.startswith("mlflow."):
+            raise ImportError("blocked")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _block_mlflow)
+    rc = main(
+        [
+            "--run-id",
+            "run-1",
+            "--config",
+            str(config),
+            "--runs-dir",
+            str(runs),
+            "--tracking-uri",
+            "http://mlflow.example:5000",
+            "--enabled",
+            "true",
+        ]
+    )
+    assert rc == 1
+
+
 def test_minimal_logger_with_mock_mlflow(tmp_path: Path, monkeypatch) -> None:
     runs, config = _write_run(tmp_path)
 
