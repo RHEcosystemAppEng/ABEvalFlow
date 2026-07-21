@@ -121,6 +121,9 @@ def _reward_to_inject(raw: dict) -> dict | None:
         return None
     return {
         "formula": "weighted",
+        # AEH RewardConfig defaults to [1, 5]; LLM judges in this pipeline
+        # emit [0, 1], so keep the range aligned or scores of 1.0 become 0.0.
+        "score_range": [0, 1],
         "weights": {name: 1.0 for name in names},
     }
 
@@ -186,6 +189,12 @@ def _enrich_one_task(
             isinstance(cfg.get("reward"), dict) and cfg["reward"]
         ):
             cfg["reward"] = reward_inject
+        # Harden existing reward blocks that omit score_range (AEH default [1,5]
+        # collapses [0,1] judge scores of 1.0 to reward 0.0).
+        reward = cfg.get("reward")
+        if isinstance(reward, dict) and reward.get("formula") == "weighted":
+            if "score_range" not in reward and "raw" not in reward:
+                reward["score_range"] = [0, 1]
         bundled.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
 
     # 3) Stage annotations in test.sh before reward runs

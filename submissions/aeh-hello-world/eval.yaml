@@ -24,9 +24,12 @@ models:
 dataset:
   path: cases
 
-# When all judges fail/null, weighted → 0.0 (AEH default average would yield 1.0)
+# When all judges fail/null, weighted → 0.0 (AEH default average would yield 1.0).
+# score_range must match judge scale: AEH defaults to [1, 5], which maps a
+# [0, 1] score of 1.0 to reward 0.0.
 reward:
   formula: weighted
+  score_range: [0, 1]
   weights:
     correctness: 1.0
     helpfulness: 1.0
