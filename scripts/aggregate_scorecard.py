@@ -198,14 +198,11 @@ def _extract_behavioral_data(
     - edge_cases: extracted from the EdgeCaseGate result in gates list
       (single source of truth — avoids re-reading report.json)
 
-    Stability and failure_mode sub-check data are not extracted here because
-    no pipeline component currently produces them. The sub-check functions
-    in certification.py are ready and will activate when upstream producers
-    exist.
+    Stability sub-check data is not extracted here because no pipeline
+    component currently produces it. The sub-check function in
+    certification.py is ready and will activate when upstream producers exist.
     TODO: Add stability extraction here once get_historical_variance()
     in monitor.py is wired into the pipeline.
-    TODO: Add failure_mode extraction here once LLM judge trial details include
-    criteria_scores (failure_handling, uncertainty_acknowledgment) in report.json.
     """
     behavioral_data: dict = {}
 
