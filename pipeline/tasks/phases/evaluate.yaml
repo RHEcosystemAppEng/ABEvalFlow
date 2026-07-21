@@ -1207,8 +1207,10 @@ spec:
           memory: "512Mi"
         limits:
           cpu: "1000m"
-          memory: "1Gi"
+          memory: "2Gi"
       env:
+        - name: HOME
+          value: /tmp
         - name: AGENT_EVAL_K8S_NAMESPACE
           valueFrom:
             fieldRef:
@@ -1270,11 +1272,16 @@ spec:
         if isinstance(models, str):
             print(models)
         else:
-            print(models.get('skill', 'claude-sonnet-4-5'))
+            print(models.get('skill', 'claude-sonnet'))
         ")
         fi
         
         JUDGE_OVERRIDE="$(params.aeh-judge-model-override)"
+        # Default judges to the resolved skill model so LiteLLM aliases stay aligned
+        # (eval.yaml may still name a model the proxy does not expose).
+        if [ -z "$JUDGE_OVERRIDE" ] && [ -n "$MODEL" ]; then
+          JUDGE_OVERRIDE="$MODEL"
+        fi
         
         echo "Submission: $SUBMISSION_DIR"
         echo "Output: $OUT_DIR"
@@ -1360,19 +1367,38 @@ spec:
         print(f"Recommendation: {rec}")
         PARSE_AEH
 
-        # Optional MLflow logging (non-blocking)
+        # Optional MLflow logging (non-blocking).
+        # AEH image site-packages is read-only under OpenShift SCC — install to /tmp.
         if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
           echo "=== AEH MLflow logging ==="
-          # Install into the same interpreter the AEH image uses for logging.
-          python -m pip install --no-cache-dir 'mlflow' 2>&1 | tail -5
-          export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
-          python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
-            --enabled true \
-            --tracking-uri "$(params.mlflow-tracking-uri)" \
-            --run-id "$RUN_ID" \
-            --config "$SUBMISSION_DIR/eval.yaml" \
-            --runs-dir "$(workspaces.source.path)/reports" \
-            2>&1 || echo "Warning: MLflow logging failed (non-blocking)"
+          MLFLOW_PKG_DIR="/tmp/mlflow-pkgs"
+          mkdir -p "$MLFLOW_PKG_DIR"
+          export PYTHONPATH="${MLFLOW_PKG_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+          # pandas is required by AEH log_results.py (mlflow.log_table).
+          if ! python -c "import mlflow, pandas" 2>/dev/null; then
+            echo "Installing mlflow-skinny + pandas into ${MLFLOW_PKG_DIR} ..."
+            # Do not let pip failure abort the step (set -e / pipefail).
+            set +e
+            python -m pip install --no-cache-dir --target "$MLFLOW_PKG_DIR" 'mlflow-skinny' 'pandas' 2>&1 | tee /tmp/mlflow-pip.log | tail -30
+            PIP_RC=${PIPESTATUS[0]}
+            set -e
+            if [ "$PIP_RC" -ne 0 ]; then
+              echo "WARN: mlflow-skinny/pandas install failed (rc=$PIP_RC)"
+              tail -40 /tmp/mlflow-pip.log || true
+            fi
+          fi
+          if python -c "import mlflow, pandas; print('mlflow OK', mlflow.__version__, 'pandas', pandas.__version__)"; then
+            export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
+            python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
+              --enabled true \
+              --tracking-uri "$(params.mlflow-tracking-uri)" \
+              --run-id "$RUN_ID" \
+              --config "$SUBMISSION_DIR/eval.yaml" \
+              --runs-dir "$(workspaces.source.path)/reports" \
+              2>&1 || echo "Warning: MLflow logging failed (non-blocking)"
+          else
+            echo "Warning: mlflow/pandas not importable; skipping MLflow logging"
+          fi
         else
           echo "Skipping AEH MLflow (enable-mlflow=$(params.enable-mlflow), uri set=$([ -n "$(params.mlflow-tracking-uri)" ] && echo yes || echo no))"
         fi
@@ -1398,8 +1424,10 @@ spec:
           memory: "512Mi"
         limits:
           cpu: "1000m"
-          memory: "1Gi"
+          memory: "2Gi"
       env:
+        - name: HOME
+          value: /tmp
         - name: AGENT_EVAL_K8S_NAMESPACE
           valueFrom:
             fieldRef:
@@ -1416,7 +1444,7 @@ spec:
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
-        
+
         EVAL_ENGINE="$(params.eval-engine)"
         AEH_MODE="$(params.aeh-mode)"
         if [ "$EVAL_ENGINE" != "aeh" ] || [ "$AEH_MODE" != "pairwise" ]; then
@@ -1445,11 +1473,14 @@ spec:
         if isinstance(models, str):
             print(models)
         else:
-            print(models.get('skill', 'claude-sonnet-4-5'))
+            print(models.get('skill', 'claude-sonnet'))
         ")
         fi
         
         JUDGE_OVERRIDE="$(params.aeh-judge-model-override)"
+        if [ -z "$JUDGE_OVERRIDE" ] && [ -n "$MODEL" ]; then
+          JUDGE_OVERRIDE="$MODEL"
+        fi
         AEH_IMAGE="$(params.aeh-image)"
         AEH_RUNNER="$(params.aeh-runner)"
         
@@ -1461,6 +1492,7 @@ spec:
         echo "Control config: $CONTROL_CONFIG"
         echo "Treatment config: $TREATMENT_CONFIG"
         echo "Model: $MODEL"
+        echo "Judge override: ${JUDGE_OVERRIDE:-none}"
         echo "Runner: $AEH_RUNNER"
 
         # Add pipeline dir to PYTHONPATH so abevalflow module is importable
@@ -1601,24 +1633,43 @@ spec:
         print(f"  Recommendation: {rec}")
         PARSE_PAIRWISE
 
-        # Optional MLflow logging for control + treatment (non-blocking)
+        # Optional MLflow logging for control + treatment (non-blocking).
+        # AEH image site-packages is read-only under OpenShift SCC — install to /tmp.
         if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
           echo "=== AEH MLflow logging (pairwise) ==="
-          python -m pip install --no-cache-dir 'mlflow' 2>&1 | tail -5
-          export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
-          for VARIANT_RUN in "control-$RUN_ID" "treatment-$RUN_ID"; do
-            CFG="$SUBMISSION_DIR/$TREATMENT_CONFIG"
-            if [[ "$VARIANT_RUN" == control-* ]]; then
-              CFG="$SUBMISSION_DIR/$CONTROL_CONFIG"
+          MLFLOW_PKG_DIR="/tmp/mlflow-pkgs"
+          mkdir -p "$MLFLOW_PKG_DIR"
+          export PYTHONPATH="${MLFLOW_PKG_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+          # pandas is required by AEH log_results.py (mlflow.log_table).
+          if ! python -c "import mlflow, pandas" 2>/dev/null; then
+            echo "Installing mlflow-skinny + pandas into ${MLFLOW_PKG_DIR} ..."
+            set +e
+            python -m pip install --no-cache-dir --target "$MLFLOW_PKG_DIR" 'mlflow-skinny' 'pandas' 2>&1 | tee /tmp/mlflow-pip.log | tail -30
+            PIP_RC=${PIPESTATUS[0]}
+            set -e
+            if [ "$PIP_RC" -ne 0 ]; then
+              echo "WARN: mlflow-skinny/pandas install failed (rc=$PIP_RC)"
+              tail -40 /tmp/mlflow-pip.log || true
             fi
-            python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
-              --enabled true \
-              --tracking-uri "$(params.mlflow-tracking-uri)" \
-              --run-id "$VARIANT_RUN" \
-              --config "$CFG" \
-              --runs-dir "$REPORTS_DIR" \
-              2>&1 || echo "Warning: MLflow logging failed for $VARIANT_RUN (non-blocking)"
-          done
+          fi
+          if python -c "import mlflow, pandas; print('mlflow OK', mlflow.__version__, 'pandas', pandas.__version__)"; then
+            export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
+            for VARIANT_RUN in "control-$RUN_ID" "treatment-$RUN_ID"; do
+              CFG="$SUBMISSION_DIR/$TREATMENT_CONFIG"
+              if [[ "$VARIANT_RUN" == control-* ]]; then
+                CFG="$SUBMISSION_DIR/$CONTROL_CONFIG"
+              fi
+              python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
+                --enabled true \
+                --tracking-uri "$(params.mlflow-tracking-uri)" \
+                --run-id "$VARIANT_RUN" \
+                --config "$CFG" \
+                --runs-dir "$REPORTS_DIR" \
+                2>&1 || echo "Warning: MLflow logging failed for $VARIANT_RUN (non-blocking)"
+            done
+          else
+            echo "Warning: mlflow/pandas not importable; skipping MLflow logging"
+          fi
         else
           echo "Skipping AEH MLflow (enable-mlflow=$(params.enable-mlflow))"
         fi

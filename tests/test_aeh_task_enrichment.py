@@ -162,3 +162,87 @@ def test_enrich_copies_submission_tool_handlers_when_missing(tmp_path: Path):
     enrich_harbor_tasks(tasks, config_path=submission / "eval.yaml")
     assert (task / "environment" / "tool_handlers.yaml").is_file()
     assert "AskUserQuestion" in (task / "environment" / "tool_handlers.yaml").read_text()
+
+
+def test_enrich_patches_models_and_injects_weighted_reward(tmp_path: Path):
+    submission = tmp_path / "submission"
+    (submission / "cases" / "case-001").mkdir(parents=True)
+    (submission / "eval.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "skill": "demo",
+                "dataset": {"path": "cases"},
+                "models": {"skill": "old-skill", "judge": "old-judge"},
+                "judges": [
+                    {"name": "correctness", "type": "llm"},
+                    {"name": "helpfulness", "type": "llm"},
+                ],
+            }
+        )
+    )
+
+    tasks = tmp_path / "tasks"
+    task = tasks / "case-001"
+    _write_generated_task(task)
+    (task / "tests" / "eval.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "dataset": {"path": ""},
+                "models": {"skill": "old-skill", "judge": "old-judge"},
+                "judges": [
+                    {"name": "correctness", "type": "llm"},
+                    {"name": "helpfulness", "type": "llm"},
+                ],
+            },
+            sort_keys=False,
+        )
+    )
+
+    enrich_harbor_tasks(
+        tasks,
+        config_path=submission / "eval.yaml",
+        skill_model="claude-sonnet",
+        judge_model="claude-sonnet",
+    )
+
+    bundled = yaml.safe_load((task / "tests" / "eval.yaml").read_text())
+    assert bundled["models"]["skill"] == "claude-sonnet"
+    assert bundled["models"]["judge"] == "claude-sonnet"
+    assert bundled["reward"]["formula"] == "weighted"
+    assert bundled["reward"]["weights"] == {
+        "correctness": 1.0,
+        "helpfulness": 1.0,
+    }
+
+
+def test_enrich_preserves_explicit_reward_section(tmp_path: Path):
+    submission = tmp_path / "submission"
+    (submission / "cases" / "case-001").mkdir(parents=True)
+    (submission / "eval.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "skill": "demo",
+                "dataset": {"path": "cases"},
+                "reward": {"formula": "weighted", "weights": {"correctness": 2.0}},
+                "judges": [{"name": "correctness"}, {"name": "helpfulness"}],
+            }
+        )
+    )
+
+    tasks = tmp_path / "tasks"
+    task = tasks / "case-001"
+    _write_generated_task(task)
+    (task / "tests" / "eval.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "dataset": {"path": ""},
+                "reward": {"formula": "weighted", "weights": {"correctness": 2.0}},
+                "judges": [{"name": "correctness"}, {"name": "helpfulness"}],
+            },
+            sort_keys=False,
+        )
+    )
+
+    enrich_harbor_tasks(tasks, config_path=submission / "eval.yaml")
+    bundled = yaml.safe_load((task / "tests" / "eval.yaml").read_text())
+    assert bundled["reward"]["weights"] == {"correctness": 2.0}

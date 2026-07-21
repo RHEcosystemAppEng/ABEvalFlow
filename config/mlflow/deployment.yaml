@@ -37,6 +37,9 @@ spec:
             - -ec
             - |
               mkdir -p /mlflow/artifacts
+              # Proxied artifacts: clients upload via the tracking HTTP API.
+              # A filesystem default-artifact-root makes remote clients try to
+              # mkdir /mlflow locally (PermissionError under OpenShift SCC).
               # Single uvicorn worker: default multi-worker forks OOM under small limits.
               exec mlflow server \
                 --host 0.0.0.0 \
@@ -44,7 +47,8 @@ spec:
                 --allowed-hosts '*' \
                 --cors-allowed-origins '*' \
                 --backend-store-uri sqlite:////mlflow/mlflow.db \
-                --default-artifact-root /mlflow/artifacts \
+                --default-artifact-root mlflow-artifacts:/ \
+                --artifacts-destination /mlflow/artifacts \
                 --serve-artifacts \
                 --uvicorn-opts '--workers 1 --timeout-keep-alive 120'
           volumeMounts:

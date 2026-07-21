@@ -139,13 +139,15 @@ def _minimal_mlflow_log(*, run_id: str, config: Path, runs_dir: Path, tracking_u
         elif summary.get("mean_reward") is not None:
             mlflow.log_metric("mean_reward", float(summary["mean_reward"]))
 
-        if summary_path.is_file():
-            mlflow.log_artifact(str(summary_path))
-        if rr_path.is_file():
-            mlflow.log_artifact(str(rr_path))
-        report_html = run_dir / "report.html"
-        if report_html.is_file():
-            mlflow.log_artifact(str(report_html))
+        for artifact in (summary_path, rr_path, run_dir / "report.html"):
+            if not artifact.is_file():
+                continue
+            try:
+                mlflow.log_artifact(str(artifact))
+            except Exception:
+                # Metrics/params already recorded; artifacts need a proxied
+                # artifact root (mlflow-artifacts:/) on the tracking server.
+                logger.warning("MLflow artifact upload failed for %s", artifact, exc_info=True)
 
     logger.info("Minimal MLflow log complete: experiment=%s run_id=%s", experiment, run_id)
 
@@ -185,6 +187,20 @@ def main(argv: list[str] | None = None) -> int:
             "Python package 'mlflow' is not installed in this environment; install with: python -m pip install mlflow"
         )
         return 1
+
+    # Belt-and-suspenders: AEH log_results rejects absolute harbor_job_dir.
+    try:
+        from abevalflow.harbor_extensions.aeh_paths import rewrite_harbor_job_dir
+
+        raw_cfg = yaml.safe_load(config.read_text()) or {}
+        skill = str(raw_cfg.get("skill") or config.parent.name)
+        rr = runs_dir / skill / args.run_id / "run_result.json"
+        if rr.is_file():
+            rewritten = rewrite_harbor_job_dir(rr)
+            if rewritten:
+                logger.info("Rewrote harbor_job_dir -> %s", rewritten)
+    except Exception:
+        logger.warning("harbor_job_dir rewrite failed; continuing", exc_info=True)
 
     script = _resolve_log_results_script()
     if script is not None:

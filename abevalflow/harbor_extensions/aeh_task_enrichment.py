@@ -46,8 +46,20 @@ _INTERCEPTION_MARKERS = (
 )
 
 
-def enrich_harbor_tasks(tasks_dir: Path, *, config_path: Path) -> int:
+def enrich_harbor_tasks(
+    tasks_dir: Path,
+    *,
+    config_path: Path,
+    skill_model: str | None = None,
+    judge_model: str | None = None,
+) -> int:
     """Enrich every Harbor task package under *tasks_dir*.
+
+    Optional *skill_model* / *judge_model* rewrite ``models`` in each task's
+    bundled ``tests/eval.yaml`` (in-pod judges read this file). When the
+    submission has no ``reward:`` section, inject a weighted formula over
+    declared judges so all-null judge values yield 0.0 instead of AEH's
+    default 1.0.
 
     Returns the number of task packages updated.
     """
@@ -71,6 +83,7 @@ def enrich_harbor_tasks(tasks_dir: Path, *, config_path: Path) -> int:
         plugin_dirs = list(runner.get("plugin_dirs") or [])
 
     wants_interception = _config_wants_tool_interception(raw)
+    reward_inject = _reward_to_inject(raw)
 
     updated = 0
     for task_dir in sorted(p for p in tasks_dir.iterdir() if p.is_dir()):
@@ -84,9 +97,32 @@ def enrich_harbor_tasks(tasks_dir: Path, *, config_path: Path) -> int:
             plugin_dirs=plugin_dirs,
             config_path=config_path,
             wants_interception=wants_interception,
+            skill_model=skill_model,
+            judge_model=judge_model,
+            reward_inject=reward_inject,
         )
         updated += 1
     return updated
+
+
+def _reward_to_inject(raw: dict) -> dict | None:
+    """Build a weighted reward block when the submission omits ``reward:``."""
+    if isinstance(raw.get("reward"), dict) and raw["reward"]:
+        return None
+    judges = raw.get("judges") or []
+    if not isinstance(judges, list):
+        return None
+    names = [
+        str(j["name"])
+        for j in judges
+        if isinstance(j, dict) and j.get("name")
+    ]
+    if not names:
+        return None
+    return {
+        "formula": "weighted",
+        "weights": {name: 1.0 for name in names},
+    }
 
 
 def _config_wants_tool_interception(raw: dict) -> bool:
@@ -110,6 +146,9 @@ def _enrich_one_task(
     plugin_dirs: list[str],
     config_path: Path,
     wants_interception: bool,
+    skill_model: str | None = None,
+    judge_model: str | None = None,
+    reward_inject: dict | None = None,
 ) -> None:
     env_dir = task_dir / "environment"
     env_dir.mkdir(parents=True, exist_ok=True)
@@ -124,14 +163,29 @@ def _enrich_one_task(
     if annotations_src is not None:
         shutil.copy2(annotations_src, env_dir / "annotations.yaml")
 
-    # 2) Restore dataset.path so load_case_record can resolve annotations
+    # 2) Patch bundled eval.yaml: dataset.path, models, reward hardening
     bundled = tests_dir / "eval.yaml"
     if bundled.is_file():
         cfg = yaml.safe_load(bundled.read_text()) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
         if isinstance(cfg.get("dataset"), dict):
             cfg["dataset"]["path"] = "cases"
         elif "dataset" not in cfg:
             cfg["dataset"] = {"path": "cases"}
+        if skill_model or judge_model:
+            models = cfg.get("models")
+            if not isinstance(models, dict):
+                models = {}
+                cfg["models"] = models
+            if skill_model:
+                models["skill"] = skill_model
+            if judge_model:
+                models["judge"] = judge_model
+        if reward_inject is not None and not (
+            isinstance(cfg.get("reward"), dict) and cfg["reward"]
+        ):
+            cfg["reward"] = reward_inject
         bundled.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
 
     # 3) Stage annotations in test.sh before reward runs

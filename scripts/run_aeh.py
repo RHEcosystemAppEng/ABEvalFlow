@@ -514,6 +514,16 @@ class HarborRunner(BaseRunner):
         except Exception as exc:  # noqa: BLE001 — best-effort bridge; don't hide harbor rc
             print(f"WARN: failed to materialize AEH case outputs: {exc}")
 
+        # AEH MLflow logger rejects absolute harbor_job_dir; store workspace-relative.
+        try:
+            from abevalflow.harbor_extensions.aeh_paths import rewrite_harbor_job_dir
+
+            rewritten = rewrite_harbor_job_dir(Path(output) / "run_result.json")
+            if rewritten:
+                print(f"Rewrote harbor_job_dir -> {rewritten}")
+        except Exception as exc:  # noqa: BLE001 — best-effort; don't hide harbor rc
+            print(f"WARN: failed to rewrite harbor_job_dir: {exc}")
+
         return result.returncode
 
     def _prepare_enriched_tasks(self, config: Path, tasks_dir: Path) -> None:
@@ -545,8 +555,13 @@ class HarborRunner(BaseRunner):
             self.image,
             judge_model=self.judge_model,
         )
-        n = enrich_harbor_tasks(tasks_dir, config_path=Path(config))
-        print(f"Enriched {n} Harbor task package(s) (skills + annotations)")
+        n = enrich_harbor_tasks(
+            tasks_dir,
+            config_path=Path(config),
+            skill_model=self.model,
+            judge_model=self.judge_model,
+        )
+        print(f"Enriched {n} Harbor task package(s) (skills + annotations + models/reward)")
 
     def _patch_eval_config_for_openshift(self, config: Path, tasks_dir: Path | None) -> Path:
         """Patch eval.yaml for OpenShift emptyDir support.
