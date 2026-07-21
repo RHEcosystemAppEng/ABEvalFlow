@@ -172,8 +172,8 @@ def generate_edge_case_evals_from_skill(
                 break
             if not ev.get("id", "").startswith("edge-"):
                 ev["id"] = f"edge-{ev.get('id', 'unknown')}"
-            if len(ev.get("assertions", [])) > 10:
-                ev["assertions"] = ev["assertions"][:10]
+            if len(ev.get("assertions", [])) > 3:
+                ev["assertions"] = ev["assertions"][:3]
 
         if valid:
             evals_data["skill_name"] = skill_name

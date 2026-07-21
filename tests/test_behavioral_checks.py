@@ -829,7 +829,7 @@ class TestLLMEdgeCaseGeneration:
         sub = self._make_submission(tmp_path)
         result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub)
         assert result is not None
-        assert len(result["evals"][0]["assertions"]) == 10
+        assert len(result["evals"][0]["assertions"]) == 3
 
     def test_generate_from_skill_retries_on_bad_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from scripts import generate_edge_case_evals
