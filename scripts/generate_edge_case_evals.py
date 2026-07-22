@@ -164,6 +164,9 @@ def generate_edge_case_evals_from_skill(
         if not evals_list:
             logger.warning("Attempt %d: Empty evals array", attempt)
             continue
+        if len(evals_list) > 3:
+            evals_list = evals_list[:3]
+            evals_data["evals"] = evals_list
 
         valid = True
         for ev in evals_list:
