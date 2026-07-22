@@ -15,8 +15,10 @@ evaluation_runs (pre-existing)
     │        │
     │        └── certifications (1:3 max, CASCADE delete)
     │
-    └──→ observability_metrics (1:1 via pipeline_run_id)
+    └──→ observability_metrics (one per run attempt, via pipeline_run_id + attempt_number)
 ```
+
+Note: arrows from `evaluation_runs` to `scorecards` and `observability_metrics` are logical references via `pipeline_run_id` string, not database-level foreign keys. This allows scorecards to exist for MCPChecker runs and metrics to outlive scorecard lifecycle.
 
 ## Pipeline Integration
 
@@ -39,7 +41,7 @@ One row per pipeline run. Stores the unified gate verdict combining all evaluati
 | `id` | UUID | No | Primary key, auto-generated |
 | `pipeline_run_id` | VARCHAR(255) | No | Tekton PipelineRun name. Unique — one scorecard per run |
 | `submission_name` | VARCHAR(255) | No | Name of the evaluated skill/agent submission |
-| `eval_engine` | VARCHAR(50) | No | Evaluation engine used: harbor, ase, mcpchecker, a2a, both |
+| `eval_engine` | VARCHAR(50) | No | Evaluation engine used: harbor, ase, aeh, mcpchecker, a2a, both |
 | `recommendation` | VARCHAR(20) | No | Unified verdict: pass, warn, or fail |
 | `recommendation_reason` | TEXT | No | Human-readable explanation of why this recommendation was given |
 | `combination_mode` | VARCHAR(20) | No | How gates were combined: all_pass, any_pass, or weighted |
@@ -59,14 +61,14 @@ One row per pipeline run. Stores the unified gate verdict combining all evaluati
 
 ## Table: `gate_results`
 
-One row per gate per pipeline run. Stores normalized results for each evaluation gate (engine, security, quality), enabling queries like "gate pass rate by type" without parsing JSON.
+One row per gate per pipeline run. Stores normalized results for each evaluation gate (engine, security, quality, behavioral), enabling queries like "gate pass rate by type" without parsing JSON.
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | UUID | No | Primary key, auto-generated |
 | `scorecard_id` | UUID | No | Foreign key to `scorecards.id` (CASCADE delete) |
-| `gate_name` | VARCHAR(100) | No | Category name of the gate: evaluation, security, or quality |
-| `gate_type` | VARCHAR(20) | No | Type of gate: engine, security, or quality |
+| `gate_name` | VARCHAR(100) | No | Category name of the gate: evaluation, security, quality, or behavioral |
+| `gate_type` | VARCHAR(20) | No | Type of gate: engine, security, quality, or behavioral |
 | `policy_key` | VARCHAR(100) | Yes | Implementation name for policy lookup: harbor, cisco, llm-review, etc. |
 | `passed` | BOOLEAN | No | Whether the gate passed based on its threshold and mode |
 | `score` | FLOAT | No | Normalized score from 0.0 (worst) to 1.0 (best) |
@@ -75,9 +77,9 @@ One row per gate per pipeline run. Stores normalized results for each evaluation
 | `findings_count` | INTEGER | No | Number of findings (issues) discovered by this gate |
 | `message` | TEXT | Yes | Human-readable summary of the gate result |
 | `details_json` | JSONB | Yes | Engine-specific payload (e.g. AnalysisResult for engine gates) |
-| `duration_ms` | INTEGER | Yes | Gate execution time in milliseconds (populated by Phase A when available) |
-| `prompt_tokens` | INTEGER | Yes | LLM prompt tokens used by this gate (e.g. quality review) |
-| `completion_tokens` | INTEGER | Yes | LLM completion tokens used by this gate |
+| `duration_ms` | INTEGER | Yes | Gate execution time in milliseconds (reserved, not yet populated) |
+| `prompt_tokens` | INTEGER | Yes | LLM prompt tokens used by this gate (reserved, not yet populated) |
+| `completion_tokens` | INTEGER | Yes | LLM completion tokens used by this gate (reserved, not yet populated) |
 | `evaluated_at` | TIMESTAMP TZ | Yes | When the gate was evaluated |
 
 **Indexes:** `scorecard_id`, `(scorecard_id, policy_key)`, `(gate_name, passed)`, `policy_key`
@@ -112,7 +114,7 @@ One row per certification level per pipeline run. Maximum 3 rows per scorecard (
 
 ## Table: `observability_metrics`
 
-One row per pipeline run with aggregated LLM token usage and phase timing. Enables cost tracking and performance monitoring. No foreign key to scorecards — metrics may outlive scorecard lifecycle.
+One row per pipeline run attempt with aggregated LLM token usage and phase timing. Enables cost tracking and performance monitoring. Retries create additional rows with incrementing `attempt_number`. No foreign key to scorecards — metrics may outlive scorecard lifecycle.
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
