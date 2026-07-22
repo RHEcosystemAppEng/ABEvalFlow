@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -170,12 +171,17 @@ def generate_edge_case_evals_from_skill(
 
         valid = True
         for ev in evals_list:
+            if not isinstance(ev, dict):
+                logger.warning("Attempt %d: eval entry is not a dict", attempt)
+                valid = False
+                break
             if not ev.get("prompt") or not ev.get("assertions"):
                 logger.warning("Attempt %d: eval missing prompt or assertions", attempt)
                 valid = False
                 break
             if not ev.get("id", "").startswith("edge-"):
                 ev["id"] = f"edge-{ev.get('id', 'unknown')}"
+            ev["id"] = re.sub(r"[^a-zA-Z0-9_-]", "", ev["id"])
             if len(ev.get("assertions", [])) > 3:
                 ev["assertions"] = ev["assertions"][:3]
 
