@@ -446,7 +446,59 @@ spec:
         print(f"Recommendation: {rec}")
         COMPUTE_REWARDS
 
-    # Step 5b: ASE - Run Edge Case Evaluations (one ASE run per edge case)
+    # Step 5b: Generate edge case evals from SKILL.md via LLM
+    - name: generate-edge-case-evals
+      image: registry.access.redhat.com/ubi9/python-311:9.6
+      env:
+        - name: LLM_BASE_URL
+          value: "$(params.llm-api-base)"
+        - name: LLM_API_KEY
+          value: "$(params.llm-api-key)"
+        - name: LLM_MODEL
+          value: "$(params.llm-model)"
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        if [ "$EVAL_ENGINE" != "harbor" ] && [ "$EVAL_ENGINE" != "ase" ] && [ "$EVAL_ENGINE" != "both" ]; then
+          echo "Skipping edge case generation (eval-engine=$EVAL_ENGINE)"
+          exit 0
+        fi
+
+        echo "=== EVALUATE PHASE: Generate Edge Case Evals ==="
+        PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
+        EDGE_EVALS_DIR="$(workspaces.source.path)/_eval_tmp/edge-case-evals"
+        mkdir -p "$EDGE_EVALS_DIR"
+
+        cd "$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR"
+        pip install --quiet --no-cache-dir pyyaml pydantic openai 2>/dev/null || true
+
+        # Generate skill-specific edge cases from SKILL.md via LLM
+        python scripts/generate_edge_case_evals.py \
+          --submission-dir "$SUBMISSION_PATH" \
+          --output-dir "$EDGE_EVALS_DIR" \
+          --generate-from-skill || echo "WARNING: LLM edge case generation failed, falling back to submitter-provided only"
+
+        # Also generate evals from submitter-provided edge_cases/*.md (if any)
+        EDGE_CASES_DIR="$SUBMISSION_PATH/edge_cases"
+        if [ -d "$EDGE_CASES_DIR" ]; then
+          for MD_FILE in "$EDGE_CASES_DIR"/*.md; do
+            [ -f "$MD_FILE" ] || continue
+            EDGE_NAME=$(basename "$MD_FILE" .md)
+            python scripts/generate_edge_case_evals.py \
+              --submission-dir "$SUBMISSION_PATH" \
+              --output-dir "$EDGE_EVALS_DIR/submitter_$EDGE_NAME" \
+              --edge-case-file "$MD_FILE"
+          done
+        fi
+
+        echo "Edge case evals generated at $EDGE_EVALS_DIR"
+        ls -la "$EDGE_EVALS_DIR/" 2>/dev/null || true
+
+    # Step 5c: ASE - Run Edge Case Evaluations (one ASE run per edge case)
     - name: ase-eval-edge-cases
       image: registry.access.redhat.com/ubi9/nodejs-20:latest
       env:
@@ -463,23 +515,16 @@ spec:
         fi
 
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
-        EDGE_CASES_DIR="$SUBMISSION_PATH/edge_cases"
-
-        if [ ! -d "$EDGE_CASES_DIR" ]; then
-          echo "No edge_cases/ directory — skipping edge case evaluation"
-          exit 0
-        fi
-
-        MD_FILES=$(find "$EDGE_CASES_DIR" -name "*.md" -type f | sort)
-        MD_COUNT=$(echo "$MD_FILES" | grep -c . || true)
-        if [ "$MD_COUNT" -eq 0 ]; then
-          echo "edge_cases/ has no .md files — skipping"
-          exit 0
-        fi
-
-        echo "=== EVALUATE PHASE: ASE Edge Case Evaluation ($MD_COUNT edge cases) ==="
-
         PIPELINE_DIR="$(workspaces.source.path)/_pipeline"
+        EDGE_EVALS_DIR="$(workspaces.source.path)/_eval_tmp/edge-case-evals"
+
+        # Check if any edge case evals were generated
+        if [ ! -d "$EDGE_EVALS_DIR" ] || [ -z "$(find "$EDGE_EVALS_DIR" -name '*.json' -print -quit 2>/dev/null)" ]; then
+          echo "No edge case evals generated — skipping"
+          exit 0
+        fi
+
+        echo "=== EVALUATE PHASE: ASE Edge Case Evaluation ==="
         RESULTS_BASE="$(workspaces.source.path)/eval-results/$(params.submission-name)/edge-cases"
         mkdir -p "$RESULTS_BASE"
 
@@ -510,48 +555,58 @@ spec:
         [ -z "$JUDGE_MODEL" ] && JUDGE_MODEL="$LLM_MODEL"
         [[ "$BASE_URL" != */v1 ]] && BASE_URL="${BASE_URL}/v1"
 
-        # Run a separate ASE evaluation for each edge case
-        EDGE_NUM=0
-        for MD_FILE in $MD_FILES; do
-          EDGE_NAME=$(basename "$MD_FILE" .md)
-          EDGE_NUM=$((EDGE_NUM + 1))
-          echo "--- Edge case $EDGE_NUM/$MD_COUNT: $EDGE_NAME ---"
+        # Run ASE for each pre-generated edge case eval
+        # The main evals.json contains all LLM-generated edge cases
+        MAIN_EVALS="$EDGE_EVALS_DIR/edge-case-evals.json"
+        if [ -f "$MAIN_EVALS" ]; then
+          EVAL_COUNT=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).evals.length)" "$MAIN_EVALS")
+          echo "Running $EVAL_COUNT LLM-generated edge cases"
 
-          PROMPT=$(cat "$MD_FILE")
-          if [ -z "$PROMPT" ]; then
-            echo "Skipping empty edge case: $EDGE_NAME"
-            continue
-          fi
+          for i in $(seq 0 $((EVAL_COUNT - 1))); do
+            EDGE_ID=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).evals[$i].id)" "$MAIN_EVALS")
+            EDGE_NAME=$(echo "$EDGE_ID" | sed 's/^edge-//')
+            echo "--- LLM-generated edge case: $EDGE_NAME ---"
 
-          # Create isolated skill dir for this edge case
+            EDGE_SKILL_DIR="$(workspaces.source.path)/_eval_tmp/edge-case-$EDGE_NAME"
+            rm -rf "$EDGE_SKILL_DIR"
+            mkdir -p "$EDGE_SKILL_DIR/evals"
+            cp "$SKILL_MD" "$EDGE_SKILL_DIR/SKILL.md"
+
+            # Extract single eval entry into its own evals.json
+            node -e "
+              const fs = require('fs');
+              const all = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+              const single = { skill_name: all.skill_name, evals: [all.evals[$i]] };
+              fs.writeFileSync(process.argv[2], JSON.stringify(single, null, 2));
+            " "$MAIN_EVALS" "$EDGE_SKILL_DIR/evals/evals.json"
+
+            # Run ASE for this single edge case
+            EDGE_RESULTS="$RESULTS_BASE/$EDGE_NAME"
+            mkdir -p "$EDGE_RESULTS"
+
+            agent-skills-eval "$EDGE_SKILL_DIR" --baseline --layout iteration --report \
+              --base-url "$BASE_URL" --target "$LLM_MODEL" --judge "$JUDGE_MODEL" \
+              --concurrency 1 --workspace "$EDGE_RESULTS/iteration-1" \
+              --api-key-env OPENAI_API_KEY || true
+
+            echo "Edge case '$EDGE_NAME' complete"
+          done
+        fi
+
+        # Run submitter-provided edge cases (from edge_cases/*.md via pre-generated evals)
+        for SUBDIR in "$EDGE_EVALS_DIR"/submitter_*/; do
+          [ -d "$SUBDIR" ] || continue
+          EVAL_FILE="$SUBDIR/edge-case-evals.json"
+          [ -f "$EVAL_FILE" ] || continue
+          EDGE_NAME=$(basename "$SUBDIR")
+          echo "--- Submitter edge case: $EDGE_NAME ---"
+
           EDGE_SKILL_DIR="$(workspaces.source.path)/_eval_tmp/edge-case-$EDGE_NAME"
           rm -rf "$EDGE_SKILL_DIR"
           mkdir -p "$EDGE_SKILL_DIR/evals"
           cp "$SKILL_MD" "$EDGE_SKILL_DIR/SKILL.md"
+          cp "$EVAL_FILE" "$EDGE_SKILL_DIR/evals/evals.json"
 
-          # Generate single-entry evals.json using node (Python not available in this image)
-          node -e "
-            const fs = require('fs');
-            const prompt = fs.readFileSync(process.argv[1], 'utf8').trim();
-            const name = process.argv[2];
-            const skill = process.argv[3];
-            const evals = {
-              skill_name: skill,
-              evals: [{
-                id: 'edge-' + name,
-                name: 'Edge case: ' + name,
-                prompt: prompt,
-                assertions: [
-                  'The response handles the edge case appropriately without crashing or producing nonsensical output',
-                  'The response acknowledges limitations or uncertainty when the input is unusual',
-                  'The response remains helpful and coherent despite the edge case conditions'
-                ]
-              }]
-            };
-            fs.writeFileSync(process.argv[4], JSON.stringify(evals, null, 2));
-          " "$MD_FILE" "$EDGE_NAME" "$(params.submission-name)" "$EDGE_SKILL_DIR/evals/evals.json"
-
-          # Run ASE for this single edge case
           EDGE_RESULTS="$RESULTS_BASE/$EDGE_NAME"
           mkdir -p "$EDGE_RESULTS"
 
@@ -565,7 +620,7 @@ spec:
 
         echo "All edge case evaluations complete"
 
-    # Step 5c: Aggregate edge case results
+    # Step 5d: Aggregate edge case results
     - name: ase-aggregate-edge-cases
       image: registry.access.redhat.com/ubi9/python-311:9.6
       script: |

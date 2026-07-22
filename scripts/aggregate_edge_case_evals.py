@@ -50,9 +50,11 @@ def aggregate_edge_case_results(results_dir: Path) -> list[dict]:
         grading_files = sorted(edge_dir.rglob("grading.json"))
         with_skill_gradings = [g for g in grading_files if "with_skill" in g.parts]
 
+        source = "submitter" if edge_name.startswith("submitter_") else "generated"
+
         if not with_skill_gradings:
             logger.warning("Edge case '%s': no with_skill grading.json — counted as failure", edge_name)
-            edge_results.append({"name": edge_name, "passed": False, "score": 0.0})
+            edge_results.append({"name": edge_name, "passed": False, "score": 0.0, "source": source})
             continue
 
         total_passed = 0
@@ -70,11 +72,11 @@ def aggregate_edge_case_results(results_dir: Path) -> list[dict]:
                 break
 
         if parse_failed or total_count == 0:
-            edge_results.append({"name": edge_name, "passed": False, "score": 0.0})
+            edge_results.append({"name": edge_name, "passed": False, "score": 0.0, "source": source})
         else:
             score = total_passed / total_count
             passed = score >= DEFAULT_EDGE_CASE_PASS_THRESHOLD
-            edge_results.append({"name": edge_name, "passed": passed, "score": score})
+            edge_results.append({"name": edge_name, "passed": passed, "score": score, "source": source})
 
     return edge_results
 

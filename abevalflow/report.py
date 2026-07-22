@@ -173,6 +173,7 @@ class EdgeCaseResult(BaseModel):
     )
     passed: bool = Field(description="Whether the edge case passed verification")
     score: float | None = Field(default=None, description="Edge case score (0.0-1.0)")
+    source: str | None = Field(default=None, description="Origin: 'generated' or 'submitter'")
 
 
 class PairwiseComparisonResult(BaseModel):

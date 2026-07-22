@@ -317,16 +317,14 @@ DEFAULT_THRESHOLDS: dict[CheckId, float] = {
 }
 
 BEHAVIORAL_SUB_CHECK_WEIGHTS = {
-    "consistency": 0.3,
-    "edge_case": 0.3,
+    "consistency": 0.4,
+    "edge_case": 0.4,
     "stability": 0.2,
-    "failure_mode": 0.2,
 }
 
 DEFAULT_CONSISTENCY_THRESHOLD = 0.3
 DEFAULT_STABILITY_VARIANCE_THRESHOLD = 0.1
 DEFAULT_EDGE_CASE_PASS_THRESHOLD = 0.5
-DEFAULT_FAILURE_MODE_THRESHOLD = 0.5
 
 
 def _check_consistency(
@@ -478,56 +476,15 @@ def _check_edge_case_results(
     )
 
 
-def _check_failure_mode(behavioral_data: dict[str, Any]) -> CheckResult:
-    """Check failure mode handling scores from LLM judge.
-
-    Evaluates whether the agent handles errors gracefully and acknowledges
-    uncertainty when appropriate.
-    """
-    failure_mode_data = behavioral_data.get("failure_mode")
-
-    if failure_mode_data is None:
-        return CheckResult(
-            check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
-            name="Failure Mode Check",
-            passed=True,
-            score=1.0,
-            message="No failure mode data available",
-            details={"sub_check": "failure_mode", "status": "no_data"},
-        )
-
-    score = failure_mode_data.get("score", 0.0)
-    threshold = failure_mode_data.get("threshold", DEFAULT_FAILURE_MODE_THRESHOLD)
-    passed = score >= threshold
-
-    return CheckResult(
-        check_id=CheckId.ENTERPRISE_BEHAVIORAL_TESTING,
-        name="Failure Mode Check",
-        passed=passed,
-        score=score,
-        message=(
-            f"Failure mode score {score:.2f} meets threshold {threshold}"
-            if passed
-            else f"Failure mode score {score:.2f} below threshold {threshold}"
-        ),
-        details={
-            "sub_check": "failure_mode",
-            "score": score,
-            "threshold": threshold,
-        },
-    )
-
-
 def _compute_behavioral_testing_check(
     behavioral_data: dict[str, Any],
 ) -> CheckResult:
     """Compute the combined Enterprise Behavioral Testing check.
 
-    Combines four sub-checks with configurable weights:
-    - Consistency (trial variance): 30%
-    - Edge case pass rate: 30%
+    Combines three sub-checks with configurable weights:
+    - Consistency (trial variance): 40%
+    - Edge case pass rate: 40%
     - Stability (score drift): 20%
-    - Failure mode handling: 20%
 
     Pass/fail is determined by whether all active sub-checks pass individually.
     The composite score is a weighted average for reporting purposes but does
@@ -541,7 +498,6 @@ def _compute_behavioral_testing_check(
         "consistency": _check_consistency(behavioral_data),
         "edge_case": _check_edge_case_results(behavioral_data),
         "stability": _check_stability(behavioral_data),
-        "failure_mode": _check_failure_mode(behavioral_data),
     }
 
     weighted_score = 0.0
@@ -825,7 +781,6 @@ def compute_certification(
             - std_reward: Trial variance from evaluation run
             - edge_cases: {total, passed} edge case results
             - stability: {score_variance, run_count} from monitoring
-            - failure_mode: {score, threshold} from LLM judge
 
     Returns:
         Complete certification result with all levels

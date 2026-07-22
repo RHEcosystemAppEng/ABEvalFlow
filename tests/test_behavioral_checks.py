@@ -12,7 +12,6 @@ from abevalflow.certification import (
     CheckResult,
     _check_consistency,
     _check_edge_case_results,
-    _check_failure_mode,
     _check_stability,
     _compute_behavioral_testing_check,
     compute_certification,
@@ -204,33 +203,6 @@ class TestEdgeCaseCheck:
         assert result.details["pass_rate"] == 0.6
 
 
-class TestFailureModeCheck:
-    """Tests for _check_failure_mode() — failure handling scores."""
-
-    def test_good_score_passes(self) -> None:
-        result = _check_failure_mode(
-            {
-                "failure_mode": {"score": 0.8, "threshold": 0.5},
-            }
-        )
-        assert result.passed is True
-        assert result.score == 0.8
-
-    def test_low_score_fails(self) -> None:
-        result = _check_failure_mode(
-            {
-                "failure_mode": {"score": 0.3, "threshold": 0.5},
-            }
-        )
-        assert result.passed is False
-        assert result.score == 0.3
-
-    def test_no_data_passes(self) -> None:
-        result = _check_failure_mode({})
-        assert result.passed is True
-        assert result.score == 1.0
-
-
 class TestBehavioralTestingCombined:
     """Tests for _compute_behavioral_testing_check() — combined check."""
 
@@ -239,7 +211,6 @@ class TestBehavioralTestingCombined:
             "std_reward": 0.1,
             "edge_cases": {"total": 3, "passed": 3},
             "stability": {"score_variance": 0.01, "run_count": 5},
-            "failure_mode": {"score": 0.8, "threshold": 0.5},
         }
         result = _compute_behavioral_testing_check(data)
         assert result.passed is True
@@ -250,7 +221,6 @@ class TestBehavioralTestingCombined:
             "std_reward": 0.9,
             "edge_cases": {"total": 3, "passed": 3},
             "stability": {"score_variance": 0.01, "run_count": 5},
-            "failure_mode": {"score": 0.8, "threshold": 0.5},
         }
         result = _compute_behavioral_testing_check(data)
         assert result.passed is False
@@ -738,8 +708,187 @@ class TestEdgeCaseAggregation:
         assert results[0]["passed"] is False
 
 
+class TestLLMEdgeCaseGeneration:
+    """Tests for LLM-generated skill-specific edge cases."""
+
+    def test_find_skill_content(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import _find_skill_content
+
+        sub = tmp_path / "my-skill"
+        sub.mkdir()
+        (sub / "metadata.yaml").write_text("name: my-skill\n")
+        skills = sub / "skills"
+        skills.mkdir()
+        (skills / "SKILL.md").write_text("# My Skill\nDoes things.")
+
+        skill_name, content = _find_skill_content(sub)
+        assert skill_name == "my-skill"
+        assert "My Skill" in content
+
+    def test_find_skill_content_nested(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import _find_skill_content
+
+        sub = tmp_path / "my-skill"
+        sub.mkdir()
+        (sub / "metadata.yaml").write_text("name: my-skill\n")
+        skills = sub / "skills" / "nested"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text("# Nested Skill")
+
+        skill_name, content = _find_skill_content(sub)
+        assert "Nested Skill" in content
+
+    def test_find_skill_content_missing(self, tmp_path: Path) -> None:
+        from scripts.generate_edge_case_evals import _find_skill_content
+
+        sub = tmp_path / "no-skill"
+        sub.mkdir()
+        with pytest.raises(FileNotFoundError):
+            _find_skill_content(sub)
+
+    def _make_submission(self, tmp_path: Path) -> Path:
+        sub = tmp_path / "my-skill"
+        sub.mkdir()
+        (sub / "metadata.yaml").write_text("name: my-skill\n")
+        skills = sub / "skills"
+        skills.mkdir()
+        (skills / "SKILL.md").write_text("# My Skill\nCreates greeting files.")
+        return sub
+
+    def test_generate_from_skill_valid_response(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from scripts import generate_edge_case_evals
+
+        valid_response = json.dumps(
+            {
+                "skill_name": "my-skill",
+                "evals": [
+                    {
+                        "id": "edge-missing-name",
+                        "name": "Edge case: missing name",
+                        "prompt": "Create a greeting without specifying a name",
+                        "assertions": ["The response handles the missing name"],
+                    }
+                ],
+            }
+        )
+        monkeypatch.setattr(
+            "abevalflow.llm_client.chat_completion",
+            lambda **kwargs: valid_response,
+        )
+        sub = self._make_submission(tmp_path)
+        result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub)
+        assert result is not None
+        assert len(result["evals"]) == 1
+        assert result["skill_name"] == "my-skill"
+        assert result["evals"][0]["id"] == "edge-missing-name"
+
+    def test_generate_from_skill_markdown_fences(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from scripts import generate_edge_case_evals
+
+        fenced = '```json\n{"skill_name":"x","evals":[{"id":"edge-test","prompt":"test","assertions":["ok"]}]}\n```'
+        monkeypatch.setattr(
+            "abevalflow.llm_client.chat_completion",
+            lambda **kwargs: fenced,
+        )
+        sub = self._make_submission(tmp_path)
+        result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub)
+        assert result is not None
+        assert len(result["evals"]) == 1
+
+    def test_generate_from_skill_enforces_edge_prefix(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from scripts import generate_edge_case_evals
+
+        no_prefix = json.dumps(
+            {
+                "skill_name": "x",
+                "evals": [{"id": "no-prefix", "prompt": "test", "assertions": ["ok"]}],
+            }
+        )
+        monkeypatch.setattr(
+            "abevalflow.llm_client.chat_completion",
+            lambda **kwargs: no_prefix,
+        )
+        sub = self._make_submission(tmp_path)
+        result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub)
+        assert result is not None
+        assert result["evals"][0]["id"] == "edge-no-prefix"
+
+    def test_generate_from_skill_caps_assertions(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from scripts import generate_edge_case_evals
+
+        many_assertions = json.dumps(
+            {
+                "skill_name": "x",
+                "evals": [{"id": "edge-test", "prompt": "test", "assertions": [f"a{i}" for i in range(15)]}],
+            }
+        )
+        monkeypatch.setattr(
+            "abevalflow.llm_client.chat_completion",
+            lambda **kwargs: many_assertions,
+        )
+        sub = self._make_submission(tmp_path)
+        result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub)
+        assert result is not None
+        assert len(result["evals"][0]["assertions"]) == 3
+
+    def test_generate_from_skill_retries_on_bad_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from scripts import generate_edge_case_evals
+
+        call_count = {"n": 0}
+
+        def mock_llm(**kwargs):
+            call_count["n"] += 1
+            if call_count["n"] < 3:
+                return "not valid json at all"
+            return json.dumps(
+                {
+                    "skill_name": "x",
+                    "evals": [{"id": "edge-test", "prompt": "test", "assertions": ["ok"]}],
+                }
+            )
+
+        monkeypatch.setattr(
+            "abevalflow.llm_client.chat_completion",
+            mock_llm,
+        )
+        sub = self._make_submission(tmp_path)
+        result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub)
+        assert result is not None
+        assert call_count["n"] == 3
+
+    def test_generate_from_skill_returns_none_after_retries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from scripts import generate_edge_case_evals
+
+        monkeypatch.setattr(
+            "abevalflow.llm_client.chat_completion",
+            lambda **kwargs: "garbage",
+        )
+        sub = self._make_submission(tmp_path)
+        result = generate_edge_case_evals.generate_edge_case_evals_from_skill(sub, max_retries=2)
+        assert result is None
+
+    def test_aggregation_tags_generated_and_submitter(self, tmp_path: Path) -> None:
+        from scripts.aggregate_edge_case_evals import aggregate_edge_case_results
+
+        for name in ["boundary_input", "submitter_custom_test"]:
+            edge_dir = tmp_path / name / "iteration-1" / "eval-skill" / "with_skill"
+            edge_dir.mkdir(parents=True)
+            (edge_dir / "grading.json").write_text(json.dumps({"summary": {"passed": 3, "failed": 0, "total": 3}}))
+
+        results = aggregate_edge_case_results(tmp_path)
+        assert len(results) == 2
+
+        generated = [r for r in results if r["source"] == "generated"]
+        submitter = [r for r in results if r["source"] == "submitter"]
+        assert len(generated) == 1
+        assert len(submitter) == 1
+        assert generated[0]["name"] == "boundary_input"
+
+
 class TestLLMJudgeCriteria:
-    """Tests for failure mode LLM judge criteria."""
+    """Tests for LLM judge criteria descriptions."""
 
     def test_failure_handling_criterion_exists(self) -> None:
         assert "failure_handling" in CRITERIA_DESCRIPTIONS
