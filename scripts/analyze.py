@@ -637,6 +637,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-image-ref", default=None)
     parser.add_argument("--harbor-fork-revision", default=None)
     parser.add_argument(
+        "--repository-url",
+        default=None,
+        help="Canonical repository URL (forge pointer)",
+    )
+    parser.add_argument(
+        "--change-id",
+        default=None,
+        help="PR/MR number (forge pointer)",
+    )
+    parser.add_argument("--trace-id", default=None, help="W3C/MLflow trace id")
+    parser.add_argument("--session-id", default=None, help="Session/conversation id")
+    parser.add_argument(
+        "--eval-run-id",
+        default=None,
+        help="Eval engine run / case id",
+    )
+    parser.add_argument(
+        "--harness-fingerprint",
+        default=None,
+        help="Harness/config content hash",
+    )
+    parser.add_argument(
+        "--forge-platform",
+        default=None,
+        help="github | gitlab | bitbucket | forgejo",
+    )
+    parser.add_argument(
         "--eval-engine",
         type=str,
         choices=["harbor", "ase", "both", "a2a", "aeh"],
@@ -692,6 +719,13 @@ def main(argv: list[str] | None = None) -> int:
         control_image_ref=args.control_image_ref,
         harbor_fork_revision=args.harbor_fork_revision,
         eval_engine=args.eval_engine,
+        repository_url=args.repository_url,
+        change_id=args.change_id,
+        trace_id=args.trace_id,
+        session_id=args.session_id,
+        eval_run_id=args.eval_run_id,
+        harness_fingerprint=args.harness_fingerprint,
+        forge_platform=args.forge_platform,
     )
 
     result = build_analysis(
