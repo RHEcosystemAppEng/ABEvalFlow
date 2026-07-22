@@ -137,7 +137,7 @@ def generate_edge_case_evals_from_skill(
                     ),
                 },
             ],
-            temperature=0.3,
+            temperature=0,
             max_tokens=4096,
         )
 
