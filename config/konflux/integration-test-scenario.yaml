@@ -1,0 +1,22 @@
+apiVersion: appstudio.redhat.com/v1beta2
+kind: IntegrationTestScenario
+metadata:
+  name: abevalflow-eval
+  namespace: ai5-marketplace-tenant
+  labels:
+    test.appstudio.openshift.io/optional: "true"
+spec:
+  application: google-lightspeed-agent
+  contexts:
+    - description: AI agent evaluation via ABEvalFlow
+      name: application
+  resolverRef:
+    resolver: git
+    resourceKind: pipelinerun
+    params:
+      - name: url
+        value: https://github.com/ikrispin/ABEvalFlow
+      - name: revision
+        value: main
+      - name: pathInRepo
+        value: pipeline/integration/konflux-eval-pipelinerun.yaml

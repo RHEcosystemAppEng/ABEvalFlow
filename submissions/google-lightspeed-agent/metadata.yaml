@@ -1,0 +1,30 @@
+name: google-lightspeed-agent
+description: A2A agent evaluation for google-lightspeed-agent via Konflux integration
+version: "1.0.0"
+eval_engine: a2a
+
+experiment:
+  n_trials: 3
+
+security_scan: disabled
+skip_quality_review: true
+
+gate_policy:
+  default_mode: warn
+  combination: all_pass
+  push_facts:
+    endpoint: https://compass.stage.redhat.com/api/soundcheck/facts/
+    entity_ref: component:default/google-lightspeed-agent
+    fact_ref_prefix: "catalog:default/abevalflow_"
+    bearer_token: ${COMPASS_API_TOKEN}
+  gates:
+    evaluation:
+      mode: block
+      threshold: 0.0
+      push_fact: true
+    security:
+      mode: warn
+      push_fact: true
+    quality:
+      mode: warn
+      push_fact: true

@@ -1,0 +1,319 @@
+# NOTE: Dual-publish requirement
+# This PipelineRun is resolved from git (via IntegrationTestScenario), but
+# the tasks it references are published as Tekton Bundles to Quay.io.
+# When updating task logic:
+#   1. Edit task YAML in pipeline/tasks/konflux/
+#   2. Push bundles: cd pipeline/integration && make bundles
+#   3. Commit and push to git
+# Pushing to git alone does NOT update the task logic inside bundles.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: abevalflow-eval
+spec:
+  timeouts:
+    pipeline: "4h"
+    tasks: "3h"
+  pipelineSpec:
+    params:
+      - name: SNAPSHOT
+        type: string
+        description: Konflux Snapshot JSON with component details
+      - name: AGENT_IMAGE_OVERRIDE
+        type: string
+        default: ""
+        description: >-
+          Override the agent image instead of using the one from the Konflux
+          snapshot. Set this when the snapshot image is in a private registry
+          that the workload cluster cannot pull from.
+    workspaces:
+      - name: shared-workspace
+    results:
+      - name: TEST_OUTPUT
+        description: Standardized Konflux test output
+        value: $(tasks.emit-result.results.TEST_OUTPUT)
+    tasks:
+      # ================================================================
+      # Stage 1: Parse the Konflux Snapshot
+      # ================================================================
+      - name: parse-snapshot
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: parse-snapshot
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-parse-snapshot:0.1
+            - name: kind
+              value: task
+        params:
+          - name: SNAPSHOT
+            value: $(params.SNAPSHOT)
+
+      # ================================================================
+      # Stage 2: Deploy the agent from the Snapshot image
+      # ================================================================
+      - name: deploy-agent
+        runAfter: [parse-snapshot]
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: deploy-agent
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-deploy-agent:0.1
+            - name: kind
+              value: task
+        params:
+          - name: agent-image
+            value: $(tasks.parse-snapshot.results.component-image)
+          - name: agent-image-override
+            value: $(params.AGENT_IMAGE_OVERRIDE)
+          - name: llm-api-base
+            value: "http://litellm.ab-eval-flow.svc:4000"
+          - name: llm-model
+            value: "gpt-4o"
+          - name: pipeline-run-id
+            value: $(context.pipelineRun.name)
+
+      # ================================================================
+      # Stage 3: Prepare (clone + validate submission)
+      # ================================================================
+      - name: prepare
+        runAfter: [deploy-agent]
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: prepare
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-prepare:0.1
+            - name: kind
+              value: task
+        params:
+          - name: repo-url
+            value: https://github.com/ikrispin/ABEvalFlow.git
+          - name: revision
+            value: main
+          - name: submission-dir
+            value: google-lightspeed-agent
+          - name: eval-engine
+            value: a2a
+          - name: pipeline-repo-url
+            value: https://github.com/ikrispin/ABEvalFlow.git
+          - name: pipeline-repo-revision
+            value: main
+          - name: pipeline-run-name
+            value: $(context.pipelineRun.name)
+          - name: enable-generation
+            value: "false"
+        workspaces:
+          - name: source
+            workspace: shared-workspace
+
+      # ================================================================
+      # Stage 4: Test (security scan + quality review)
+      # ================================================================
+      - name: test
+        runAfter: [prepare]
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: test
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-test:0.1
+            - name: kind
+              value: task
+        params:
+          - name: submission-dir
+            value: google-lightspeed-agent
+          - name: submission-name
+            value: $(tasks.prepare.results.submission-name)
+          - name: eval-engine
+            value: a2a
+          - name: report-prefix
+            value: $(tasks.prepare.results.report-prefix)
+          - name: pipeline-run-name
+            value: $(context.pipelineRun.name)
+          - name: pipeline-repo-url
+            value: https://github.com/ikrispin/ABEvalFlow.git
+          - name: pipeline-repo-revision
+            value: main
+          - name: security-scan-mode
+            value: disabled
+          - name: submission-security-scan
+            value: $(tasks.prepare.results.security-scan)
+          - name: submission-skip-quality-review
+            value: $(tasks.prepare.results.skip-quality-review)
+          - name: enable-quality-review
+            value: "false"
+          - name: llm-base-url
+            value: "http://litellm.ab-eval-flow.svc:4000/v1"
+        workspaces:
+          - name: source
+            workspace: shared-workspace
+
+      # ================================================================
+      # Stage 5: Evaluate (A2A agent evaluation)
+      # ================================================================
+      - name: evaluate
+        runAfter: [test]
+        timeout: "3h"
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: evaluate
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-evaluate:0.1
+            - name: kind
+              value: task
+        params:
+          - name: eval-engine
+            value: a2a
+          - name: submission-dir
+            value: google-lightspeed-agent
+          - name: submission-name
+            value: $(tasks.prepare.results.submission-name)
+          - name: commit-sha
+            value: $(tasks.parse-snapshot.results.git-revision)
+          - name: pipeline-run-id
+            value: $(context.pipelineRun.name)
+          - name: pipeline-repo-url
+            value: https://github.com/ikrispin/ABEvalFlow.git
+          - name: pipeline-repo-revision
+            value: main
+          - name: llm-model
+            value: "claude-sonnet"
+          - name: llm-api-base
+            value: "http://litellm.ab-eval-flow.svc:4000"
+          - name: agent-endpoint
+            value: $(tasks.deploy-agent.results.agent-endpoint)
+          - name: agent-timeout
+            value: "120"
+        workspaces:
+          - name: source
+            workspace: shared-workspace
+
+      # ================================================================
+      # Stage 6: Analyze + Scorecard
+      # ================================================================
+      - name: analyze-scorecard
+        runAfter: [evaluate]
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: analyze-scorecard
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-analyze-scorecard:0.1
+            - name: kind
+              value: task
+        params:
+          - name: submission-name
+            value: $(tasks.prepare.results.submission-name)
+          - name: eval-engine
+            value: a2a
+          - name: commit-sha
+            value: $(tasks.parse-snapshot.results.git-revision)
+          - name: pipeline-run-id
+            value: $(context.pipelineRun.name)
+          - name: uplift-threshold
+            value: "0.0"
+          - name: pipeline-repo-url
+            value: https://github.com/ikrispin/ABEvalFlow.git
+          - name: pipeline-repo-revision
+            value: main
+          - name: enable-scorecard
+            value: "true"
+          - name: enable-degradation-check
+            value: "false"
+        workspaces:
+          - name: source
+            workspace: shared-workspace
+
+      # ================================================================
+      # Stage 7: Store (optional — graceful when secrets missing)
+      # ================================================================
+      - name: store
+        runAfter: [analyze-scorecard]
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: store
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-store:0.1
+            - name: kind
+              value: task
+        params:
+          - name: submission-name
+            value: $(tasks.prepare.results.submission-name)
+          - name: pipeline-run-id
+            value: $(context.pipelineRun.name)
+          - name: report-prefix
+            value: $(tasks.prepare.results.report-prefix)
+          - name: recommendation
+            value: $(tasks.evaluate.results.recommendation)
+          - name: eval-engine
+            value: a2a
+          - name: commit-sha
+            value: $(tasks.parse-snapshot.results.git-revision)
+          - name: pipeline-repo-url
+            value: https://github.com/ikrispin/ABEvalFlow.git
+          - name: pipeline-repo-revision
+            value: main
+        workspaces:
+          - name: source
+            workspace: shared-workspace
+
+      # ================================================================
+      # Stage 8: Emit Konflux TEST_OUTPUT
+      # ================================================================
+      - name: emit-result
+        runAfter: [store]
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: emit-result
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-emit-result:0.1
+            - name: kind
+              value: task
+        params:
+          - name: submission-name
+            value: $(tasks.prepare.results.submission-name)
+        workspaces:
+          - name: source
+            workspace: shared-workspace
+
+    # ==================================================================
+    # FINALLY: Cleanup agent deployment
+    # ==================================================================
+    finally:
+      - name: cleanup-agent
+        taskRef:
+          resolver: bundles
+          params:
+            - name: name
+              value: cleanup-agent
+            - name: bundle
+              value: quay.io/rh-ee-ikrispin/abevalflow-task-cleanup-agent:0.1
+            - name: kind
+              value: task
+        params:
+          - name: agent-name
+            value: $(tasks.deploy-agent.results.agent-name)
+          - name: deployed
+            value: $(tasks.deploy-agent.results.deployed)
+
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 1Gi
