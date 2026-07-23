@@ -1,0 +1,352 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: evaluate
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: konflux
+spec:
+  description: >-
+    Evaluation phase for Konflux integration. Submits the evaluation as a
+    remote Pod on the workload cluster where the agent, LiteLLM, and Harbor
+    are co-located. Runs Harbor trials + analyze.py inside the Pod, then
+    retrieves report.json back to the Konflux workspace via logs.
+  params:
+    - name: eval-engine
+      type: string
+      default: "a2a"
+    - name: submission-dir
+      type: string
+    - name: submission-name
+      type: string
+    - name: commit-sha
+      type: string
+      default: ""
+    - name: pipeline-run-id
+      type: string
+    - name: pipeline-repo-url
+      type: string
+      default: "https://github.com/ikrispin/ABEvalFlow.git"
+    - name: pipeline-repo-revision
+      type: string
+      default: "main"
+    - name: eval-base-image
+      type: string
+      default: "quay.io/rh-ee-ikrispin/abevalflow-eval-base:latest"
+    - name: llm-model
+      type: string
+      default: "claude-sonnet"
+    - name: llm-api-base
+      type: string
+      default: "http://litellm.ab-eval-flow.svc:4000"
+    - name: llm-api-key
+      type: string
+      default: "sk-dummy"
+    - name: agent-endpoint
+      type: string
+      default: ""
+    - name: agent-timeout
+      type: string
+      default: "120"
+    - name: uplift-threshold
+      type: string
+      default: "0.0"
+    - name: workload-cluster-url
+      type: string
+      default: "https://api.cn-ai-lab.2vn8.p1.openshiftapps.com:6443"
+    - name: workload-namespace
+      type: string
+      default: "ab-eval-flow"
+    - name: eval-timeout
+      type: string
+      default: "1800"
+  workspaces:
+    - name: source
+  results:
+    - name: treatment-mean-reward
+      description: Treatment/with-skill mean reward
+    - name: control-mean-reward
+      description: Control/without-skill mean reward
+    - name: recommendation
+      description: Pass or fail recommendation
+    - name: results-dir
+      description: Path to evaluation results
+  steps:
+    - name: submit-eval
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      env:
+        - name: WORKLOAD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: workload-cluster-credentials
+              key: token
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== EVALUATE PHASE: Submit Remote Eval ==="
+
+        CLUSTER_URL="$(params.workload-cluster-url)"
+        NAMESPACE="$(params.workload-namespace)"
+        # TODO: Replace --insecure-skip-tls-verify with --certificate-authority
+        oc login --server="$CLUSTER_URL" --token="$WORKLOAD_TOKEN" --insecure-skip-tls-verify=true 2>/dev/null
+
+        EVAL_ENGINE="$(params.eval-engine)"
+        SUBMISSION_NAME="$(params.submission-name)"
+        SUBMISSION_DIR="$(params.submission-dir)"
+        AGENT_ENDPOINT="$(params.agent-endpoint)"
+        COMMIT_SHA="$(params.commit-sha)"
+        PIPELINE_RUN_ID="$(params.pipeline-run-id)"
+        UPLIFT_THRESHOLD="$(params.uplift-threshold)"
+        RUN_ID=$(echo "$PIPELINE_RUN_ID" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-20)
+        POD_NAME="eval-job-${RUN_ID:-$(date +%s)}"
+
+        echo "Engine: $EVAL_ENGINE"
+        echo "Submission: $SUBMISSION_NAME"
+        echo "Agent endpoint: $AGENT_ENDPOINT"
+        echo "Eval pod: $POD_NAME"
+
+        echo -n "0.0" > "$(results.treatment-mean-reward.path)"
+        echo -n "0.0" > "$(results.control-mean-reward.path)"
+        echo -n "fail" > "$(results.recommendation.path)"
+        RESULTS_DIR="$(workspaces.source.path)/eval-results/$SUBMISSION_NAME"
+        REPORT_DIR="$(workspaces.source.path)/reports/$SUBMISSION_NAME"
+        mkdir -p "$RESULTS_DIR" "$REPORT_DIR"
+        echo -n "$RESULTS_DIR" > "$(results.results-dir.path)"
+
+        cat <<PODSPEC | oc apply -n $NAMESPACE -f -
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: $POD_NAME
+          namespace: $NAMESPACE
+          labels:
+            abevalflow/temp: "true"
+            abevalflow/type: eval-job
+        spec:
+          restartPolicy: Never
+          activeDeadlineSeconds: $(params.eval-timeout)
+          containers:
+          - name: eval
+            image: $(params.eval-base-image)
+            command: ["/bin/bash", "-c"]
+            args:
+            - |
+              set -euo pipefail
+              export HOME=/tmp
+
+              echo "=== Remote Eval Pod Starting ==="
+              echo "Engine: $EVAL_ENGINE"
+              echo "Agent: $AGENT_ENDPOINT"
+
+              git clone --depth 1 --branch "$(params.pipeline-repo-revision)" \
+                "$(params.pipeline-repo-url)" /tmp/abevalflow
+              cd /tmp/abevalflow
+              export PYTHONPATH=/tmp/abevalflow
+              pip install --quiet --no-cache-dir pydantic scipy pyyaml 2>&1 | tail -1
+
+              SUBMISSION_PATH="/tmp/abevalflow/submissions/$SUBMISSION_DIR"
+              RESULTS_DIR="/tmp/eval-results"
+              REPORT_DIR="/tmp/eval-reports"
+              mkdir -p "\$RESULTS_DIR" "\$REPORT_DIR"
+
+              if [ "$EVAL_ENGINE" = "a2a" ]; then
+                N_ATTEMPTS=\$(python3 -c "
+              import yaml
+              try:
+                  meta = yaml.safe_load(open('\$SUBMISSION_PATH/metadata.yaml'))
+                  print(meta.get('experiment', {}).get('n_trials', 5))
+              except:
+                  print(5)
+              ")
+
+                TASK_DIR=""
+                if [ -f "\$SUBMISSION_PATH/task.toml" ]; then
+                  TASK_DIR="\$SUBMISSION_PATH"
+                elif [ -d "\$SUBMISSION_PATH/tasks" ]; then
+                  for subdir in "\$SUBMISSION_PATH/tasks"/*/; do
+                    if [ -f "\${subdir}task.toml" ]; then
+                      TASK_DIR="\${subdir%/}"
+                      break
+                    fi
+                  done
+                fi
+
+                if [ -z "\$TASK_DIR" ]; then
+                  echo "ERROR: No task.toml found"
+                  exit 1
+                fi
+
+                echo "Task: \$(basename \$TASK_DIR) | Attempts: \$N_ATTEMPTS"
+
+                python3 - "\$RESULTS_DIR" "\$TASK_DIR" "\$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" "$(params.llm-api-base)" "openai/$(params.llm-model)" <<'GENCFG'
+              import sys, yaml
+              results_dir, task_dir, n_attempts, endpoint, timeout, llm_api_base, llm_model = sys.argv[1:8]
+              config = {
+                  "job_name": "a2a-eval",
+                  "jobs_dir": results_dir,
+                  "n_attempts": int(n_attempts),
+                  "agents": [{"import_path": "abevalflow.harbor_agents.a2a_adapter:A2AAgent", "kwargs": {"endpoint": endpoint, "timeout": int(timeout)}}],
+                  "tasks": [{"path": task_dir}],
+                  "environment": {"type": "local"},
+                  "verifier": {"env": {"LLM_JUDGE_MODEL": llm_model, "LLM_API_BASE": llm_api_base, "OPENAI_API_KEY": "sk-dummy"}}
+              }
+              with open(results_dir + "/config.yaml", "w") as f:
+                  yaml.dump(config, f, default_flow_style=False)
+              GENCFG
+
+                python3 -c "from abevalflow.harbor_agents.a2a_adapter import A2AAgent; print('A2AAgent imported OK')"
+                HARBOR_EXIT=0
+                harbor run -c "\$RESULTS_DIR/config.yaml" -y 2>&1 || HARBOR_EXIT=\$?
+                echo "Harbor exit code: \$HARBOR_EXIT"
+                find "\$RESULTS_DIR" -name "exception.txt" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null || true
+              fi
+
+              # === Run analyze.py inside the Pod (Option C) ===
+              echo "=== Running analyze.py ==="
+              ANALYZE_ARGS=(
+                --results-dir "\$RESULTS_DIR"
+                --output-dir "\$REPORT_DIR"
+                --submission-name "$SUBMISSION_NAME"
+                --threshold "$UPLIFT_THRESHOLD"
+                --eval-engine "$EVAL_ENGINE"
+              )
+              [ -n "$COMMIT_SHA" ] && ANALYZE_ARGS+=(--commit-sha "$COMMIT_SHA")
+              [ -n "$PIPELINE_RUN_ID" ] && ANALYZE_ARGS+=(--pipeline-run-id "$PIPELINE_RUN_ID")
+
+              python scripts/analyze.py "\${ANALYZE_ARGS[@]}" 2>&1 || echo "WARNING: analyze.py failed"
+
+              # TODO: Migrate to ConfigMap-based result transfer instead of
+              # log parsing. Write report.json to a ConfigMap, read it from
+              # the orchestrator task, and delete in cleanup.
+              if [ -f "\$REPORT_DIR/report.json" ]; then
+                echo "=== REPORT_JSON_START ==="
+                cat "\$REPORT_DIR/report.json"
+                echo ""
+                echo "=== REPORT_JSON_END ==="
+
+                python3 -c "
+              import json
+              r = json.load(open('\$REPORT_DIR/report.json'))
+              s = r.get('summary', {})
+              t = s.get('treatment', {}).get('mean_reward')
+              rec = s.get('recommendation', 'fail')
+              n = s.get('treatment', {}).get('n_trials', 0)
+              print(json.dumps({'mean_reward': t if t is not None else 0.0, 'recommendation': rec, 'n_trials': n}))
+              "
+              else
+                echo "WARNING: report.json not generated"
+                python3 -c "import json; print(json.dumps({'mean_reward': 0.0, 'recommendation': 'fail', 'n_trials': 0}))"
+              fi
+
+              echo "=== Remote Eval Pod Complete ==="
+            env:
+            - name: HOME
+              value: /tmp
+            - name: LLM_JUDGE_MODEL
+              value: "openai/$(params.llm-model)"
+            - name: LLM_BASE_URL
+              value: "$(params.llm-api-base)"
+            - name: LLM_API_BASE
+              value: "$(params.llm-api-base)"
+            - name: OPENAI_API_KEY
+              value: "$(params.llm-api-key)"
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: "1"
+                memory: 2Gi
+        PODSPEC
+
+        echo "Eval pod submitted. Waiting for completion..."
+
+        TIMEOUT=$(params.eval-timeout)
+        POLL_INTERVAL=15
+        ELAPSED=0
+
+        while [ $ELAPSED -lt $TIMEOUT ]; do
+          PHASE=$(oc get pod $POD_NAME -n $NAMESPACE -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+          case "$PHASE" in
+            Succeeded)
+              echo "Eval pod completed successfully (${ELAPSED}s)"
+              break
+              ;;
+            Failed)
+              echo "Eval pod failed (${ELAPSED}s)"
+              oc logs $POD_NAME -n $NAMESPACE 2>&1 | tail -50
+              break
+              ;;
+            *)
+              printf "."
+              sleep $POLL_INTERVAL
+              ELAPSED=$((ELAPSED + POLL_INTERVAL))
+              ;;
+          esac
+        done
+        echo ""
+
+        if [ $ELAPSED -ge $TIMEOUT ]; then
+          echo "TIMEOUT: Eval pod did not complete in ${TIMEOUT}s"
+          oc logs $POD_NAME -n $NAMESPACE 2>&1 | tail -30
+          oc delete pod $POD_NAME -n $NAMESPACE --ignore-not-found=true
+          exit 1
+        fi
+
+        echo "=== Retrieving results ==="
+        oc logs $POD_NAME -n $NAMESPACE 2>&1 | tee /tmp/eval-pod-logs.txt
+
+        # Extract report.json from logs and write to workspace
+        python3 - /tmp/eval-pod-logs.txt "$(workspaces.source.path)/reports/$SUBMISSION_NAME" "$(results.treatment-mean-reward.path)" "$(results.control-mean-reward.path)" "$(results.recommendation.path)" <<'EXTRACT'
+        import json, re, sys
+
+        logs_path, report_dir, treat_path, ctrl_path, rec_path = sys.argv[1:6]
+        logs = open(logs_path).read()
+
+        # Extract report.json from delimited block
+        report_match = re.search(r'=== REPORT_JSON_START ===\n(.*?)\n=== REPORT_JSON_END ===', logs, re.DOTALL)
+        if report_match:
+            report_json = report_match.group(1).strip()
+            try:
+                report = json.loads(report_json)
+                with open(f"{report_dir}/report.json", "w") as f:
+                    json.dump(report, f, indent=2)
+                print(f"Wrote report.json to {report_dir}/report.json")
+
+                s = report.get("summary", {})
+                t_reward = s.get("treatment", {}).get("mean_reward")
+                recommendation = s.get("recommendation", "fail")
+                n_trials = s.get("treatment", {}).get("n_trials", 0)
+                print(f"Treatment mean reward: {t_reward}")
+                print(f"Recommendation: {recommendation}")
+                print(f"Trials: {n_trials}")
+
+                open(treat_path, "w").write(str(t_reward if t_reward is not None else 0.0))
+                open(ctrl_path, "w").write("0.0")
+                open(rec_path, "w").write(recommendation)
+            except json.JSONDecodeError as e:
+                print(f"ERROR: Failed to parse report.json: {e}")
+                open(treat_path, "w").write("0.0")
+                open(ctrl_path, "w").write("0.0")
+                open(rec_path, "w").write("fail")
+        else:
+            # Fallback: extract summary JSON
+            pattern = r'\{[^{}]*"mean_reward"[^{}]*\}'
+            matches = re.findall(pattern, logs)
+            if matches:
+                summary = json.loads(matches[-1])
+                mean_reward = summary.get("mean_reward", 0.0)
+                rec = summary.get("recommendation", "fail")
+                print(f"Fallback - Mean reward: {mean_reward}, Recommendation: {rec}")
+                open(treat_path, "w").write(str(mean_reward))
+                open(ctrl_path, "w").write("0.0")
+                open(rec_path, "w").write(rec)
+            else:
+                print("WARNING: Could not extract results from pod logs")
+                open(treat_path, "w").write("0.0")
+                open(ctrl_path, "w").write("0.0")
+                open(rec_path, "w").write("fail")
+        EXTRACT
+
+        oc delete pod $POD_NAME -n $NAMESPACE --ignore-not-found=true
+        echo "=== Evaluate phase complete ==="
