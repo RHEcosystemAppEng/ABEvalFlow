@@ -1,0 +1,95 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: emit-result
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: konflux
+spec:
+  description: >-
+    Maps ABEvalFlow scorecard results to Konflux's standardized TEST_OUTPUT
+    format. Reads the scorecard.json from the workspace and emits a JSON
+    result with SUCCESS/WARNING/FAILURE status.
+  params:
+    - name: submission-name
+      type: string
+      description: Submission name to locate scorecard in workspace
+  workspaces:
+    - name: source
+      description: Workspace containing the evaluation reports
+  results:
+    - name: TEST_OUTPUT
+      description: Standardized Konflux test output in JSON format
+  steps:
+    - name: emit
+      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        echo "=== EMIT KONFLUX TEST RESULT ==="
+
+        microdnf install -y jq --nodocs 2>/dev/null || true
+
+        REPORT_DIR="$(workspaces.source.path)/reports/$(params.submission-name)"
+        SCORECARD="$REPORT_DIR/scorecard.json"
+        REPORT="$REPORT_DIR/report.json"
+
+        RESULT="ERROR"
+        NOTE=""
+
+        if [ -f "$SCORECARD" ]; then
+          SCORECARD_REC=$(jq -r '.recommendation // "fail"' "$SCORECARD")
+          CERT_LEVEL=$(jq -r '.highest_certification // "none"' "$SCORECARD")
+          GATES_PASSED=$(jq -r '.gates_passed // 0' "$SCORECARD")
+          GATES_FAILED=$(jq -r '.gates_failed // 0' "$SCORECARD")
+
+          case "$SCORECARD_REC" in
+            pass)    RESULT="SUCCESS" ;;
+            warn)    RESULT="WARNING" ;;
+            fail)    RESULT="FAILURE" ;;
+            *)       RESULT="ERROR" ;;
+          esac
+
+          NOTE="ABEvalFlow: recommendation=${SCORECARD_REC}, certification=${CERT_LEVEL}, gates_passed=${GATES_PASSED}, gates_failed=${GATES_FAILED}"
+
+        elif [ -f "$REPORT" ]; then
+          REPORT_REC=$(jq -r '.summary.recommendation // "fail"' "$REPORT")
+
+          case "$REPORT_REC" in
+            pass)    RESULT="SUCCESS" ;;
+            fail)    RESULT="FAILURE" ;;
+            *)       RESULT="ERROR" ;;
+          esac
+
+          NOTE="ABEvalFlow: recommendation=${REPORT_REC} (no scorecard)"
+
+        else
+          RESULT="FAILURE"
+          NOTE="ABEvalFlow: no scorecard.json or report.json found"
+        fi
+
+        echo "Result: $RESULT"
+        echo "Note: $NOTE"
+
+        SUCCESSES=0
+        FAILURES=0
+        WARNINGS=0
+        case "$RESULT" in
+          SUCCESS) SUCCESSES=1 ;;
+          FAILURE) FAILURES=1 ;;
+          WARNING) WARNINGS=1 ;;
+          ERROR)   FAILURES=1 ;;
+        esac
+
+        TEST_OUTPUT=$(jq -rcn \
+          --arg date "$(date -u --iso-8601=seconds)" \
+          --arg result "$RESULT" \
+          --arg note "$NOTE" \
+          --argjson successes "$SUCCESSES" \
+          --argjson failures "$FAILURES" \
+          --argjson warnings "$WARNINGS" \
+          '{result: $result, timestamp: $date, note: $note, successes: $successes, failures: $failures, warnings: $warnings}')
+
+        echo -n "$TEST_OUTPUT" | tee "$(results.TEST_OUTPUT.path)"
+        echo ""
+        echo "=== TEST_OUTPUT emitted ==="

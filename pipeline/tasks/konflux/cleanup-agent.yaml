@@ -1,0 +1,67 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: cleanup-agent
+  labels:
+    app.kubernetes.io/name: abevalflow
+    app.kubernetes.io/component: konflux
+spec:
+  description: >-
+    Cleans up the A2A agent Deployment and Service on the remote workload
+    cluster. Runs in the pipeline's finally block to ensure cleanup even
+    on failure.
+  params:
+    - name: agent-name
+      type: string
+      default: ""
+      description: Name of the Deployment/Service to delete
+    - name: deployed
+      type: string
+      default: "false"
+      description: Whether an agent was actually deployed
+    - name: workload-cluster-url
+      type: string
+      default: "https://api.cn-ai-lab.2vn8.p1.openshiftapps.com:6443"
+      description: API URL of the workload cluster
+    - name: workload-namespace
+      type: string
+      default: "ab-eval-flow"
+      description: Namespace on the workload cluster
+  steps:
+    - name: cleanup
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      env:
+        - name: WORKLOAD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: workload-cluster-credentials
+              key: token
+              optional: true
+      script: |
+        #!/usr/bin/env bash
+
+        AGENT_NAME="$(params.agent-name)"
+        DEPLOYED="$(params.deployed)"
+
+        if [ -z "$AGENT_NAME" ] || [ "$DEPLOYED" != "true" ]; then
+          echo "No agent to clean up (deployed=$DEPLOYED, name=$AGENT_NAME)"
+          exit 0
+        fi
+
+        if [ -z "${WORKLOAD_TOKEN:-}" ]; then
+          echo "WARNING: No workload cluster token, cannot clean up"
+          exit 0
+        fi
+
+        echo "=== CLEANUP AGENT (cross-cluster) ==="
+        CLUSTER_URL="$(params.workload-cluster-url)"
+        NAMESPACE="$(params.workload-namespace)"
+        # TODO: Replace --insecure-skip-tls-verify with --certificate-authority
+        oc login --server="$CLUSTER_URL" --token="$WORKLOAD_TOKEN" --insecure-skip-tls-verify=true 2>/dev/null
+
+        echo "Deleting: $AGENT_NAME in $NAMESPACE on $CLUSTER_URL"
+        oc delete deployment/$AGENT_NAME -n $NAMESPACE --ignore-not-found=true
+        oc delete service/$AGENT_NAME -n $NAMESPACE --ignore-not-found=true
+        oc delete pod -n $NAMESPACE -l abevalflow/temp=true,abevalflow/type=eval-job --ignore-not-found=true
+
+        echo "Cleanup complete"
