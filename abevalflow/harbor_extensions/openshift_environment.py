@@ -9,16 +9,17 @@ Extends agent-eval-harness KubernetesEnvironment with:
    directory is missing, the redirect fails, ``test.sh`` never executes, and
    ``download_dir`` returns empty stdout → ``DownloadVerifierDirError``.
 
-Usage (AEH / agent_eval.harbor.run):
+Usage (classic Harbor A/B and AEH):
+
     environment:
-      type: kubernetes
-    # plus CLI:
+      import_path: abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment
+      delete: true
+    # and/or CLI:
     #   --environment-import-path \\
     #     abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment
 
-Classic Harbor (skills_eval_corrections) uses environment.type: openshift and the
-fork's built-in OpenShiftEnvironment — do not set an import-path type string in
-job config YAML (stock Harbor rejects non-enum types at JobConfig validation).
+Prebuilt trial images: set ``docker_image`` in the task's ``task.toml``
+``[environment]`` section (not fork ``kwargs.image_ref``).
 """
 
 from __future__ import annotations

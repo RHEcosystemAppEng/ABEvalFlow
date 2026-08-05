@@ -5,12 +5,13 @@ metadata:
   namespace: ab-eval-flow
 spec:
   description: >-
-    Runs A/B evaluation using Harbor on OpenShift. Installs Harbor from the
-    fork repo, generates per-variant job configs from submission metadata,
-    and executes treatment and control as separate Harbor jobs. Each variant
-    gets its own results directory for clean trial attribution. Supports two
-    modes: prebuilt (uses digest-based image refs from the build-push task)
-    and local-build (Harbor builds from each task's Dockerfile).
+    Runs A/B evaluation using stock Harbor on OpenShift via ABEvalFlow's
+    custom OpenShift environment (import_path). Generates per-variant job
+    configs from submission metadata and executes treatment and control as
+    separate Harbor jobs. Each variant gets its own results directory for
+    clean trial attribution. Supports two modes: prebuilt (digest image refs
+    + docker_image in task.toml) and local-build (Harbor builds from each
+    task's Dockerfile with stock docker env).
   params:
     - name: submission-dir
       type: string
@@ -38,15 +39,6 @@ spec:
       description: >-
         Evaluation mode: 'prebuilt' uses digest image refs from build-push;
         'local-build' lets Harbor build from each task's Dockerfile.
-    - name: harbor-fork-url
-      type: string
-      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
-      description: Harbor fork repository URL
-    - name: harbor-fork-revision
-      type: string
-      default: "main"
-      # TODO: pin to a specific SHA once the fork stabilises
-      description: Branch or SHA of the Harbor fork to install
     - name: pipeline-repo-url
       type: string
       default: "https://github.com/RHEcosystemAppEng/agentic_eval_flow.git"
@@ -93,11 +85,11 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        # --- 1. Install Harbor from fork ---
-        echo "=== Installing Harbor from $(params.harbor-fork-url) @ $(params.harbor-fork-revision) ==="
+        # --- 1. Install stock Harbor from PyPI ---
+        echo "=== Installing Harbor harbor==0.20.0 from PyPI ==="
         INSTALL_START=$(date +%s)
         pip install --quiet --no-cache-dir \
-          "git+$(params.harbor-fork-url)@$(params.harbor-fork-revision)" \
+          "harbor==0.20.0" \
           "kubernetes>=32.0.0"
         INSTALL_END=$(date +%s)
         echo "Harbor installed in $((INSTALL_END - INSTALL_START))s"
@@ -115,9 +107,10 @@ spec:
         SUBMISSION_PATH="$(workspaces.source.path)/submissions/$(params.submission-dir)"
         RESULTS_DIR="$(workspaces.source.path)/eval-results/$(params.submission-name)"
         CONFIG_DIR="$(workspaces.source.path)/_eval-configs"
+        OPENSHIFT_IMPORT_PATH="abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment"
 
         cd "$PIPELINE_DIR"
-        export PYTHONPATH="$PIPELINE_DIR"
+        export PYTHONPATH="$PIPELINE_DIR:${PYTHONPATH:-}"
         pip install --quiet --no-cache-dir pydantic pyyaml
 
         ARGS=(
@@ -190,8 +183,13 @@ spec:
           echo "Overriding trial count: $OVERRIDE_N_TRIALS"
         fi
 
+        HARBOR_ENV_FLAGS=""
+        if [ "$(params.eval-mode)" = "prebuilt" ]; then
+          HARBOR_ENV_FLAGS="--environment-import-path $OPENSHIFT_IMPORT_PATH"
+        fi
+
         # --- 4. Run treatment evaluation ---
-        TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml -y $AGENT_FLAGS"
+        TREATMENT_CMD="harbor run -c $CONFIG_DIR/treatment-config.yaml $HARBOR_ENV_FLAGS -y $AGENT_FLAGS"
         echo "=== Running treatment evaluation ==="
         echo "Command: $(echo "$TREATMENT_CMD" | sed 's/API_KEY=\S*/API_KEY=***/g')"
         EVAL_START=$(date +%s)
@@ -200,7 +198,7 @@ spec:
         echo "Treatment completed in $((EVAL_MID - EVAL_START))s"
 
         # --- 5. Run control evaluation ---
-        CONTROL_CMD="harbor run -c $CONFIG_DIR/control-config.yaml -y $AGENT_FLAGS"
+        CONTROL_CMD="harbor run -c $CONFIG_DIR/control-config.yaml $HARBOR_ENV_FLAGS -y $AGENT_FLAGS"
         echo "=== Running control evaluation ==="
         echo "Command: $(echo "$CONTROL_CMD" | sed 's/API_KEY=\S*/API_KEY=***/g')"
         eval $CONTROL_CMD

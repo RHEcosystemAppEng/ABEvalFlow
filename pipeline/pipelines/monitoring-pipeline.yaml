@@ -35,13 +35,7 @@ spec:
       type: string
       default: "harbor"
       description: Evaluation engine (harbor, ase, mcpchecker, a2a, aeh)
-    # Harbor params
-    - name: harbor-fork-url
-      type: string
-      default: "https://github.com/RHEcosystemAppEng/skills_eval_corrections.git"
-    - name: harbor-fork-revision
-      type: string
-      default: "main"
+    # Harbor params (stock PyPI Harbor + custom OpenShift env)
     - name: eval-mode
       type: string
       default: "prebuilt"
@@ -275,10 +269,6 @@ spec:
         - name: pipeline-repo-revision
           value: $(params.pipeline-repo-revision)
         # Harbor params
-        - name: harbor-fork-url
-          value: $(params.harbor-fork-url)
-        - name: harbor-fork-revision
-          value: $(params.harbor-fork-revision)
         - name: eval-mode
           value: $(params.eval-mode)
         - name: registry-url
@@ -377,8 +367,6 @@ spec:
           value: $(params.revision)
         - name: pipeline-run-id
           value: $(context.pipelineRun.name)
-        - name: harbor-fork-revision
-          value: $(params.harbor-fork-revision)
         - name: uplift-threshold
           value: $(params.uplift-threshold)
         - name: security-scan-mode

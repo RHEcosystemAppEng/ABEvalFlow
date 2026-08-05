@@ -101,8 +101,8 @@ agentic_eval_flow/
 | Repository | Purpose |
 |---|---|
 | [skill-submissions](https://github.com/RHEcosystemAppEng/skill-submissions) | Submission intake -- users push skills, MCP evals, and agent evals here |
-| [skills_eval_corrections](https://github.com/RHEcosystemAppEng/skills_eval_corrections) | Harbor fork with OpenShift backend for Agentic Eval Flow |
-| [All-Hands-AI/openhands-agent-monitor](https://github.com/All-Hands-AI/openhands-agent-monitor) | Harbor upstream -- agent evaluation framework |
+| [laude-institute/harbor](https://github.com/laude-institute/harbor) | Harbor upstream (PyPI `harbor==0.20.0`) -- classic A/B uses stock Harbor + OpenShift custom env |
+| [opendatahub-io/agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness) | AEH -- KubernetesEnvironment base for the OpenShift custom env plugin |
 | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | Security scanner for prompt injection and data exfiltration detection |
 | [harness-eval](https://github.com/redhat-community-ai-tools/harness-eval) | Deterministic security and quality scanner for skill submissions (27 rule categories, 97 rules) |
 
@@ -120,7 +120,7 @@ The pipeline is LLM-agnostic. Three modes are supported:
 
 - OpenShift cluster with Pipelines operator (Tekton)
 - Container registry (Quay.io) with push credentials
-- Harbor fork with OpenShift backend
+- Stock Harbor (`harbor==0.20.0`) with the OpenShift custom environment plugin
 - LLM access (one of the three modes above)
 - Python 3.11+
 

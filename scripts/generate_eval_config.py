@@ -16,6 +16,10 @@ producing a clean result layout::
                 <trial-1>__<uuid>/result.json
                 ...
 
+Prebuilt mode uses stock Harbor + ABEvalFlow OpenShift custom env
+(``environment.import_path``) and writes the digest ref into each task's
+``task.toml`` as ``docker_image``. Local-build mode uses stock ``docker``.
+
 Usage:
     python scripts/generate_eval_config.py \\
         --submission-dir /workspace/submissions/my-submission \\
@@ -32,12 +36,14 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from abevalflow.harbor_extensions import OPENSHIFT_ENVIRONMENT_IMPORT_PATH
 from abevalflow.schemas import SubmissionMetadata
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,9 @@ _HARBOR_DEFAULT_AGENT_TIMEOUT = 600.0
 _HARBOR_DEFAULT_VERIFIER_TIMEOUT = 120.0
 _HARBOR_DEFAULT_SETUP_TIMEOUT = 600.0
 _HARBOR_DEFAULT_BUILD_TIMEOUT = 600.0
+
+# Local/dev Harbor backend when not using the OpenShift custom env.
+_LOCAL_ENVIRONMENT_TYPE = "docker"
 
 
 def load_metadata(submission_dir: Path) -> SubmissionMetadata:
@@ -91,6 +100,49 @@ def _resolve_llm_params(
     return llm_model, llm_api_base, llm_api_key, llm_agent_wrapper
 
 
+def set_task_docker_image(task_dir: Path | str, image_ref: str) -> Path:
+    """Set or overwrite ``[environment].docker_image`` in a task's task.toml.
+
+    Idempotent: re-running with the same or a new digest updates the field only.
+    Creates a minimal ``[environment]`` section when the file or section is missing.
+    """
+    task_path = Path(task_dir)
+    toml_path = task_path / "task.toml"
+    if not image_ref:
+        raise ValueError("image_ref is required to set docker_image")
+
+    if toml_path.is_file():
+        text = toml_path.read_text()
+    else:
+        text = 'version = "1.0"\n\n[environment]\n'
+        logger.warning("task.toml missing under %s; creating minimal file", task_path)
+
+    if re.search(r"(?m)^\[environment\]\s*$", text):
+        if re.search(r"(?m)^docker_image\s*=", text):
+            text = re.sub(
+                r'(?m)^docker_image\s*=\s*".*"\s*$',
+                f'docker_image = "{image_ref}"',
+                text,
+                count=1,
+            )
+        else:
+            text = re.sub(
+                r"(?m)^(\[environment\]\s*\n)",
+                rf'\1docker_image = "{image_ref}"\n',
+                text,
+                count=1,
+            )
+    else:
+        if not text.endswith("\n"):
+            text += "\n"
+        text += f'\n[environment]\ndocker_image = "{image_ref}"\n'
+
+    toml_path.parent.mkdir(parents=True, exist_ok=True)
+    toml_path.write_text(text)
+    logger.info("Set docker_image in %s", toml_path)
+    return toml_path
+
+
 def build_variant_config(
     metadata: SubmissionMetadata,
     variant: str,
@@ -107,6 +159,10 @@ def build_variant_config(
 
     Each variant gets its own job so results land in a variant-specific
     directory and trial classification is unambiguous.
+
+    Prebuilt mode selects the OpenShift custom env via ``import_path`` and
+    expects ``docker_image`` on the task (see :func:`set_task_docker_image`).
+    Local-build mode uses stock Harbor ``docker`` with ``force_build``.
     """
     if eval_mode == "prebuilt" and not image_ref:
         raise ValueError(f"image_ref is required for variant '{variant}' in prebuilt mode")
@@ -121,27 +177,27 @@ def build_variant_config(
 
     task: dict[str, Any] = {"path": task_dir}
 
-    # Stock Harbor JobConfig validates environment.type as a strict enum
-    # (openshift|docker|...). The fork's OpenShiftEnvironment is selected via
-    # this enum — do not put an import path here (that fails Pydantic validation).
-    env_block: dict[str, Any] = {
-        "type": "openshift",
-        "delete": True,
-        "override_memory_mb": metadata.memory_mb,
-        "override_storage_mb": metadata.storage_mb,
-    }
-
-    kwargs: dict[str, Any] = {
-        "cpu_request": "100m",
-        "memory_limit_multiplier": 1.5,
-    }
-
     if eval_mode == "prebuilt":
-        kwargs["image_ref"] = image_ref
-    env_block["kwargs"] = kwargs
-
-    if eval_mode != "prebuilt":
-        env_block["force_build"] = True
+        # Stock Harbor EnvironmentConfig accepts import_path; custom env is
+        # also selectable via harbor run --environment-import-path.
+        env_block: dict[str, Any] = {
+            "import_path": OPENSHIFT_ENVIRONMENT_IMPORT_PATH,
+            "delete": True,
+            "override_memory_mb": metadata.memory_mb,
+            "override_storage_mb": metadata.storage_mb,
+            "kwargs": {
+                "cpu_request": "100m",
+                "memory_limit_multiplier": 1.5,
+            },
+        }
+    else:
+        env_block = {
+            "type": _LOCAL_ENVIRONMENT_TYPE,
+            "delete": True,
+            "force_build": True,
+            "override_memory_mb": metadata.memory_mb,
+            "override_storage_mb": metadata.storage_mb,
+        }
 
     agent_mult = _timeout_multiplier(metadata.agent_timeout_sec, _HARBOR_DEFAULT_AGENT_TIMEOUT)
     verifier_mult = _timeout_multiplier(metadata.verifier_timeout_sec, _HARBOR_DEFAULT_VERIFIER_TIMEOUT)
@@ -211,6 +267,9 @@ def generate_eval_configs(
 
     configs: dict[str, dict[str, Any]] = {}
     for variant, (task_dir, img_ref) in variant_args.items():
+        if eval_mode == "prebuilt":
+            set_task_docker_image(task_dir, img_ref)
+
         jobs_dir = f"{results_base_dir}/{variant}"
         config = build_variant_config(
             metadata=metadata,
