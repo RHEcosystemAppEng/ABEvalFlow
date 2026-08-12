@@ -11,11 +11,7 @@ from typing import Any
 
 import yaml
 
-from abevalflow.harbor_extensions import OPENSHIFT_ENVIRONMENT_IMPORT_PATH
-
 DEFAULT_AEH_THRESHOLD = 0.5
-# OPENSHIFT_ENVIRONMENT_IMPORT_PATH re-exported for existing callers;
-# canonical definition lives in abevalflow.harbor_extensions.
 
 
 def resolve_evaluation_threshold(

@@ -36,8 +36,8 @@ sys.modules["agent_eval.harbor.kubernetes"] = _k8s_mod
 
 from abevalflow.harbor_extensions import OPENSHIFT_ENVIRONMENT_IMPORT_PATH  # noqa: E402
 from abevalflow.harbor_extensions.openshift_environment import (  # noqa: E402
-    OpenShiftEnvironment,
     _HARBOR_PATHS,
+    OpenShiftEnvironment,
 )
 
 
