@@ -16,8 +16,6 @@ Cluster ask: create/get/delete pods, exec, pull secrets; no harbor-task-scc.
 """
 
 # Shared import path for Harbor --environment-import-path (classic + AEH).
-OPENSHIFT_ENVIRONMENT_IMPORT_PATH = (
-    "abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment"
-)
+OPENSHIFT_ENVIRONMENT_IMPORT_PATH = "abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment"
 
 __all__ = ["OPENSHIFT_ENVIRONMENT_IMPORT_PATH"]

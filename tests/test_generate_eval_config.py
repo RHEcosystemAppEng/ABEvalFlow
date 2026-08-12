@@ -54,9 +54,7 @@ def task_dirs(tmp_path: Path) -> tuple[Path, Path]:
     control = tmp_path / "tasks-control" / "my-submission"
     for d in (treatment, control):
         d.mkdir(parents=True)
-        (d / "task.toml").write_text(
-            'version = "1.0"\n\n[environment]\ncpus = 1\nmemory_mb = 2048\n'
-        )
+        (d / "task.toml").write_text('version = "1.0"\n\n[environment]\ncpus = 1\nmemory_mb = 2048\n')
     return treatment, control
 
 
@@ -98,9 +96,7 @@ class TestSetTaskDockerImage:
     def test_overwrites_existing_docker_image(self, tmp_path: Path):
         task = tmp_path / "task"
         task.mkdir()
-        (task / "task.toml").write_text(
-            'version = "1.0"\n\n[environment]\ndocker_image = "old@sha256:x"\n'
-        )
+        (task / "task.toml").write_text('version = "1.0"\n\n[environment]\ndocker_image = "old@sha256:x"\n')
         set_task_docker_image(task, TREATMENT_REF)
         text = (task / "task.toml").read_text()
         assert text.count("docker_image") == 1
