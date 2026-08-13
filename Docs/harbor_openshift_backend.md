@@ -12,8 +12,8 @@
 Agentic Eval Flow classic Harbor CI now uses:
 
 - Stock / pinned upstream Harbor (`harbor==0.20.0`)
-- Custom environment via Harbor `environment.import_path` /
-  `--environment-import-path` pointing at
+- Custom environment via Harbor JobConfig `environment.import_path`
+  pointing at
   `abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment`
 - Prebuilt trial images via task.toml `docker_image` (pipeline scaffold + crane)
 - `restricted-v2` friendly pods (emptyDir `/workspace` + `/tmp`; no oc Binary Builds; no harbor-task-scc)

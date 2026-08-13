@@ -103,6 +103,30 @@ class TestSetTaskDockerImage:
         assert TREATMENT_REF in text
         assert "old@sha256:x" not in text
 
+    def test_overwrites_docker_image_with_trailing_comment(self, tmp_path: Path):
+        task = tmp_path / "task"
+        task.mkdir()
+        (task / "task.toml").write_text(
+            'version = "1.0"\n\n[environment]\ndocker_image = "old@sha256:x" # pinned digest\n'
+        )
+        set_task_docker_image(task, TREATMENT_REF)
+        text = (task / "task.toml").read_text()
+        assert text.count("docker_image") == 1
+        assert f'docker_image = "{TREATMENT_REF}"' in text
+        assert "old@sha256:x" not in text
+        assert "# pinned digest" in text  # tomlkit preserves inline comments
+
+    def test_handles_environment_header_with_trailing_comment(self, tmp_path: Path):
+        task = tmp_path / "task"
+        task.mkdir()
+        (task / "task.toml").write_text('version = "1.0"\n\n[environment] # config\ncpus = 1\n')
+        set_task_docker_image(task, TREATMENT_REF)
+        text = (task / "task.toml").read_text()
+        assert "[environment] # config" in text
+        assert text.count("[environment]") == 1
+        assert f'docker_image = "{TREATMENT_REF}"' in text
+        assert "cpus = 1" in text
+
 
 class TestBuildVariantConfigPrebuilt:
     def test_basic_structure(self, minimal_submission: Path):

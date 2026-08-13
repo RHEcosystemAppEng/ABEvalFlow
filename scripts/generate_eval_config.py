@@ -36,11 +36,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any
 
+import tomlkit
 import yaml
 
 from abevalflow.harbor_extensions import OPENSHIFT_ENVIRONMENT_IMPORT_PATH
@@ -105,6 +105,7 @@ def set_task_docker_image(task_dir: Path | str, image_ref: str) -> Path:
 
     Idempotent: re-running with the same or a new digest updates the field only.
     Creates a minimal ``[environment]`` section when the file or section is missing.
+    Uses ``tomlkit`` so comments and unrelated keys are preserved.
     """
     task_path = Path(task_dir)
     toml_path = task_path / "task.toml"
@@ -112,33 +113,29 @@ def set_task_docker_image(task_dir: Path | str, image_ref: str) -> Path:
         raise ValueError("image_ref is required to set docker_image")
 
     if toml_path.is_file():
-        text = toml_path.read_text()
+        doc = tomlkit.parse(toml_path.read_text())
     else:
-        text = 'version = "1.0"\n\n[environment]\n'
+        doc = tomlkit.document()
+        doc["version"] = "1.0"
         logger.warning("task.toml missing under %s; creating minimal file", task_path)
 
-    if re.search(r"(?m)^\[environment\]\s*$", text):
-        if re.search(r"(?m)^docker_image\s*=", text):
-            text = re.sub(
-                r'(?m)^docker_image\s*=\s*".*"\s*$',
-                f'docker_image = "{image_ref}"',
-                text,
-                count=1,
-            )
-        else:
-            text = re.sub(
-                r"(?m)^(\[environment\]\s*\n)",
-                rf'\1docker_image = "{image_ref}"\n',
-                text,
-                count=1,
-            )
-    else:
-        if not text.endswith("\n"):
-            text += "\n"
-        text += f'\n[environment]\ndocker_image = "{image_ref}"\n'
+    env = doc.get("environment")
+    if env is None:
+        env = tomlkit.table()
+        doc["environment"] = env
+    elif not isinstance(env, dict):
+        raise ValueError(f"[environment] in {toml_path} must be a table")
+
+    env["docker_image"] = image_ref
+
+    written = env.get("docker_image")
+    if written != image_ref:
+        raise ValueError(
+            f"docker_image write verification failed for {toml_path}: expected {image_ref!r}, found {written!r}"
+        )
 
     toml_path.parent.mkdir(parents=True, exist_ok=True)
-    toml_path.write_text(text)
+    toml_path.write_text(tomlkit.dumps(doc))
     logger.info("Set docker_image in %s", toml_path)
     return toml_path
 
@@ -178,8 +175,7 @@ def build_variant_config(
     task: dict[str, Any] = {"path": task_dir}
 
     if eval_mode == "prebuilt":
-        # Stock Harbor EnvironmentConfig accepts import_path; custom env is
-        # also selectable via harbor run --environment-import-path.
+        # Stock Harbor EnvironmentConfig selects the custom env via import_path.
         env_block: dict[str, Any] = {
             "import_path": OPENSHIFT_ENVIRONMENT_IMPORT_PATH,
             "delete": True,

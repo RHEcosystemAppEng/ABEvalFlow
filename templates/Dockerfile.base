@@ -49,7 +49,8 @@ RUN pip install --no-cache-dir \
     "harbor==${HARBOR_VERSION}" \
     "kubernetes>=32.0.0" \
     pydantic \
-    pyyaml
+    pyyaml \
+    "tomlkit>=0.13"
 
 ENV PYTHONPATH=/opt/agent-eval-harness \
     HOME=/workspace

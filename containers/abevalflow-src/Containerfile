@@ -1,7 +1,0 @@
-# Smoke-test source image: full ABEvalFlow working tree for Tekton without git push.
-# Build from repo root:
-#   podman build -f containers/abevalflow-src/Containerfile -t abevalflow-src:smoke .
-
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
-COPY . /opt/abevalflow
-WORKDIR /opt/abevalflow

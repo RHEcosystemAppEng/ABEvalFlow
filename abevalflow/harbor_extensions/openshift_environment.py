@@ -14,9 +14,6 @@ Usage (classic Harbor A/B and AEH):
     environment:
       import_path: abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment
       delete: true
-    # and/or CLI:
-    #   --environment-import-path \\
-    #     abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment
 
 Prebuilt trial images: set ``docker_image`` in the task's ``task.toml``
 ``[environment]`` section (not fork ``kwargs.image_ref``).

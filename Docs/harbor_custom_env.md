@@ -18,17 +18,16 @@ Classic Harbor A/B (`eval_engine: harbor`) and AEH Harbor runs share:
 
 **Custom env selection** (prebuilt / OpenShift CI only):
 
-```text
-abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment
+JobConfig `environment.import_path`:
+
+```yaml
+environment:
+  import_path: abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment
 ```
 
-via JobConfig `environment.import_path` and/or:
-
-```bash
-harbor run -c <config.yaml> \
-  --environment-import-path abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment \
-  -y
-```
+Classic Harbor CI uses that YAML field only (`harbor run -c <config.yaml> -y`).
+AEH still passes Harbor’s deprecated `--environment-import-path` when
+`agent_eval.harbor.run` would otherwise override the config.
 
 **Do not** use stock Harbor `environment.type: openshift` (oc CLI / custom SCC model) for shared OpenShift CI.
 
@@ -41,7 +40,7 @@ The composite evaluate task (`pipeline/tasks/phases/evaluate.yaml`) Harbor path:
 1. Uses `eval-base:local-env` (stock Harbor + AEH + baked `abevalflow`)
 2. Generates **two** Harbor job configs via `scripts/generate_eval_config.py`
 3. Writes treatment/control digests into each task’s `task.toml` as `docker_image`
-4. Runs `harbor run -c treatment-config.yaml` then `harbor run -c control-config.yaml` with `--environment-import-path`
+4. Runs `harbor run -c treatment-config.yaml` then `harbor run -c control-config.yaml` (env from YAML `import_path`)
 
 ### Per-variant config (prebuilt)
 
@@ -83,6 +82,8 @@ environment:
 ```
 
 No OpenShift import path; Harbor builds from each task’s Dockerfile.
+**Local / privileged Docker only** — not supported on shared OpenShift CI
+(no docker-in-docker). Cluster pipelines should use `eval_mode=prebuilt`.
 
 ### Result directory layout
 
