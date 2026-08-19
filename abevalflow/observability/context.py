@@ -120,6 +120,11 @@ class MetricsContext(BaseModel):
 
     def to_observability_dict(self) -> dict:
         """Convert to kwargs for ObservabilityMetricsRow."""
+        from abevalflow.observability.cost import calculate_cost
+
+        prompt = self.total_prompt_tokens
+        completion = self.total_completion_tokens
+
         return {
             "submission_name": self.submission_name,
             "model_name": self.model_name,
@@ -129,8 +134,9 @@ class MetricsContext(BaseModel):
             "evaluate_duration_ms": self.timing_ms("evaluate"),
             "analyze_duration_ms": self.timing_ms("analyze"),
             "store_duration_ms": self.timing_ms("store"),
-            "total_prompt_tokens": self.total_prompt_tokens or None,
-            "total_completion_tokens": self.total_completion_tokens or None,
+            "total_prompt_tokens": prompt or None,
+            "total_completion_tokens": completion or None,
             "total_tokens": self.total_tokens or None,
+            "estimated_cost_usd": calculate_cost(prompt, completion, self.model_name),
             "llm_calls_count": self.llm_calls_count or None,
         }
