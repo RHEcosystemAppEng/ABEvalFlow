@@ -1,4 +1,4 @@
-QUAY_NS ?= quay.io/rh-ee-ikrispin
+QUAY_NS ?= quay.io/ecosystem-appeng
 VERSION ?= 0.1
 TASKS_DIR := ../tasks/konflux
 

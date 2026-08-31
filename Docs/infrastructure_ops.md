@@ -8,6 +8,20 @@ Deployment and operations reference for running Agentic Eval Flow on OpenShift.
 - `oc` CLI authenticated with cluster-admin or namespace-admin
 - `tkn` CLI (optional, for manual pipeline triggers and PipelineRun cleanup)
 
+## Quay.io images (org registry)
+
+Published Agentic Eval Flow images live under **`quay.io/ecosystem-appeng/`** (not a personal namespace):
+
+| Image / bundle | Use |
+|---|---|
+| `abevalflow-redteam`, `abevalflow-pyrit` | Classic + Konflux red-team Task steps |
+| `abevalflow-eval-base` | Konflux evaluate default (classic CI uses the OpenShift internal `eval-base` ImageStream instead) |
+| `abevalflow-task-*` | Tekton Bundles for Konflux IntegrationTestScenario |
+
+**CI push:** GitHub Actions (`push-bundles`) authenticates with robot account `ecosystem-appeng+abevalflow` via repo secrets `QUAY_USERNAME` / `QUAY_TOKEN`. Local pushes use the same robot (`podman login quay.io` then `make bundles` in `pipeline/integration`).
+
+**Cluster pull (`ab-eval-flow`):** Keep a `quay-pull-secret` dockerconfig secret for `quay.io` with that robot, and attach it to the Tekton `pipeline` ServiceAccount `imagePullSecrets` so red-team / Quay-backed steps can pull if repos are private. Classic Harbor/AEH evaluate steps continue to use `image-registry.openshift-image-registry.svc:5000/ab-eval-flow/eval-base:*` and do not depend on Quay.
+
 ## Namespace Setup
 
 ```bash

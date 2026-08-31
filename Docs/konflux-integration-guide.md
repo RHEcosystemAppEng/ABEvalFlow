@@ -316,14 +316,14 @@ The core tasks are published as Tekton Bundles to Quay.io:
 
 | Bundle | Task |
 |--------|------|
-| `quay.io/rh-ee-ikrispin/abevalflow-task-parse-snapshot:0.1` | parse-snapshot |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-prepare:0.1` | prepare |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-test:0.1` | test |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-evaluate:0.1` | evaluate |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-analyze-scorecard:0.1` | analyze-scorecard |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-store:0.1` | store |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-red-team:0.1` | red-team (opt-in) |
-| `quay.io/rh-ee-ikrispin/abevalflow-task-emit-result:0.1` | emit-result |
+| `quay.io/ecosystem-appeng/abevalflow-task-parse-snapshot:0.1` | parse-snapshot |
+| `quay.io/ecosystem-appeng/abevalflow-task-prepare:0.1` | prepare |
+| `quay.io/ecosystem-appeng/abevalflow-task-test:0.1` | test |
+| `quay.io/ecosystem-appeng/abevalflow-task-evaluate:0.1` | evaluate |
+| `quay.io/ecosystem-appeng/abevalflow-task-analyze-scorecard:0.1` | analyze-scorecard |
+| `quay.io/ecosystem-appeng/abevalflow-task-store:0.1` | store |
+| `quay.io/ecosystem-appeng/abevalflow-task-red-team:0.1` | red-team (opt-in) |
+| `quay.io/ecosystem-appeng/abevalflow-task-emit-result:0.1` | emit-result |
 
 To rebuild bundles after editing task YAML:
 ```bash

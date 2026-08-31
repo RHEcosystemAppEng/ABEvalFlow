@@ -150,7 +150,7 @@ spec:
         echo "Config generated at $CONFIG_DIR/promptfooconfig.yaml"
 
     - name: run-redteam
-      image: quay.io/rh-ee-ikrispin/abevalflow-redteam:latest
+      image: quay.io/ecosystem-appeng/abevalflow-redteam:latest
       env:
         - name: CI
           value: "true"
@@ -237,7 +237,7 @@ spec:
         echo "Promptfoo complete: $FINDINGS findings, passed=$PASSED"
 
     - name: run-crescendo
-      image: quay.io/rh-ee-ikrispin/abevalflow-pyrit:0.1
+      image: quay.io/ecosystem-appeng/abevalflow-pyrit:0.1
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
