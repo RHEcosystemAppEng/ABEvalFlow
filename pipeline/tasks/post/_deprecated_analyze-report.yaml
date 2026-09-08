@@ -30,10 +30,6 @@ spec:
       type: string
       default: ""
       description: Tekton PipelineRun name for provenance
-    - name: harbor-fork-revision
-      type: string
-      default: ""
-      description: Harbor fork revision used for provenance
     - name: uplift-threshold
       type: string
       default: "0.0"
@@ -133,9 +129,6 @@ spec:
           fi
           if [ -n "$(params.pipeline-run-id)" ]; then
             ARGS+=(--pipeline-run-id "$(params.pipeline-run-id)")
-          fi
-          if [ -n "$(params.harbor-fork-revision)" ]; then
-            ARGS+=(--harbor-fork-revision "$(params.harbor-fork-revision)")
           fi
           python scripts/analyze.py "${ARGS[@]}"
 
