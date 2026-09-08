@@ -56,7 +56,7 @@ spec:
       description: Git branch/tag/SHA of the submission repo
     - name: eval-base-image
       type: string
-      default: "quay.io/rh-ee-ikrispin/abevalflow-eval-base:latest"
+      default: "quay.io/ecosystem-appeng/abevalflow-eval-base:latest"
       description: Container image with Harbor + dependencies pre-installed
     - name: llm-model
       type: string

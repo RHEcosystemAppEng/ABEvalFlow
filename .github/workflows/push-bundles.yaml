@@ -14,7 +14,6 @@ on:
         default: '0.1'
 
 env:
-  QUAY_REPO: quay.io/rh-ee-ikrispin/abevalflow-catalog
   VERSION: ${{ github.event.inputs.version || '0.1' }}
 
 jobs:
