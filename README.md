@@ -122,7 +122,7 @@ The pipeline is LLM-agnostic. Three modes are supported:
 - Container registry (Quay.io) with push credentials
 - Harbor fork with OpenShift backend
 - LLM access (one of the three modes above)
-- Python 3.11+
+- Python 3.12+
 
 ## Documentation
 

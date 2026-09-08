@@ -286,6 +286,7 @@ Key steps:
 | `ab-eval-db-credentials` | Store results in PostgreSQL |
 | `minio-credentials` | Upload artifacts to MinIO/S3 |
 | `monitoring-slack-webhook` | Send degradation alerts to Slack |
+| `a2a-agent-credentials` | Bearer token for JWT-protected A2A agents (`eval-engine=a2a` only) |
 
 ### Creating Workload Cluster Credentials
 
@@ -309,6 +310,22 @@ stringData:
 ```
 
 See `config/konflux/secrets-template.yaml` for the full template.
+
+### Creating A2A Agent Credentials
+
+Only needed when `eval-engine=a2a` and the target agent requires a Bearer
+token (e.g. JWT-protected endpoints). If this secret doesn't exist, the
+`agent-auth-token-secret` lookup is optional and no `Authorization` header
+is sent — existing no-auth agents are unaffected.
+
+```bash
+oc create secret generic a2a-agent-credentials \
+  --from-literal=token="<your-agent-jwt>" \
+  -n <your-tenant-namespace>
+```
+
+If your secret has a different name, pass it via the `agent-auth-token-secret`
+pipeline parameter (default: `a2a-agent-credentials`).
 
 ## Tekton Bundles
 

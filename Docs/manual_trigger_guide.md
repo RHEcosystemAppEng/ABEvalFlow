@@ -197,6 +197,8 @@ A2A monitoring runs can be triggered three ways (plus manual runs). Choose the r
 
 **Existing agent** (`agent-endpoint`): The pipeline connects to an already-running agent (typically `http://lightspeed-agent.ab-eval-flow.svc:8000`). Do not set `agent-image`/`agent-tag` unless you want a fresh deploy.
 
+**JWT-protected agent** (optional): If the agent requires a Bearer token, create an `a2a-agent-credentials` Secret with a `token` key in the pipeline's namespace (see `Docs/konflux-integration-guide.md#creating-a2a-agent-credentials`). No params need to change — the pipeline picks it up automatically via the `agent-auth-token-secret` param (default: `a2a-agent-credentials`). If the secret doesn't exist, no `Authorization` header is sent, so agents that don't require auth are unaffected.
+
 ### 1. Quay Push Webhook
 
 Fires when a new image is pushed to `quay.io/ecosystem-appeng/google-lightspeed-agent` (excluding `sha256:` digest tags and `on-pr-*` PR tags).

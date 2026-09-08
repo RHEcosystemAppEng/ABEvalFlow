@@ -110,6 +110,13 @@ spec:
       type: string
       default: "120"
       description: A2A agent request timeout in seconds
+    - name: agent-auth-token-secret
+      type: string
+      default: "a2a-agent-credentials"
+      description: >-
+        Name of a Secret (in this task's namespace) with a "token" key holding
+        a Bearer token for JWT-protected A2A agents. Optional: if the secret
+        doesn't exist, no Authorization header is sent (unchanged default behavior).
     - name: agent-image
       type: string
       default: "quay.io/ecosystem-appeng/google-lightspeed-agent"
@@ -1102,6 +1109,12 @@ spec:
               name: llm-credentials
               key: api-key
               optional: true
+        - name: AGENT_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: $(params.agent-auth-token-secret)
+              key: token
+              optional: true
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
@@ -1111,6 +1124,9 @@ spec:
           echo "Skipping A2A eval (eval-engine=$EVAL_ENGINE)"
           exit 0
         fi
+        
+        # Optional; unset when the secret/key doesn't exist (optional: true above).
+        AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
         
         # Read endpoint from deploy step or param
         ENDPOINT_FILE="$(workspaces.source.path)/_eval_tmp/agent-endpoint"
@@ -1178,11 +1194,15 @@ spec:
         LLM_API_BASE="$(params.llm-api-base)"
         LLM_MODEL="openai/$(params.llm-model)"
         
-        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" "$LLM_API_BASE" "$LLM_MODEL" <<'GENCFG'
+        python3 - "$CONFIG_FILE" "$TASK_DIR" "$RESULTS_DIR" "$N_ATTEMPTS" "$AGENT_ENDPOINT" "$(params.agent-timeout)" "$LLM_API_BASE" "$LLM_MODEL" "$AGENT_AUTH_TOKEN" <<'GENCFG'
         import sys
         import yaml
         
-        config_file, task_dir, results_dir, n_attempts, endpoint, timeout, llm_api_base, llm_model = sys.argv[1:9]
+        config_file, task_dir, results_dir, n_attempts, endpoint, timeout, llm_api_base, llm_model, auth_token = sys.argv[1:10]
+        
+        agent_kwargs = {"endpoint": endpoint, "timeout": int(timeout)}
+        if auth_token:
+            agent_kwargs["auth_token"] = auth_token
         
         config = {
             "job_name": "a2a-eval",
@@ -1190,10 +1210,7 @@ spec:
             "n_attempts": int(n_attempts),
             "agents": [{
                 "import_path": "abevalflow.harbor_agents.a2a_adapter:A2AAgent",
-                "kwargs": {
-                    "endpoint": endpoint,
-                    "timeout": int(timeout)
-                }
+                "kwargs": agent_kwargs
             }],
             "tasks": [{"path": task_dir}],
             "environment": {

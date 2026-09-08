@@ -26,6 +26,29 @@ harbor run \
   --n-attempts 3
 ```
 
+#### Optional agent kwargs
+
+The A2A adapter accepts a few optional `--ak` flags beyond `endpoint`/`timeout`:
+
+| Kwarg | Default | Description |
+|-------|---------|-------------|
+| `auth_token` | none | Bearer token sent as `Authorization: Bearer <token>` for JWT-protected agents. Also read from the `AGENT_AUTH_TOKEN` env var if not set. |
+| `blocking` | `true` | Requests synchronous completion (`configuration.blocking`) so `result.artifacts` is populated. Set to `false` only if your agent requires async/polling semantics. |
+| `verify_ssl` | `false` | TLS certificate verification for the agent endpoint. Defaults to `false` because most internal OpenShift/Kubernetes Routes use self-signed or cluster-internal certs. Set to `true` if your endpoint has a CA-trusted certificate. |
+
+```bash
+# Example: JWT-protected agent with a CA-trusted certificate
+harbor run \
+  -p examples/a2a-agent-eval/tasks/lightspeed-qa \
+  --agent-import-path abevalflow.harbor_agents.a2a_adapter:A2AAgent \
+  --ak endpoint=$A2A_ENDPOINT \
+  --ak timeout=120 \
+  --ak auth_token=$A2A_AUTH_TOKEN \
+  --ak verify_ssl=true \
+  -e podman \
+  --n-attempts 3
+```
+
 ### Via Agentic Eval Flow Pipeline (Tekton)
 
 ```bash
@@ -34,6 +57,13 @@ tkn pipeline start abevalflow-ci-pipeline \
   --param agent-endpoint=$A2A_ENDPOINT \
   --param submission-name=lightspeed-qa-eval
 ```
+
+If the agent requires a Bearer token, create an `a2a-agent-credentials` Secret
+(with a `token` key) in the pipeline's namespace beforehand — see
+[`Docs/konflux-integration-guide.md`](../../Docs/konflux-integration-guide.md#creating-a2a-agent-credentials).
+No extra params are needed unless your secret has a different name (use
+`--param agent-auth-token-secret=<name>` in that case). If the secret doesn't
+exist, the pipeline runs exactly as before with no `Authorization` header.
 
 ## Task Structure
 
@@ -121,6 +151,7 @@ def grade() -> dict:
 | `LLM_JUDGE_MODEL` | Model for LLM-as-judge | `openai/claude-sonnet` |
 | `LLM_BASE_URL` | LiteLLM proxy URL | `http://litellm.ab-eval-flow.svc.cluster.local:4000` |
 | `A2A_ENDPOINT` | Agent endpoint URL | (required) |
+| `AGENT_AUTH_TOKEN` | Bearer token for JWT-protected agents (fallback if `--ak auth_token` isn't set) | none |
 
 ## Troubleshooting
 
