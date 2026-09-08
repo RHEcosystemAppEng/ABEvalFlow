@@ -1977,6 +1977,44 @@ spec:
         print(f"Recommendation: {rec}")
         PARSE_AEH
 
+        # Same opt-in MLflow path as Harbor AEH single-run (aeh-eval).
+        # OpenShell reports live under reports/<eval-name>/<pipeline-run-id>/.
+        export AGENT_EVAL_HARNESS_ROOT="$HARNESS_DIR"
+        if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
+          echo "=== AEH OpenShell MLflow logging ==="
+          MLFLOW_PKG_DIR="/tmp/mlflow-pkgs"
+          mkdir -p "$MLFLOW_PKG_DIR"
+          export PYTHONPATH="${MLFLOW_PKG_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+          if python -c "import mlflow, pandas" 2>/dev/null; then
+            echo "mlflow/pandas already available (image or prior install); skipping pip"
+          else
+            echo "Installing mlflow-skinny + pandas into ${MLFLOW_PKG_DIR} (fallback) ..."
+            set +e
+            python -m pip install --no-cache-dir --target "$MLFLOW_PKG_DIR" 'mlflow-skinny' 'pandas' 2>&1 | tee /tmp/mlflow-pip.log | tail -30
+            PIP_RC=${PIPESTATUS[0]}
+            set -e
+            if [ "$PIP_RC" -ne 0 ]; then
+              echo "WARN: mlflow-skinny/pandas install failed (rc=$PIP_RC)"
+              tail -40 /tmp/mlflow-pip.log || true
+            fi
+          fi
+          if python -c "import mlflow, pandas; print('mlflow OK', mlflow.__version__, 'pandas', pandas.__version__)"; then
+            export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
+            python "$PIPELINE_DIR/scripts/log_aeh_mlflow.py" \
+              --enabled true \
+              --tracking-uri "$(params.mlflow-tracking-uri)" \
+              --experiment "$RUN_ID" \
+              --run-id "$RUN_ID" \
+              --config "$SUBMISSION_DIR/eval.yaml" \
+              --runs-dir "$(workspaces.source.path)/reports" \
+              2>&1 || echo "Warning: MLflow logging failed (non-blocking)"
+          else
+            echo "Warning: mlflow/pandas not importable; skipping MLflow logging"
+          fi
+        else
+          echo "Skipping AEH OpenShell MLflow (enable-mlflow=$(params.enable-mlflow), uri set=$([ -n "$(params.mlflow-tracking-uri)" ] && echo yes || echo no))"
+        fi
+
         if [ "$AEH_EXIT" -ne 0 ]; then
           echo "ERROR: AEH OpenShell evaluation exited $AEH_EXIT (report written if outputs existed)"
           exit "$AEH_EXIT"

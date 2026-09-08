@@ -427,10 +427,19 @@ def _minimal_mlflow_log(
 
         if run_result.get("cost_usd") is not None:
             mlflow.log_metric("cost_usd", float(run_result["cost_usd"]))
-        if run_result.get("mean_reward") is not None:
-            mlflow.log_metric("mean_reward", float(run_result["mean_reward"]))
-        elif summary.get("mean_reward") is not None:
-            mlflow.log_metric("mean_reward", float(summary["mean_reward"]))
+        mean_reward = run_result.get("mean_reward")
+        if mean_reward is None:
+            mean_reward = summary.get("mean_reward")
+        if mean_reward is None:
+            try:
+                from scripts.aggregate_aeh import _extract_mean_reward
+
+                mean_reward = _extract_mean_reward(run_dir)
+            except Exception:
+                logger.warning("Could not derive mean_reward for MLflow", exc_info=True)
+                mean_reward = None
+        if mean_reward is not None:
+            mlflow.log_metric("mean_reward", float(mean_reward))
 
         for artifact in (summary_path, rr_path, run_dir / "report.html"):
             if not artifact.is_file():

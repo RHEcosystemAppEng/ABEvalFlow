@@ -4,6 +4,10 @@ name: forge-eval-rubrics
 
 scene: monday-acquisition
 
+# Pipeline evaluate overrides experiment to the Tekton PipelineRun name.
+mlflow:
+  experiment: forge-eval-rubrics
+
 models:
   # LiteLLM in-cluster alias (override via aeh-model-override). OpenClaw
   # --model is qualified as inference/<id> by the harness from providers below.

@@ -471,6 +471,10 @@ spec:
       value: "mock"
     - name: aeh-model-override
       value: "claude-sonnet"
+    - name: enable-mlflow
+      value: "true"
+    - name: mlflow-tracking-uri
+      value: "http://abevalflow-mlflow.ab-eval-flow.svc.cluster.local:5000"
   taskRunTemplate:
     serviceAccountName: pipeline
   timeouts:
@@ -487,7 +491,7 @@ spec:
 YAML
 ```
 
-Profile defaults (override only what you need): `eval-engine=aeh_openshell_openclaw`, `submission-dir=openclaw-forge`, sandbox image pin `quay.io/aipcc/base-images/agentic/openclaw:0.0.1-1787755593`, orchestrator `registry.access.redhat.com/ubi9/python-311:9.6`, `enable-ai-generation=false`. Harness revision defaults to `feat/aeh-openshell-openclaw` (the OpenShell module lives there). After this branch merges, `revision` / `pipeline-repo-revision` can stay at Pipeline default `main`.
+Profile defaults (override only what you need): `eval-engine=aeh_openshell_openclaw`, `submission-dir=openclaw-forge`, sandbox image pin `quay.io/aipcc/base-images/agentic/openclaw:0.0.1-1787755593`, orchestrator `registry.access.redhat.com/ubi9/python-311:9.6`, `enable-ai-generation=false`, **`enable-mlflow=true`** with tracking URI `http://abevalflow-mlflow.ab-eval-flow.svc.cluster.local:5000`. One PipelineRun becomes one MLflow experiment (name = Tekton run id). Port-forward the tracking server (no public Route by default): `oc -n ab-eval-flow port-forward svc/abevalflow-mlflow 5000:5000`. Harness revision defaults to `feat/aeh-openshell-openclaw` (the OpenShell module lives there). After this branch merges, `revision` / `pipeline-repo-revision` can stay at Pipeline default `main`.
 
 **Store / artifacts:** OpenShell reuses the AEH MinIO prefix `{prefix}/debug/aeh/<run-id>/` (same as Harbor AEH run trees). Harbor `_eval_tmp` debug (`debug/harbor/`) is N/A. Cluster Postgres must have **Alembic 005** (`evaluation_runs.eval_engine` varchar(50)) before store-to-db succeeds — `aeh_openshell_openclaw` is 22 characters. The store Task uploads MinIO **before** the DB insert so a varchar(10) failure does not skip artifacts; the PipelineRun still fails until 005 is applied. See [persistence.md](persistence.md) and `alembic/versions/005_widen_eval_engine.py`.
 

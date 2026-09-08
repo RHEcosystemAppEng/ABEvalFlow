@@ -173,6 +173,90 @@ def test_minimal_logger_with_mock_mlflow(tmp_path: Path, monkeypatch) -> None:
     assert ("tokens_input", 100.0) in calls["metrics"]
 
 
+def test_minimal_logger_derives_mean_reward_from_likert_summary(tmp_path: Path, monkeypatch) -> None:
+    """OpenShell summary.yaml often has no top-level mean_reward; derive from judges."""
+    runs = tmp_path / "reports"
+    run_dir = runs / "forge-eval-rubrics" / "aeh-openshell-openclaw-x"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_result.json").write_text('{"execution_mode": "openshell"}')
+    (run_dir / "summary.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "judges": {
+                    "analysis_accuracy": {"mean": 2.0, "score_range": [1, 5]},
+                },
+                "per_case": {
+                    "analysis-panel": {"analysis_accuracy": {"value": 2}},
+                },
+            }
+        )
+    )
+    config = tmp_path / "eval.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "name": "forge-eval-rubrics",
+                "mlflow": {"experiment": "forge-eval-rubrics"},
+                "judges": [{"name": "analysis_accuracy", "llm_rubric": "x"}],
+            }
+        )
+    )
+    calls: dict = {"metrics": []}
+
+    class _FakeRun:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class _FakeMlflow:
+        def set_tracking_uri(self, uri):
+            pass
+
+        def set_experiment(self, name):
+            pass
+
+        def start_run(self, run_name=None):
+            return _FakeRun()
+
+        def log_param(self, k, v):
+            pass
+
+        def log_metric(self, k, v):
+            calls["metrics"].append((k, v))
+
+        def log_artifact(self, path):
+            pass
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "mlflow", _FakeMlflow())
+    monkeypatch.setattr("scripts.log_aeh_mlflow._resolve_log_results_script", lambda: None)
+    rc = main(
+        [
+            "--run-id",
+            "aeh-openshell-openclaw-x",
+            "--config",
+            str(config),
+            "--runs-dir",
+            str(runs),
+            "--tracking-uri",
+            "http://mlflow.example:5000",
+            "--experiment",
+            "aeh-openshell-openclaw-x",
+            "--enabled",
+            "true",
+            "--actions",
+            "log-results",
+        ]
+    )
+    assert rc == 0
+    mean = dict(calls["metrics"]).get("mean_reward")
+    assert mean is not None
+    assert mean != 0.0
+
+
 def test_minimal_logger_uses_pipeline_experiment_override(tmp_path: Path, monkeypatch) -> None:
     """--experiment forces one experiment per PipelineRun (ignores eval.yaml mlflow.experiment)."""
     runs, config = _write_run(tmp_path)
