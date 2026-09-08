@@ -1898,6 +1898,12 @@ spec:
         echo "Output: $OUT_DIR"
         echo "Model: $MODEL"
 
+        export AGENT_EVAL_HARNESS_ROOT="$HARNESS_DIR"
+        if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
+          export MLFLOW_TRACKING_URI="$(params.mlflow-tracking-uri)"
+          echo "MLFLOW_TRACKING_URI set for AEH harness + CI logger"
+        fi
+
         set +e
         python "$PIPELINE_DIR/scripts/run_aeh.py" single \
           --runner openshell \
@@ -1979,7 +1985,8 @@ spec:
 
         # Same opt-in MLflow path as Harbor AEH single-run (aeh-eval).
         # OpenShell reports live under reports/<eval-name>/<pipeline-run-id>/.
-        export AGENT_EVAL_HARNESS_ROOT="$HARNESS_DIR"
+        # Calls AEH skills/eval-mlflow/log_results.py (harness clone), then
+        # CI fallback metrics if that no-ops.
         if [ "$(params.enable-mlflow)" = "true" ] && [ -n "$(params.mlflow-tracking-uri)" ]; then
           echo "=== AEH OpenShell MLflow logging ==="
           MLFLOW_PKG_DIR="/tmp/mlflow-pkgs"

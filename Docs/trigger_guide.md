@@ -493,6 +493,17 @@ YAML
 
 Profile defaults (override only what you need): `eval-engine=aeh_openshell_openclaw`, `submission-dir=openclaw-forge`, sandbox image pin `quay.io/aipcc/base-images/agentic/openclaw:0.0.1-1787755593`, orchestrator `registry.access.redhat.com/ubi9/python-311:9.6`, `enable-ai-generation=false`, **`enable-mlflow=true`** with tracking URI `http://abevalflow-mlflow.ab-eval-flow.svc.cluster.local:5000`. One PipelineRun becomes one MLflow experiment (name = Tekton run id). Port-forward the tracking server (no public Route by default): `oc -n ab-eval-flow port-forward svc/abevalflow-mlflow 5000:5000`. Harness revision defaults to `feat/aeh-openshell-openclaw` (the OpenShell module lives there). After this branch merges, `revision` / `pipeline-repo-revision` can stay at Pipeline default `main`.
 
+**MLflow: AEH vs CI (both used on this profile)**
+
+| | **AEH (`/eval-mlflow`, `log_results.py`)** | **CI (`log_aeh_mlflow.py`)** |
+|---|---|---|
+| When | After a harness run (`eval-run` / OpenShell `score.py` artifacts exist) | After the evaluate Task, if `enable-mlflow=true` |
+| What | Full AEH payload: params, judge metrics, `summary.yaml` / `report.html`, per-case table, traces built from `stdout.log` / events | Calls **the same** AEH `log_results.py` from the cloned harness (`AGENT_EVAL_HARNESS_ROOT`). If that no-ops, logs a **minimal** CI fallback (`mean_reward`, tokens, those files) |
+| Experiment | `eval.yaml` `mlflow.experiment` (here `forge-eval-rubrics`) | Overridden to the **Tekton PipelineRun name** so cluster runs do not collide |
+| Tracking URI | `mlflow.tracking_uri` in yaml, else `MLFLOW_TRACKING_URI`, else `http://127.0.0.1:5000` | Pipeline param `mlflow-tracking-uri` (exported as `MLFLOW_TRACKING_URI` for AEH too) |
+
+OpenClaw does **not** emit live Claude-Code OTel traces inside the sandbox (that path is `execute.py` / Claude Code). AEH still **reconstructs** traces after harvest. CI does not replace AEH MLflow; it **invokes** it and only fills gaps.
+
 **Store / artifacts:** OpenShell reuses the AEH MinIO prefix `{prefix}/debug/aeh/<run-id>/` (same as Harbor AEH run trees). Harbor `_eval_tmp` debug (`debug/harbor/`) is N/A. Cluster Postgres must have **Alembic 005** (`evaluation_runs.eval_engine` varchar(50)) before store-to-db succeeds — `aeh_openshell_openclaw` is 22 characters. The store Task uploads MinIO **before** the DB insert so a varchar(10) failure does not skip artifacts; the PipelineRun still fails until 005 is applied. See [persistence.md](persistence.md) and `alembic/versions/005_widen_eval_engine.py`.
 
 Konflux evaluate has no AEH OpenShell path; cluster `ci-pipeline-openshell` is enough for this engine.

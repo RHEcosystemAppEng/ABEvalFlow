@@ -125,7 +125,7 @@ spec:
     - name: enable-mlflow
       type: string
       default: "true"
-      description: Log AEH OpenShell results to MLflow after evaluate
+      description: Export MLFLOW_TRACKING_URI for AEH and run log_aeh_mlflow.py after evaluate
     - name: mlflow-tracking-uri
       type: string
       default: "http://abevalflow-mlflow.ab-eval-flow.svc.cluster.local:5000"

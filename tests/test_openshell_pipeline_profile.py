@@ -58,6 +58,10 @@ class TestOpenshellPipelineProfile:
         assert "log_aeh_mlflow.py" in openshell
         assert "=== AEH OpenShell MLflow logging ===" in openshell
         assert "Skipping AEH OpenShell MLflow" in openshell
+        # AEH harness sees the tracking URI during the run; CI logger runs after.
+        uri_note = "MLFLOW_TRACKING_URI set for AEH harness + CI logger"
+        assert uri_note in openshell
+        assert openshell.find(uri_note) < openshell.find("scripts/run_aeh.py")
 
     def test_harbor_profiles_still_include_test(self):
         for path in (CI, CI_DEV):

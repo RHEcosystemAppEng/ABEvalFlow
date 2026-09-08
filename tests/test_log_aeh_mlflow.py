@@ -424,3 +424,38 @@ def test_resolve_run_dir_prefers_exact_then_pairwise_prefixes(tmp_path: Path) ->
         raise AssertionError("expected FileNotFoundError")
     except FileNotFoundError as exc:
         assert "missing-run" in str(exc)
+
+
+def test_prompt_mode_mlflow_patch_does_not_set_skill() -> None:
+    from scripts.log_aeh_mlflow import _apply_mlflow_eval_patch, _config_reports_leaf
+
+    raw = {
+        "name": "forge-eval-rubrics",
+        "execution": {"prompt": "{{ input.prompt }}"},
+        "mlflow": {"experiment": "forge-eval-rubrics"},
+    }
+    assert _config_reports_leaf(raw, "openclaw-forge") == "forge-eval-rubrics"
+    patched = _apply_mlflow_eval_patch(
+        raw,
+        experiment="aeh-openshell-openclaw-abc",
+        reports_skill="forge-eval-rubrics",
+        tracking_uri="http://abevalflow-mlflow.ab-eval-flow.svc.cluster.local:5000",
+    )
+    assert "skill" not in patched
+    assert patched["name"] == "forge-eval-rubrics"
+    assert patched["execution"]["prompt"] == "{{ input.prompt }}"
+    assert patched["mlflow"]["experiment"] == "aeh-openshell-openclaw-abc"
+    assert patched["mlflow"]["tracking_uri"].startswith("http://abevalflow-mlflow")
+
+
+def test_skill_mode_mlflow_patch_still_sets_skill() -> None:
+    from scripts.log_aeh_mlflow import _apply_mlflow_eval_patch
+
+    patched = _apply_mlflow_eval_patch(
+        {"skill": "aeh-hello-world", "name": "aeh-hello-world"},
+        experiment="pr-1",
+        reports_skill="aeh-hello-world",
+        tracking_uri="http://mlflow.example:5000",
+    )
+    assert patched["skill"] == "aeh-hello-world"
+    assert patched["mlflow"]["experiment"] == "pr-1"

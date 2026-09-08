@@ -111,9 +111,21 @@ Adjust sizes based on expected submission volume and image sizes.
 
 ## MLflow (optional AEH observability)
 
-Opt-in post-evaluate logging for AEH runs. Defaults: `enable-mlflow=false`,
-empty `mlflow-tracking-uri`. See `config/mlflow/README.md` for security notes
-(in-cluster hosts only; Route is optional/dev-only; SQLite is not HA).
+Two layers share the same tracking server:
+
+- **AEH** (`skills/eval-mlflow/scripts/log_results.py`, `/eval-mlflow`): judge
+  metrics, `summary.yaml` / `report.html`, reconstructed traces. Configured by
+  `eval.yaml` `mlflow.experiment` and `MLFLOW_TRACKING_URI` (do not hardcode the
+  in-cluster URI in eval.yaml — local AEH uses localhost or an env override).
+- **CI** (`scripts/log_aeh_mlflow.py` after evaluate): invokes that same AEH
+  script from the harness clone, patches experiment to the Tekton PipelineRun
+  name, and falls back to a minimal metrics log if AEH no-ops.
+
+Harbor / default pipelines: `enable-mlflow=false`, empty `mlflow-tracking-uri`.
+`abevalflow-pipeline-openshell` defaults both **on**
+(`http://abevalflow-mlflow.ab-eval-flow.svc.cluster.local:5000`). See
+`config/mlflow/README.md` for security notes (in-cluster hosts only; Route is
+optional/dev-only; SQLite is not HA).
 
 ```bash
 # Deploy tracking server (PVC uses cluster default StorageClass)

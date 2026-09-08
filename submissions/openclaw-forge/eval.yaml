@@ -4,7 +4,9 @@ name: forge-eval-rubrics
 
 scene: monday-acquisition
 
-# Pipeline evaluate overrides experiment to the Tekton PipelineRun name.
+# Pipeline evaluate overrides experiment to the Tekton PipelineRun name
+# and sets tracking_uri via MLFLOW_TRACKING_URI / log_aeh_mlflow patch.
+# Local /eval-mlflow uses this experiment name + env URI (or localhost:5000).
 mlflow:
   experiment: forge-eval-rubrics
 
