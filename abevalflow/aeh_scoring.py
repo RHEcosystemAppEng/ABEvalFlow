@@ -13,9 +13,6 @@ import yaml
 
 DEFAULT_AEH_THRESHOLD = 0.5
 
-# Import path for AEH HarborRunner --environment-import-path (emptyDir mounts).
-OPENSHIFT_ENVIRONMENT_IMPORT_PATH = "abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment"
-
 
 def resolve_evaluation_threshold(
     metadata_path: Path | str | None = None,
