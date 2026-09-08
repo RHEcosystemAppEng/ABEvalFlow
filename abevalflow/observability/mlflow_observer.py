@@ -164,14 +164,22 @@ def _log_observability_metrics(report_dir: Path) -> None:
             total_calls += usage.get("call_count", 0)
 
         if total_prompt > 0 or total_completion > 0:
-            mlflow.log_metrics(
-                {
-                    "total_prompt_tokens": total_prompt,
-                    "total_completion_tokens": total_completion,
-                    "total_tokens": total_prompt + total_completion,
-                    "llm_calls_count": total_calls,
-                }
-            )
+            metrics = {
+                "total_prompt_tokens": total_prompt,
+                "total_completion_tokens": total_completion,
+                "total_tokens": total_prompt + total_completion,
+                "llm_calls_count": total_calls,
+            }
+
+            model_name = checkpoint.get("model_name")
+            if model_name:
+                from abevalflow.observability.cost import calculate_cost
+
+                cost = calculate_cost(total_prompt, total_completion, model_name)
+                if cost is not None:
+                    metrics["estimated_cost_usd"] = cost
+
+            mlflow.log_metrics(metrics)
 
         model_name = checkpoint.get("model_name")
         if model_name:
