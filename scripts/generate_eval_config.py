@@ -16,7 +16,7 @@ producing a clean result layout::
                 <trial-1>__<uuid>/result.json
                 ...
 
-Prebuilt mode uses stock Harbor + ABEvalFlow OpenShift custom env
+Prebuilt mode uses stock Harbor + Agentic Eval Flow OpenShift custom env
 (``environment.import_path``) and writes the digest ref into each task's
 ``task.toml`` as ``docker_image``. Local-build mode uses stock ``docker``.
 

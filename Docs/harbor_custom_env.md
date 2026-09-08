@@ -1,4 +1,4 @@
-# Harbor Custom Environment — Integration Contract for ABEvalFlow
+# Harbor Custom Environment -- Integration Contract for Agentic Eval Flow
 
 > **Status:** Current (replaces the skills_eval_corrections fork runtime dependency)
 > **Related:** [harbor_openshift_backend.md](./harbor_openshift_backend.md)
@@ -14,7 +14,7 @@ Classic Harbor A/B (`eval_engine: harbor`) and AEH Harbor runs share:
 | Harbor | `harbor==0.20.0` (PyPI; stock upstream) |
 | Kubernetes client | `kubernetes>=32.0.0` |
 | AEH K8s env | `agent_eval.harbor.kubernetes.KubernetesEnvironment` on `PYTHONPATH` (pinned AEH SHA in eval-base) |
-| ABEvalFlow plugin | `abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment` on `PYTHONPATH` |
+| Agentic Eval Flow plugin | `abevalflow.harbor_extensions.openshift_environment:OpenShiftEnvironment` on `PYTHONPATH` |
 
 **Custom env selection** (prebuilt / OpenShift CI only):
 
@@ -33,7 +33,7 @@ AEH still passes Harbor’s deprecated `--environment-import-path` when
 
 ---
 
-## How ABEvalFlow invokes Harbor
+## How Agentic Eval Flow invokes Harbor
 
 The composite evaluate task (`pipeline/tasks/phases/evaluate.yaml`) Harbor path:
 
