@@ -33,7 +33,7 @@ from typing import Any
 
 import yaml
 
-from abevalflow.aeh_scoring import OPENSHIFT_ENVIRONMENT_IMPORT_PATH
+from abevalflow.harbor_extensions import OPENSHIFT_ENVIRONMENT_IMPORT_PATH
 
 
 class RunnerError(Exception):
