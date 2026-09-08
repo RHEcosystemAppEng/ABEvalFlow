@@ -22,7 +22,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/ai5-marketplace-tenant/agent-eval-harness:{{revision}}
+    value: quay.io/ecosystem-appeng/agent-eval-harness:{{revision}}
   - name: dockerfile
     value: /containers/agent-eval-harness/Containerfile
   - name: build-args
