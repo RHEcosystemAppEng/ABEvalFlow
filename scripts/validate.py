@@ -31,6 +31,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+from abevalflow.corpus_denylist import validate_corpus_categories
 from abevalflow.schemas import EvalEngine, SubmissionMetadata
 
 logger = logging.getLogger(__name__)
@@ -751,6 +752,14 @@ def validate_submission(
     # Common: supportive/ size check (skip for mcpchecker, a2a, and aeh)
     if not run_mcpchecker and not run_a2a and not run_aeh:
         errors.extend(_check_supportive_size(submission_dir))
+
+    if metadata:
+        errors.extend(
+            validate_corpus_categories(
+                metadata.corpus_categories,
+                submission_dir / "supportive",
+            )
+        )
 
     if errors:
         logger.warning("Validation failed with %d error(s)", len(errors))

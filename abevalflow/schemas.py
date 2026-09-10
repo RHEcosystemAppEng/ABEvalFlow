@@ -535,6 +535,15 @@ class SubmissionMetadata(BaseModel):
     version: str = Field(default="0.1.0", min_length=1, description="Version string")
     author: str | None = Field(default=None, description="Author or team name")
     tags: list[str] | None = Field(default=None, description="Optional classification tags")
+    corpus_categories: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional corpus sensitivity tags for supportive/ data. "
+            "High-risk categories (hr_personal, customer_support_identifiable, "
+            "credentials_secrets, financial_payment, sensitive_slack_dms, "
+            "legal_privileged) are denylisted and fail validation."
+        ),
+    )
     generation_mode: GenerationMode = Field(
         default=GenerationMode.MANUAL,
         description=(

@@ -81,6 +81,14 @@ gate_policy:
 
 See [Gate Policy Configuration](Docs/gates-architecture.md#gate-policy-configuration) for full options.
 
+### Corpus sensitivity (ABE-2)
+
+Do not feed High-risk corpora into eval submissions. Validation rejects
+`metadata.yaml` `corpus_categories` (or tags in `supportive/` YAML/JSON) that
+declare denylisted categories: `hr_personal`, `customer_support_identifiable`,
+`credentials_secrets`, `financial_payment`, `sensitive_slack_dms`, and
+`legal_privileged`. Use approved public fixtures instead.
+
 ## Repository Structure
 
 ```
