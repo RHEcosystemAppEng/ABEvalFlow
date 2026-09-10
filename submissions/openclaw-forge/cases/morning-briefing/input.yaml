@@ -1,29 +1,7 @@
 prompt: |
-  CRITICAL: Use tools to read LIVE Microsoft 365 data (Outlook + calendar).
-  This run is M365-only — do NOT use Slack.
-  Do NOT invent emails or calendar events.
-  Do NOT paste tool output as if you ran tools — actually call them.
-
-  Environment already set:
-    M365_USER
-    M365_AUTH_HEADER_FILE (curl -H @file — Graph bearer; do not cat/echo it)
-    M365_GRAPH_CURL (wrapper: curl -sS -H @$M365_AUTH_HEADER_FILE)
-    TMPDIR=/sandbox/tmp (use this or .openclaw/tmp/ — never /tmp)
-
-  Preferred tools (in order):
-    1) M365 CLI or MCP, if available
-    2) exec + curl via header file (REQUIRED on OpenClaw 8.1+):
-         curl -sS -H @"$M365_AUTH_HEADER_FILE" 'https://graph.microsoft.com/v1.0/...'
-       or: "$M365_GRAPH_CURL" 'https://graph.microsoft.com/v1.0/...'
-       Do NOT put a Bearer token in the command text (it becomes ***).
-
-  Useful Graph calls (READ ONLY):
-    GET https://graph.microsoft.com/v1.0/me/messages?$top=25&$orderby=receivedDateTime%20desc&$select=subject,from,receivedDateTime,bodyPreview,importance
-    GET https://graph.microsoft.com/v1.0/me/calendar/events?$top=20&$select=subject,start,end,bodyPreview
-
-  Task (READ ONLY — do not send mail or create events):
-  You are a Chief of Staff agent producing the morning briefing for an IBM
-  executive from their Outlook mailbox and calendar (M365_USER).
+  Prepare the user's executive morning briefing using the connected information
+  sources available in the workspace. First verify and follow the installed
+  daily-briefing skill and its source-retrieval skills.
 
   Produce a structured morning briefing with three sections:
 
@@ -39,12 +17,4 @@ prompt: |
 
   LOOKING AHEAD — Preparation and context for the next few days (use calendar).
 
-  Rules:
-  - Top of Mind: only items that require the executive to act or decide today.
-  - FYI: real business signals worth knowing but no action needed now.
-  - Exclude entirely: newsletters, bot/automated mail, webinar FYIs, and
-    low-priority interview noise.
-  - Rank Top of Mind by stakes and urgency.
-  - Group mail + calendar about the same workstream into one card.
-  - Do not merge messages from the same sender about different topics.
-  - Do not sendMail or create events — read-only.
+  Follow the skill's output, evidence, grouping, prioritization, and safety rules.

@@ -194,6 +194,14 @@ spec:
       description: >-
         Branch or tag of GuyZivRH/agent-eval-harness to clone. Must include the
         OpenShell create keep-alive fix (`--detach` + `sleep infinity`).
+    - name: forge-agent-catalog-repo-url
+      type: string
+      default: "https://github.com/rh-forge/forge-agent-catalog.git"
+      description: Portable Forge agent/skill catalog repository.
+    - name: forge-agent-catalog-revision
+      type: string
+      default: "main"
+      description: Immutable catalog branch, tag, or commit to stage into OpenClaw.
     - name: openshell-gateway-endpoint
       type: string
       default: "http://openshell.openshell.svc.cluster.local:8080"
@@ -276,6 +284,23 @@ spec:
         else
           git clone --depth 1 --branch "$(params.agent-eval-harness-repo-revision)" \
             "$(params.agent-eval-harness-repo-url)" "$HARNESS_DIR"
+        fi
+
+        # Stage the portable Forge skills separately from the OpenShell image.
+        # The image supplies OpenClaw and deployment-owned binaries; the catalog
+        # supplies versioned workspace skills and schemas for this evaluation.
+        if [ "$(params.eval-engine)" = "aeh_openshell_openclaw" ]; then
+          CATALOG_DIR="$(workspaces.source.path)/submissions/$(params.submission-dir)/_forge-agent-catalog"
+          if [ -d "$CATALOG_DIR/.git" ]; then
+            cd "$CATALOG_DIR"
+            git fetch origin "$(params.forge-agent-catalog-revision)" --depth 1
+            git reset --hard FETCH_HEAD
+          else
+            git clone --depth 1 --branch "$(params.forge-agent-catalog-revision)" \
+              "$(params.forge-agent-catalog-repo-url)" "$CATALOG_DIR"
+          fi
+          echo "Forge catalog staged at $CATALOG_DIR"
+          git -C "$CATALOG_DIR" rev-parse HEAD
         fi
         
         # Create results directories

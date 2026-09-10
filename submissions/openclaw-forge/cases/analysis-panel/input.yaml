@@ -1,29 +1,7 @@
 prompt: |
-  CRITICAL: Use tools to read LIVE Microsoft 365 data (Outlook + calendar).
-  This run is M365-only — do NOT use Slack.
-  Do NOT invent emails or calendar events.
-  Do NOT paste tool output as if you ran tools — actually call them.
-
-  Environment already set:
-    M365_USER
-    M365_AUTH_HEADER_FILE (curl -H @file — Graph bearer; do not cat/echo it)
-    M365_GRAPH_CURL (wrapper: curl -sS -H @$M365_AUTH_HEADER_FILE)
-    TMPDIR=/sandbox/tmp (use this or .openclaw/tmp/ — never /tmp)
-
-  Preferred tools (in order):
-    1) M365 CLI or MCP, if available
-    2) exec + curl via header file (REQUIRED on OpenClaw 8.1+):
-         curl -sS -H @"$M365_AUTH_HEADER_FILE" 'https://graph.microsoft.com/v1.0/...'
-       or: "$M365_GRAPH_CURL" 'https://graph.microsoft.com/v1.0/...'
-       Do NOT put a Bearer token in the command text (it becomes ***).
-
-  Useful Graph calls (READ ONLY):
-    GET https://graph.microsoft.com/v1.0/me/messages?$top=25&$orderby=receivedDateTime%20desc&$select=subject,from,receivedDateTime,bodyPreview,importance
-    GET https://graph.microsoft.com/v1.0/me/calendar/events?$top=20&$select=subject,start,end,bodyPreview
-
-  Task (READ ONLY — do not send mail or create events):
-  You are a Chief of Staff agent producing a detailed analysis panel (Review)
-  for the Watson Orchestrate GA go/no-go card in the executive's morning briefing.
+  Produce a detailed analysis panel for the Watson Orchestrate GA go/no-go
+  item. First verify and follow the installed daily-briefing skill and its
+  source-retrieval skills. Use only governed read operations.
 
   Read the relevant emails and calendar events about Watson Orchestrate GA
   readiness / blocker / exec decision, then produce an analysis panel with:
@@ -42,9 +20,5 @@ prompt: |
     - The medium (email subject or calendar event title)
     - A brief quote or reference to the specific claim it supports
 
-  Rules:
-  - Every factual claim must be traceable to a named email or calendar source.
-  - Clearly distinguish what comes from sources vs what is your inference.
-  - Make it obvious that this analysis is from an AI system, not a colleague.
-  - Do not invent deadlines, dollar amounts, or facts not in the sources.
-  - Do not sendMail or create events — read-only.
+  Follow the installed skills' evidence, citation, and safety rules. Do not
+  invent deadlines, dollar amounts, or facts not in the sources.
